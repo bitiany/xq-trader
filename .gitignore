@@ -1,0 +1,102 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+.conda
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Unit test / Coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+# Translations
+*.mo
+*.pot
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDEs
+.cursor/*
+.vscode/*
+.trae/*
+.vscode/settings.json
+!.vscode/tasks.json
+# !.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+
+# Project specific
+logs/
+*.log
+secrets/
+.env.local
+.env.*.local
+__pycache__/
+.pytest_cache/
+.coverage
+htmlcov/
+docs/temp/
+*/llm_config.yaml
+*/llm_config.json
+**/node_modules/
+*/dist/
+/data
+example/
+redbeat.*
+celerybeat*
+/src/agent/workspace/sessions/*
+/src/agent/workspace/config.json
+/storage/
+/notebooks/

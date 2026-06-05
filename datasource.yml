@@ -1,0 +1,54 @@
+# 数据源配置 — 占位符由 framework.commons.resolver 从环境变量解析
+# Schema 约定：public=平台管理 | research=研究域(因子注册/Alpha/画像/选股) | stock=行情与因子值 | trading=交易域(实盘+模拟盘)
+datasource:
+  default:
+    driver: postgresql+asyncpg
+    host: ${DATABASES_DEFAULT_HOST}
+    port: ${DATABASES_DEFAULT_PORT}
+    db_name: ${DATABASES_DEFAULT_NAME}
+    user: ${DATABASES_DEFAULT_USER}
+    password: ${ENC:gAAAAABp7KMY-wUj7QLs8vItk3IHmQc3dZA1Q0i-Xi06EL-OPyGEa7THP-_pGy6AKJlPibDzZbZoB5zuPhyWO9vwRDVOnfYT3Q==}
+    schema: ${DATABASES_DEFAULT_SCHEMA:-public}
+    pool_size: 15
+    max_overflow: 20
+    echo: false
+
+  stock:
+    driver: postgresql+asyncpg
+    host: ${DATABASES_STOCK_HOST}
+    port: ${DATABASES_STOCK_PORT}
+    db_name: ${DATABASES_STOCK_NAME}
+    user: ${DATABASES_STOCK_USER}
+    password: ${ENC:gAAAAABp7KMY-wUj7QLs8vItk3IHmQc3dZA1Q0i-Xi06EL-OPyGEa7THP-_pGy6AKJlPibDzZbZoB5zuPhyWO9vwRDVOnfYT3Q==}
+    schema: ${DATABASES_STOCK_SCHEMA:-stock}
+    pool_size: 10
+    max_overflow: 15
+    echo: false
+
+  research:
+    driver: postgresql+asyncpg
+    host: ${DATABASES_RESEARCH_HOST}
+    port: ${DATABASES_RESEARCH_PORT}
+    db_name: ${DATABASES_RESEARCH_NAME}
+    user: ${DATABASES_RESEARCH_USER}
+    password: ${ENC:gAAAAABp7KMY-wUj7QLs8vItk3IHmQc3dZA1Q0i-Xi06EL-OPyGEa7THP-_pGy6AKJlPibDzZbZoB5zuPhyWO9vwRDVOnfYT3Q==}
+    schema: ${DATABASES_RESEARCH_SCHEMA:-research}
+    pool_size: 10
+    max_overflow: 15
+    echo: false
+
+  trading:
+    driver: postgresql+asyncpg
+    host: ${DATABASES_TRADING_HOST}
+    port: ${DATABASES_TRADING_PORT}
+    db_name: ${DATABASES_TRADING_NAME}
+    user: ${DATABASES_TRADING_USER}
+    password: ${ENC:gAAAAABp7KMY-wUj7QLs8vItk3IHmQc3dZA1Q0i-Xi06EL-OPyGEa7THP-_pGy6AKJlPibDzZbZoB5zuPhyWO9vwRDVOnfYT3Q==}
+    schema: ${DATABASES_TRADING_SCHEMA:-trading}
+    pool_size: 10
+    max_overflow: 15
+    echo: false
+
+timescale:
+  enabled: false
+  overrides: {}
