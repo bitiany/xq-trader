@@ -30,7 +30,7 @@ import os
 import re
 from typing import Any
 
-from jsonpath_ng import parse
+from jsonpath_ng import parse  # type: ignore[import-untyped]
 
 from framework.commons.crypto import CryptoUtils
 

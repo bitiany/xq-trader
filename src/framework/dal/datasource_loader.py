@@ -52,23 +52,23 @@ class DatasourceLoader:
                 f":{encoded_password}@{datasource_config.get('host')}"
                 f":{datasource_config.get('port')}/{datasource_config.get('db_name')}"
             )
-        
+
         pool_size = datasource_config.get("pool_size", 15)
         if isinstance(pool_size, str):
             pool_size = int(pool_size)
-        
+
         max_overflow = datasource_config.get("max_overflow", 20)
         if isinstance(max_overflow, str):
             max_overflow = int(max_overflow)
-        
+
         pool_timeout = datasource_config.get("pool_timeout", 30)
         if isinstance(pool_timeout, str):
             pool_timeout = int(pool_timeout)
-        
+
         echo = datasource_config.get("echo", False)
         if isinstance(echo, str):
             echo = echo.lower() in ('true', '1', 'yes', 'on')
-        
+
         return DatasourceConfig(
             name=name,
             url=url,

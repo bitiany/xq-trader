@@ -6,7 +6,7 @@ Base: 纯粹的 ORM 基类，仅提供数据源绑定和工具方法
 AuditedBase: 继承 Base，增加 id / created_at / updated_at 审计字段
 """
 import logging
-from typing import Any, Optional, TypeVar, cast
+from typing import Any, TypeVar, cast
 
 from sqlalchemy import DateTime, Integer, and_, delete, func, or_, select
 from sqlalchemy import func as sql_func
@@ -94,14 +94,14 @@ class Base(DeclarativeBase):
         return list(cast(Table, cls.__table__).primary_key.columns)[0]
 
     @classmethod
-    async def get(cls: type[T], id: Any) -> Optional[T]:
+    async def get(cls: type[T], id: Any) -> T | None:
         async with cls._get_engines_manager().get_transaction_session(
             cls._get_bind_key()
         ) as db:
-            return cast(Optional[T], await db.get(cls, id))
+            return cast(T | None, await db.get(cls, id))
 
     @classmethod
-    async def get_by_id(cls: type[T], id: Any) -> Optional[T]:
+    async def get_by_id(cls: type[T], id: Any) -> T | None:
         return await cls.get(id)
 
     @classmethod
@@ -351,16 +351,16 @@ class Base(DeclarativeBase):
             return list(result.scalars().all())
 
     @classmethod
-    async def get_or_none(cls: type[T], **filters: Any) -> Optional[T]:
+    async def get_or_none(cls: type[T], **filters: Any) -> T | None:
         async with cls._get_engines_manager().get_transaction_session(
             cls._get_bind_key()
         ) as db:
             stmt = select(cls).filter_by(**filters)
             result = await db.execute(stmt)
-            return cast(Optional[T], result.scalar_one_or_none())
+            return cast(T | None, result.scalar_one_or_none())
 
     @classmethod
-    async def get_one_or_none(cls: type[T], **filters: Any) -> Optional[T]:
+    async def get_one_or_none(cls: type[T], **filters: Any) -> T | None:
         results = await cls.filter(limit=1, **filters)
         return results[0] if results else None
 
@@ -407,7 +407,7 @@ class Base(DeclarativeBase):
             return result.scalar() or 0
 
     @classmethod
-    async def update_by_id(cls: type[T], id: Any, data: dict[str, Any]) -> Optional[T]:
+    async def update_by_id(cls: type[T], id: Any, data: dict[str, Any]) -> T | None:
         instance = await cls.get(id)
         if not instance:
             return None

@@ -62,6 +62,8 @@ venv.bak/
 .cursor/*
 .vscode/*
 .trae/*
+!.trae/rules/
+!.trae/skills/
 .vscode/settings.json
 !.vscode/tasks.json
 # !.vscode/launch.json

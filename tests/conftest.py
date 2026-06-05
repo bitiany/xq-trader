@@ -4,6 +4,7 @@ Pytest 配置文件
 统一处理测试环境初始化：
 - sys.path 配置（src 目录）
 - 数据源 fixture（FastAPI + register_datasource）
+- API 集成测试 client fixture
 """
 import sys
 from pathlib import Path
@@ -16,7 +17,6 @@ if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
 # 自动发现 tests/ 下的所有子目录，加入 sys.path
-# 用于导入各子目录下的 models 等模块
 # 注意：不将 tests/ 本身加入 sys.path，避免 tests/framework 与 src/framework 包名冲突
 _TESTS_DIR = Path(__file__).parent
 for _subdir in _TESTS_DIR.iterdir():
@@ -45,6 +45,7 @@ async def app_with_datasource():
     环境变量通过 .env 文件或系统环境变量提供，不做任何绕过。
     """
     from fastapi import FastAPI
+
     from framework.config.settings import settings
     from framework.dal.datasource_loader import DatasourceLoader
     from framework.dal.register import register_datasource
@@ -63,6 +64,28 @@ async def app_with_datasource():
     lifespan = app.router.lifespan_context(app)
     async with lifespan:
         yield app
+
+
+@pytest_asyncio.fixture(scope="session", loop_scope="session")
+async def api_client():
+    """
+    REST API 集成测试客户端（session 级别复用）
+
+    使用 httpx ASGITransport 直接连接 FastAPI 应用，
+    无需启动真实 HTTP 服务器，测试速度更快且稳定。
+    通过完整应用栈（中间件 + 异常处理 + 路由 + 数据源）验证接口行为。
+    手动触发 lifespan 以初始化数据源。
+    """
+    import httpx
+
+    from xqtrader.main import create_app
+
+    app = create_app()
+
+    async with app.router.lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            yield client
 
 
 def pytest_configure(config):
