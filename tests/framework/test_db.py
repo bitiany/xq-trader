@@ -1,7 +1,8 @@
 """Framework 单元测试 — 数据库 ORM 查询验证。"""
 
 import pytest
-from xqtrader.domain.security.models import Security  # noqa: I001
+
+from xqtrader.domain.security.models import Security
 
 
 @pytest.mark.asyncio(loop_scope="session")

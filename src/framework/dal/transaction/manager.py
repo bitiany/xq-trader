@@ -135,16 +135,10 @@ class TransactionManager:
                 logger.debug("加入现有事务")
                 yield current_ctx
                 return
-            else:
-                # 新建事务
-                pass
+            # 否则创建新事务
 
         elif propagation == Propagation.REQUIRES_NEW:
-            if current_ctx:
-                # 挂起当前事务（简化处理：不真正挂起，只是标记）
-                logger.debug("挂起当前事务，创建新事务")
-                # 注：当前实现为简化版本，真正的事务挂起需要保存和恢复上下文
-                # 对于大多数业务场景，当前的 REQUIRED 传播已足够
+            pass  # 始终创建新事务
 
         elif propagation == Propagation.MANDATORY:
             if not current_ctx or current_ctx._committed or current_ctx._rolled_back:
@@ -174,40 +168,42 @@ class TransactionManager:
 
         ctx = TransactionContext(session, propagation, bind_key)
 
-        try:
-            # 处理事务传播
-            existing_ctx = self._context.get()
-            if existing_ctx and propagation == Propagation.REQUIRED:
-                # 复用当前事务
-                yield existing_ctx
-                return
-            elif existing_ctx and propagation == Propagation.REQUIRES_NEW:
-                # 保存当前上下文，稍后恢复
-                old_token = self._context.set(ctx)
-            else:
-                # 设置新的事务上下文
-                token = self._context.set(ctx)
+        # 保存旧上下文用于恢复
+        old_ctx = self._context.get()
+        old_token = None
 
-            try:
-                yield ctx
-                # 如果没有显式提交或回滚，则自动提交
-                if not ctx._committed and not ctx._rolled_back:
-                    logger.debug(f"事务装饰器自动提交：{id(ctx.session)}")
-                    await ctx.commit()
-            finally:
-                # 恢复上下文
-                if existing_ctx and propagation == Propagation.REQUIRES_NEW:
-                    self._context.reset(old_token)
-                else:
-                    self._context.reset(token)
+        try:
+            # 根据传播行为决定上下文管理
+            if propagation == Propagation.REQUIRES_NEW:
+                # 挂起当前事务，创建新事务
+                if old_ctx is not None:
+                    logger.debug("挂起当前事务，创建新事务")
+                old_token = self._context.set(ctx)
+            elif propagation == Propagation.REQUIRED:
+                if old_ctx is not None and not old_ctx._committed and not old_ctx._rolled_back:
+                    # 复用现有事务
+                    logger.debug("加入现有事务")
+                    yield old_ctx
+                    return
+                # 设置新事务上下文
+                old_token = self._context.set(ctx)
+
+            yield ctx
+
+            # 如果没有显式提交或回滚，则自动提交
+            if not ctx._committed and not ctx._rolled_back:
+                logger.debug(f"事务自动提交：{id(ctx.session)}")
+                await ctx.commit()
         except Exception as e:
             # 发生异常自动回滚
-            logger.debug(f"事务装饰器自动回滚：{id(ctx.session)}, error={e}")
+            logger.debug(f"事务自动回滚：{id(ctx.session)}, error={e}")
             await ctx.rollback()
             raise
         finally:
-            # 关键修复：只关闭当前事务的 session，不再处理所有活跃 session
-            # 每个 FastAPI 请求有独立的 ContextVar session 集合，互不干扰
+            # 恢复旧上下文
+            if old_token is not None:
+                self._context.reset(old_token)
+            # 只关闭当前事务的 session，不影响外部事务
             await ctx.close()
 
     async def commit(self) -> None:

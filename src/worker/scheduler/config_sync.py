@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -23,8 +24,6 @@ class ConfigSync:
             if existing is not None:
                 continue
 
-            import json
-
             await PipelineDef.create(
                 name=task_id,
                 description=task_def.get("description", ""),
@@ -43,8 +42,6 @@ class ConfigSync:
         records = await PipelineDef.filter(is_active=True)
         result: dict[str, dict[str, Any]] = {}
         for record in records:
-            import json
-
             config = json.loads(record.config) if isinstance(record.config, str) else record.config
             pipeline_name = record.name
             pipeline_mode = record.mode or "barrier"

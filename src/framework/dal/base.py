@@ -473,26 +473,33 @@ class Base(DeclarativeBase):
         """
         from sqlalchemy import update as sql_update
 
-        async with cls._get_engines_manager().get_transaction_session(
-            cls._get_bind_key()
-        ) as db:
-            # 构建更新语句
-            stmt = sql_update(cls).values(**data)
+        try:
+            async with cls._get_engines_manager().get_transaction_session(
+                cls._get_bind_key()
+            ) as db:
+                # 构建更新语句
+                stmt = sql_update(cls).values(**data)
 
-            # 构建过滤条件
-            conditions = cls._build_filter_conditions(**filters)
-            if conditions:
-                stmt = stmt.where(and_(*conditions))
+                # 构建过滤条件
+                conditions = cls._build_filter_conditions(**filters)
+                if conditions:
+                    stmt = stmt.where(and_(*conditions))
 
-            # 执行批量更新
-            result = await db.execute(stmt)
-            updated_count = result.rowcount
+                # 执行批量更新
+                result = await db.execute(stmt)
+                updated_count = result.rowcount
 
-            # flush 确保更新操作生效
-            await db.flush()
+                # flush 确保更新操作生效
+                await db.flush()
 
-            logger.debug(f"批量更新成功: {cls.__name__}, {updated_count} 条记录")
-            return int(updated_count or 0)
+                logger.debug(f"批量更新成功: {cls.__name__}, {updated_count} 条记录")
+                return int(updated_count or 0)
+        except Exception as e:
+            logger.error(
+                f"批量更新失败: {cls.__name__}, data={data}, filters={filters}, error={e}",
+                exc_info=True
+            )
+            raise
 
     @classmethod
     async def delete_by_id(cls, id: Any) -> bool:
@@ -555,26 +562,33 @@ class Base(DeclarativeBase):
                 count = await User.delete_many(status='deleted')
                 return count
         """
-        async with cls._get_engines_manager().get_transaction_session(
-            cls._get_bind_key()
-        ) as db:
-            # 构建删除语句
-            stmt = delete(cls)
+        try:
+            async with cls._get_engines_manager().get_transaction_session(
+                cls._get_bind_key()
+            ) as db:
+                # 构建删除语句
+                stmt = delete(cls)
 
-            # 构建过滤条件
-            conditions = cls._build_filter_conditions(**filters)
-            if conditions:
-                stmt = stmt.where(and_(*conditions))
+                # 构建过滤条件
+                conditions = cls._build_filter_conditions(**filters)
+                if conditions:
+                    stmt = stmt.where(and_(*conditions))
 
-            # 执行批量删除
-            result = await db.execute(stmt)
-            deleted_count = result.rowcount
+                # 执行批量删除
+                result = await db.execute(stmt)
+                deleted_count = result.rowcount
 
-            # flush 确保删除操作生效
-            await db.flush()
+                # flush 确保删除操作生效
+                await db.flush()
 
-            logger.debug(f"批量删除成功: {cls.__name__}, {deleted_count} 条记录")
-            return int(deleted_count or 0)
+                logger.debug(f"批量删除成功: {cls.__name__}, {deleted_count} 条记录")
+                return int(deleted_count or 0)
+        except Exception as e:
+            logger.error(
+                f"批量删除失败: {cls.__name__}, filters={filters}, error={e}",
+                exc_info=True
+            )
+            raise
 
     # ==================== 类方法 - 创建操作 ====================
     @classmethod
