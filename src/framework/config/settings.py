@@ -95,7 +95,6 @@ class AppSettings(BaseSettings):
 class QmtSettings(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore")
 
-    QMT_PATH: str = ""
     QMT_USERDATA_PATH: str = ""
     QMT_ACCOUNT_ID: str = ""
     QMT_ACCOUNT_TYPE: str = "STOCK"
@@ -185,8 +184,6 @@ class Settings:
             "QMT_ACCOUNT_ID",
             CryptoUtils.decrypt_if_encrypted(qmt.QMT_ACCOUNT_ID) or "",
         )
-        if not qmt.QMT_USERDATA_PATH and qmt.QMT_PATH:
-            object.__setattr__(qmt, "QMT_USERDATA_PATH", qmt.QMT_PATH)
         self.QMT = qmt
         self.GRAPH = GraphSettings()
         self.NEO4J = Neo4jSettings()
