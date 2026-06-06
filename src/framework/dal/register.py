@@ -181,3 +181,33 @@ def register_datasource(
     )
 
     logger.info("数据源已注册到 FastAPI 应用")
+
+
+def register_datasource_sync(
+    datasource_config: dict[str, Any] | None = None,
+    generate_schema: bool = False,
+    timescale_config: dict[str, Any] | None = None,
+) -> None:
+    """
+    同步方式注册数据源 — 用于非 FastAPI 进程（如 Celery Worker）。
+
+    初始化引擎管理器，可选创建表结构。
+    """
+    import asyncio
+
+    engines_manager.initialize(datasource_config or {})
+    logger.info("数据源引擎初始化完成（同步模式）")
+
+    if generate_schema:
+        manager = DatasourceManager.__new__(DatasourceManager)
+        manager._initialized = False
+        manager._app = None  # type: ignore[assignment]
+        manager._generate_schema = generate_schema
+        manager._datasource_config = datasource_config or {}
+        manager._timescale_config = timescale_config or {}
+
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(manager.create_tables())
+        loop.run_until_complete(manager._init_timescale_tables())
+        manager._initialized = True
+        logger.info("数据源表结构创建完成（同步模式）")

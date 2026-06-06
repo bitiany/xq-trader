@@ -1,7 +1,7 @@
 ---
 name: db-tools
 description: >-
-  PostgreSQL 数据库操作工具（Cursor 用户级 skill）。当需要查看表结构、执行只读查询、
+  PostgreSQL 数据库操作工具（trae 用户级 skill）。当需要查看表结构、执行只读查询、
   执行 INSERT/UPDATE/DELETE/DDL，或运行 .sql 脚本文件时，必须使用本 skill。
   禁止直接使用 psql、pgAdmin 或其他绕过 db_tools 的数据库访问方式。
 ---
@@ -10,10 +10,10 @@ description: >-
 
 ## 工具位置
 
-本 skill 安装在 Cursor 用户级目录：
+本 skill 安装在 trae 用户级目录：
 
 ```
-%USERPROFILE%\.cursor\skills\db-tools\
+%USERPROFILE%\.trae\skills\db-tools\
 ├── SKILL.md
 ├── db_tools.py
 └── .env
@@ -33,18 +33,18 @@ description: >-
 ## 前置条件
 
 1. **Python 环境**：使用已安装 `sqlalchemy`、`python-dotenv`、`psycopg2` 的环境（如项目 conda 环境）。
-2. **数据库连接**：通过 `%USERPROFILE%\.cursor\skills\db-tools\.env` 中的 `DATABASE_URL` 配置。
+2. **数据库连接**：通过 `%USERPROFILE%\.trae\skills\db-tools\.env` 中的 `DATABASE_URL` 配置。
 3. **ENV 变量**：执行前设置 `ENV` 指向 `.env` 文件路径。
 
 ```powershell
-$DB_TOOLS = Join-Path $env:USERPROFILE ".cursor\skills\db-tools"
+$DB_TOOLS = Join-Path $env:USERPROFILE ".trae\skills\db-tools"
 $env:ENV = Join-Path $DB_TOOLS ".env"
 ```
 
 ## 命令速查
 
 ```powershell
-$DB_TOOLS = Join-Path $env:USERPROFILE ".cursor\skills\db-tools"
+$DB_TOOLS = Join-Path $env:USERPROFILE ".trae\skills\db-tools"
 python (Join-Path $DB_TOOLS "db_tools.py") <command> [options]
 ```
 
@@ -62,7 +62,7 @@ python (Join-Path $DB_TOOLS "db_tools.py") <command> [options]
 获取指定 schema 下所有表的列、外键、索引信息。
 
 ```powershell
-$DB_TOOLS = Join-Path $env:USERPROFILE ".cursor\skills\db-tools"
+$DB_TOOLS = Join-Path $env:USERPROFILE ".trae\skills\db-tools"
 $env:ENV = Join-Path $DB_TOOLS ".env"
 python (Join-Path $DB_TOOLS "db_tools.py") get_all_tables_info --schema public --json
 ```
@@ -79,7 +79,7 @@ python (Join-Path $DB_TOOLS "db_tools.py") get_all_tables_info --schema public -
 执行只读 SQL 查询。若语句不含 `LIMIT`，自动追加 `--limit`（默认 1000）。
 
 ```powershell
-$DB_TOOLS = Join-Path $env:USERPROFILE ".cursor\skills\db-tools"
+$DB_TOOLS = Join-Path $env:USERPROFILE ".trae\skills\db-tools"
 $env:ENV = Join-Path $DB_TOOLS ".env"
 python (Join-Path $DB_TOOLS "db_tools.py") execute_query `
   --sql "SELECT rule_code, rule_name FROM public.t_trade_signal_rule" `
@@ -99,7 +99,7 @@ python (Join-Path $DB_TOOLS "db_tools.py") execute_query `
 执行 DML 或 DDL，自动识别语句类型并返回对应结构。
 
 ```powershell
-$DB_TOOLS = Join-Path $env:USERPROFILE ".cursor\skills\db-tools"
+$DB_TOOLS = Join-Path $env:USERPROFILE ".trae\skills\db-tools"
 $env:ENV = Join-Path $DB_TOOLS ".env"
 python (Join-Path $DB_TOOLS "db_tools.py") execute_sql `
   --sql "UPDATE public.t_trade_signal_rule SET description='updated' WHERE rule_code='test'" `
@@ -126,7 +126,7 @@ python (Join-Path $DB_TOOLS "db_tools.py") execute_sql `
 执行一个或多个 `.sql` 脚本文件，支持 glob 模式。文件路径相对于**当前工作目录**。
 
 ```powershell
-$DB_TOOLS = Join-Path $env:USERPROFILE ".cursor\skills\db-tools"
+$DB_TOOLS = Join-Path $env:USERPROFILE ".trae\skills\db-tools"
 $env:ENV = Join-Path $DB_TOOLS ".env"
 python (Join-Path $DB_TOOLS "db_tools.py") execute_sql_file --file db/migrations/001_init.sql --json
 python (Join-Path $DB_TOOLS "db_tools.py") execute_sql_file --file "db/migrations/*.sql" --json

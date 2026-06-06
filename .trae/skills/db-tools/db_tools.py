@@ -7,8 +7,8 @@ PostgreSQL 数据库操作 CLI — xqtrader db-tools Skill
   - execute_sql          写操作与 DDL（INSERT / UPDATE / DELETE / CREATE 等）
   - execute_sql_file     执行 .sql 脚本文件（支持 glob）
 
-用法（Cursor 用户级 skill）:
-    $DB_TOOLS = Join-Path $env:USERPROFILE ".cursor\skills\db-tools"
+用法（trae 用户级 skill）:
+    $DB_TOOLS = Join-Path $env:USERPROFILE ".trae\skills\db-tools"
     $env:ENV = Join-Path $DB_TOOLS ".env"
     python (Join-Path $DB_TOOLS "db_tools.py") get_all_tables_info --schema public
     python (Join-Path $DB_TOOLS "db_tools.py") execute_query --sql "SELECT 1" --json
@@ -66,7 +66,7 @@ def get_database_url() -> str:
     """从环境变量读取 DATABASE_URL。"""
     database_url = os.getenv("DATABASE_URL")
     if not database_url:
-        raise RuntimeError("未设置 DATABASE_URL，请先配置 %USERPROFILE%\\.cursor\\skills\\db-tools\\.env 或设置 ENV 环境变量")
+        raise RuntimeError("未设置 DATABASE_URL，请先配置 %USERPROFILE%\\.trae\\skills\\db-tools\\.env 或设置 ENV 环境变量")
     return database_url
 
 
@@ -410,7 +410,7 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
-  $DB_TOOLS = Join-Path $env:USERPROFILE ".cursor\\skills\\db-tools"
+  $DB_TOOLS = Join-Path $env:USERPROFILE ".trae\\skills\\db-tools"
   python (Join-Path $DB_TOOLS "db_tools.py") get_all_tables_info --schema public
   python (Join-Path $DB_TOOLS "db_tools.py") execute_query --sql "SELECT version()" --json
   python (Join-Path $DB_TOOLS "db_tools.py") execute_sql --sql "UPDATE public.t SET x=1 WHERE id=1" --json

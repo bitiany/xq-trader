@@ -50,7 +50,7 @@ class AppSettings(BaseSettings):
     DESCRIPTION: str = "Server API"
     DEBUG: bool = False
     API_PREFIX: str = "/api/v1"
-    PORT: int = 8086
+    PORT: int = 8096
     API_KEY: str | None = None
     ROOT_DIR: str = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
     STORAGE_DIR: str = ""
@@ -166,6 +166,14 @@ class JupyterSettings(BaseSettings):
     JUPYTER_NOTEBOOK_DIR: str = ""
 
 
+class CelerySettings(BaseSettings):
+    model_config = SettingsConfigDict(extra="ignore")
+
+    CELERY_REDIS_DB: int = 1
+    CELERY_BROKER_URL: str = ""
+    CELERY_RESULT_BACKEND: str = ""
+
+
 class Settings:
     """应用配置容器（APP 子配置独立读取 APP_* 环境变量）。"""
 
@@ -190,6 +198,7 @@ class Settings:
         self.AGENT = AgentApiSettings()
         self.COLLECT = CollectSettings()
         self.JUPYTER = JupyterSettings()
+        self.CELERY = CelerySettings()
 
 
 settings = Settings()

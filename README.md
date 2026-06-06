@@ -68,7 +68,7 @@ python -m xqtrader.main
 或使用 uvicorn：
 
 ```powershell
-uvicorn xqtrader.main:create_app --factory --host 0.0.0.0 --port 8086
+uvicorn xqtrader.main:create_app --factory --host 0.0.0.0 --port 8096
 ```
 
 或使用项目入口命令：
@@ -79,9 +79,9 @@ xqtrader-api
 
 ### 4. 访问文档
 
-- Swagger UI：http://localhost:8086/docs
-- ReDoc：http://localhost:8086/redoc
-- 健康检查：http://localhost:8086/api/v1/health
+- Swagger UI：http://localhost:8096/docs
+- ReDoc：http://localhost:8096/redoc
+- 健康检查：http://localhost:8096/api/v1/health
 
 ## 运行测试
 

@@ -6,6 +6,7 @@ requires-python = ">=3.10"
 dependencies = [
     "alembic>=1.13,<2.0",
     "asyncpg>=0.29,<1.0",
+    "celery[redis]>=5.4,<6.0",
     "cryptography>=42.0,<45.0",
     "fastapi>=0.109,<1.0",
     "jsonpath-ng>=1.6,<2.0",
@@ -41,6 +42,8 @@ dev = [
 
 [project.scripts]
 xqtrader-api = "xqtrader.main:run"
+xqtrader-worker = "worker.celery_entry:run_worker"
+xqtrader-beat = "worker.celery_entry:run_beat"
 
 [[tool.uv.index]]
 default = true
