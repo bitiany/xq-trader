@@ -1,0 +1,79 @@
+.statusbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--statusbar-height);
+  min-height: var(--statusbar-height);
+  padding: 0 12px;
+  background: var(--bg-statusbar);
+  border-top: 1px solid var(--border-subtle);
+  font-size: 10px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  z-index: 100;
+}
+
+.statusbar__section {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.statusbar__section--center {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.statusbar__section--right {
+  margin-left: auto;
+}
+
+.statusbar__item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.statusbar__dot {
+  fill: currentColor;
+}
+
+.statusbar__dot--ok {
+  color: var(--color-live);
+}
+
+.statusbar__dot--warn {
+  color: var(--color-warn, #d4a017);
+}
+
+.statusbar__dot--error {
+  color: var(--color-loss);
+}
+
+.statusbar__pnl {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.statusbar__pnl-value {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 11px;
+}
+
+.statusbar__pnl-value--profit {
+  color: var(--color-profit);
+}
+
+.statusbar__pnl-value--loss {
+  color: var(--color-loss);
+}
+
+@media (max-width: 768px) {
+  .statusbar__section--center {
+    display: none;
+  }
+}

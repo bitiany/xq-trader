@@ -1,0 +1,18 @@
+.model-list__name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.model-list__empty p {
+  margin: 0 0 4px;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.model-list__empty span {
+  font-size: 12px;
+  color: var(--text-muted);
+}

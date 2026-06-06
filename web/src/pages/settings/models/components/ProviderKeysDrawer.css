@@ -1,0 +1,33 @@
+.provider-keys__hint {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--accent-muted);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.provider-keys__table {
+  margin-bottom: 0;
+}
+
+.provider-keys__table--editable .ant-table-cell {
+  vertical-align: middle;
+}
+
+.provider-keys__row--draft .ant-table-cell {
+  background: var(--accent-muted);
+}
+
+.provider-keys__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.provider-keys__key {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}

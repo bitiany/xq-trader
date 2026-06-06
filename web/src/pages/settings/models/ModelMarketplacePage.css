@@ -1,0 +1,35 @@
+.model-marketplace {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.model-marketplace__head {
+  padding: 0 2px;
+}
+
+.model-marketplace__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.model-marketplace__desc {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.model-marketplace__vendor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 8px;
+}
+
+@media (max-width: 768px) {
+  .model-marketplace__vendor-grid {
+    grid-template-columns: 1fr;
+  }
+}

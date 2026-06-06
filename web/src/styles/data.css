@@ -1,0 +1,332 @@
+.data-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+.data-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+}
+
+.data-toolbar__left,
+.data-toolbar__right,
+.data-toolbar__stats {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.data-toolbar__search {
+  width: 280px;
+}
+
+.data-toolbar__view-toggle {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.watermark-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.watermark-chart__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.watermark-chart__legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.watermark-chart__swatch {
+  width: 14px;
+  height: 8px;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+.watermark-chart__swatch--range {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--color-profit) 45%, transparent), var(--color-profit));
+}
+
+.watermark-chart__swatch--lag-gap {
+  background: repeating-linear-gradient(
+    -45deg,
+    color-mix(in srgb, var(--color-warn, #d4a017) 55%, transparent),
+    color-mix(in srgb, var(--color-warn, #d4a017) 55%, transparent) 3px,
+    transparent 3px,
+    transparent 6px
+  );
+  border-radius: 2px;
+}
+
+.watermark-chart__swatch--today {
+  width: 16px;
+  height: 2px;
+  border-radius: 0;
+  background: var(--color-warn, #d4a017);
+}
+
+.watermark-chart__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+
+.watermark-chart__rows {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 4px 0;
+}
+
+.watermark-chart__today-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: calc(220px + 12px);
+  background: var(--color-warn, #d4a017);
+  opacity: 0.85;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.watermark-chart__row {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr) 56px;
+  gap: 12px;
+  align-items: center;
+}
+
+.watermark-chart__label-col {
+  min-width: 0;
+}
+
+.watermark-chart__label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.watermark-chart__sublabel {
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.watermark-chart__track {
+  position: relative;
+  height: 22px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border-subtle) 65%, transparent);
+}
+
+.watermark-chart__bar {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  border-radius: 999px;
+  z-index: 1;
+}
+
+.watermark-chart__bar--fresh {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--color-profit) 55%, transparent), var(--color-profit));
+}
+
+.watermark-chart__bar--lagged {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--color-warn, #d4a017) 55%, transparent), var(--color-warn, #d4a017));
+}
+
+.watermark-chart__lag-gap {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  border-radius: 0 999px 999px 0;
+  z-index: 0;
+  background: repeating-linear-gradient(
+    -45deg,
+    color-mix(in srgb, var(--color-warn, #d4a017) 35%, transparent),
+    color-mix(in srgb, var(--color-warn, #d4a017) 35%, transparent) 4px,
+    transparent 4px,
+    transparent 8px
+  );
+  border: 1px dashed color-mix(in srgb, var(--color-warn, #d4a017) 50%, transparent);
+}
+
+.watermark-chart__stat {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-align: right;
+}
+
+.watermark-chart__axis {
+  position: relative;
+  height: 18px;
+  margin-left: calc(220px + 12px);
+  margin-right: calc(56px + 12px);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.watermark-chart__axis-tick {
+  position: absolute;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.task-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.task-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.task-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 220px;
+}
+
+.task-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.task-card__title-wrap {
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+}
+
+.task-card__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  color: var(--color-accent);
+  flex-shrink: 0;
+}
+
+.task-card__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.task-card__status {
+  display: inline-flex;
+  margin-top: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+}
+
+.task-card__status--idle {
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--border-subtle) 80%, transparent);
+}
+
+.task-card__status--running {
+  color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+
+.task-card__status--success {
+  color: var(--color-profit);
+  background: color-mix(in srgb, var(--color-profit) 12%, transparent);
+}
+
+.task-card__status--failed {
+  color: var(--color-loss);
+  background: color-mix(in srgb, var(--color-loss) 12%, transparent);
+}
+
+.task-card__desc {
+  margin: 0;
+  flex: 1;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.task-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-muted, var(--text-secondary));
+}
+
+.task-card__pipeline {
+  font-family: var(--font-mono);
+}
+
+.task-card__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+@media (max-width: 960px) {
+  .watermark-chart__row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .watermark-chart__today-line {
+    margin-left: 0;
+  }
+
+  .watermark-chart__axis {
+    margin-left: 0;
+    margin-right: 0;
+  }
+
+  .watermark-chart__stat {
+    text-align: left;
+  }
+
+  .data-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .data-toolbar__search {
+    width: 100%;
+  }
+}

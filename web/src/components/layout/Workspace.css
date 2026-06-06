@@ -1,0 +1,61 @@
+.workspace {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-workspace);
+  overflow: hidden;
+}
+
+.workspace__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 36px;
+  min-height: 36px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-workspace-header);
+  flex-shrink: 0;
+}
+
+.workspace__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.2px;
+}
+
+.workspace__tabs {
+  display: flex;
+  gap: 2px;
+}
+
+.workspace__tab {
+  height: 26px;
+  padding: 0 12px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+
+.workspace__tab:hover {
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+}
+
+.workspace__tab--active {
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+}
+
+.workspace__content {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+}

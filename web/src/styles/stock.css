@@ -1,0 +1,342 @@
+.stock-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  width: 100%;
+  position: relative;
+}
+
+.stock-page__back {
+  position: absolute;
+  top: 0;
+  left: -36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  z-index: 10;
+}
+
+.stock-page__back:hover {
+  background: var(--bg-hover);
+  color: var(--color-text-primary);
+  border-color: var(--color-text-secondary);
+}
+
+.stock-header {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto;
+  gap: 12px 24px;
+  padding: 20px 24px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-card);
+}
+
+.stock-header__identity {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.stock-header__name {
+  margin: 0 0 8px;
+  font-size: 26px;
+  font-weight: 700;
+}
+
+.stock-header__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.stock-header__symbol {
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
+.stock-header__sep {
+  color: var(--border-subtle);
+  user-select: none;
+}
+
+.stock-header__quote {
+  grid-column: 2;
+  grid-row: 1;
+  text-align: right;
+}
+
+.stock-header__price {
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.stock-header__change {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 6px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.stock-header__quote--up .stock-header__price,
+.stock-header__quote--up .stock-header__change {
+  color: var(--color-profit);
+}
+
+.stock-header__quote--down .stock-header__price,
+.stock-header__quote--down .stock-header__change {
+  color: var(--color-loss);
+}
+
+.stock-header__metrics {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 10px;
+}
+
+.stock-header__metric {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+}
+
+.stock-header__metric-label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.stock-header__metric-value {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.stock-page__main {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.stock-page__chart {
+  min-width: 0;
+  padding: 12px;
+  min-height: 520px;
+}
+
+.stock-chart-wrap {
+  position: relative;
+  min-height: 480px;
+}
+
+.stock-chart {
+  width: 100%;
+  height: 480px;
+}
+
+.stock-page__chart-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.stock-chart--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 480px;
+  color: var(--text-muted);
+}
+
+.stock-intro p {
+  margin: 0;
+  padding: 0 16px 16px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  font-size: 13px;
+}
+
+.stock-page__tabs {
+  min-width: 0;
+}
+
+.stock-panel {
+  padding: 16px;
+}
+
+.stock-financials__block + .stock-financials__block {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.stock-financials__block h4 {
+  margin: 0 0 8px;
+}
+
+.stock-financials__period {
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.stock-financials__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.stock-financials__item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  font-size: 12px;
+}
+
+.stock-financials__item strong {
+  font-size: 14px;
+}
+
+.stock-financials__empty {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.stock-news {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.stock-news__item + .stock-news__item {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.stock-news__title {
+  font-weight: 600;
+}
+
+.stock-news__meta {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.stock-diagnosis {
+  text-align: center;
+  padding: 32px 16px;
+}
+
+.stock-diagnosis__icon {
+  display: inline-flex;
+  margin-bottom: 12px;
+  color: var(--color-accent);
+}
+
+.positions-table__symbol-link {
+  color: inherit;
+  text-decoration: none;
+  font-family: var(--font-mono);
+}
+
+.positions-table__symbol-link:hover,
+.positions-table__name-link:hover {
+  color: var(--color-accent);
+}
+
+.positions-table__name-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.topbar__search-wrap {
+  flex: 1;
+  min-width: 280px;
+}
+
+.topbar__search-wrap .ant-select-selector {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding-left: 28px !important;
+}
+
+@media (max-width: 900px) {
+  .stock-header {
+    grid-template-columns: 1fr;
+  }
+
+  .stock-header__quote {
+    grid-column: 1;
+    text-align: left;
+  }
+
+  .stock-header__change {
+    justify-content: flex-start;
+  }
+}
+
+.stock-tag-badge {
+  display: inline-block;
+  border: 1px solid;
+  border-radius: 3px;
+  font-weight: 500;
+  white-space: nowrap;
+  vertical-align: middle;
+  letter-spacing: 0.3px;
+  transition: opacity 0.15s ease;
+}
+
+.stock-tag-badge:hover {
+  opacity: 0.85;
+}
+
+.stock-tag-badge--more {
+  background-color: var(--bg-elevated);
+  color: var(--text-muted);
+  border-color: var(--border-subtle);
+  font-size: 11px;
+  padding: 0 5px;
+  line-height: 18px;
+}
+
+.stock-tag-list {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.stock-header__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}

@@ -1,0 +1,43 @@
+.marketplace-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.marketplace-panel__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.marketplace-panel__head--tools {
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
+.marketplace-panel__titles {
+  min-width: 0;
+}
+
+.marketplace-panel__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.marketplace-panel__subtitle {
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.marketplace-panel__extra {
+  flex-shrink: 0;
+}
+
+.marketplace-panel__body {
+  min-width: 0;
+}
