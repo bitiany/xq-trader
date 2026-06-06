@@ -127,7 +127,7 @@ class DatasourceManager:
     def _get_schema(self, bind_key: str) -> str:
         """获取指定数据源的 schema"""
         from framework.dal.enginee import engines_manager
-        config = engines_manager._datasource_configs.get(bind_key)
+        config = engines_manager.datasource_configs.get(bind_key)
         if config:
             return config.db_schema or "public"
         return "public"

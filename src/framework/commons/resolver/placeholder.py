@@ -33,6 +33,9 @@ from typing import Any
 from jsonpath_ng import parse  # type: ignore[import-untyped]
 
 from framework.commons.crypto import CryptoUtils
+from framework.commons.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class PlaceholderResolver:
@@ -108,7 +111,7 @@ class PlaceholderResolver:
                         decrypted = CryptoUtils.decrypt(encrypted_value)
                         return decrypted
                     except Exception as e:
-                        print(f"解密失败: {e}")
+                        logger.warning(f"解密失败: {e}")
                         return default_value
 
                 # 确定数据源
@@ -119,7 +122,7 @@ class PlaceholderResolver:
 
                 # 查找值
                 value = self._jsonpath_search(jsonpath_expr, data_source)
-                print(f"解析 {var_path} 为 {value}")
+                logger.debug(f"解析 {var_path} 为 {value}")
 
                 if value is not None:
                     # 对密码字段进行 URL 编码
@@ -142,7 +145,7 @@ class PlaceholderResolver:
                     decrypted = CryptoUtils.decrypt(encrypted_value)
                     return decrypted
                 except Exception as e:
-                    print(f"解密失败: {e}")
+                    logger.warning(f"解密失败: {e}")
                     return default_value
             # 确定数据源
             if context is not None:
@@ -225,7 +228,7 @@ class PlaceholderResolver:
             try:
                 self._cache[jsonpath_expr] = parse(jsonpath_expr)
             except Exception as e:
-                print(f"JSONPath 解析失败: {jsonpath_expr}, 错误: {e}")
+                logger.warning(f"JSONPath 解析失败: {jsonpath_expr}, 错误: {e}")
                 return None
 
         expr = self._cache[jsonpath_expr]

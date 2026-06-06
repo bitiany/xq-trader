@@ -60,6 +60,11 @@ class EnginesManager:
     def is_initialized(self) -> bool:
         return self._initialized
 
+    @property
+    def datasource_configs(self) -> dict[str, DatasourceConfig]:
+        """数据源配置的只读访问。"""
+        return self._datasource_configs
+
     def _initialize_datasource(self, bind_key: str, config: DatasourceConfig) -> None:
         """
         初始化单个数据源（新方案专用）
