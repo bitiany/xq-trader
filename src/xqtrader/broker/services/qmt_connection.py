@@ -44,6 +44,13 @@ class QmtConnection:
     def is_connected(self) -> bool:
         return self._connected
 
+    def mark_disconnected(self) -> None:
+        """标记连接已断开（由回调处理器在 on_disconnected 时调用）。"""
+        if self._connected:
+            self._connected = False
+            self._trader = None
+            logger.warning("QMT 交易连接已被标记为断开")
+
     @property
     def trader(self) -> XtQuantTrader:
         """获取 XtQuantTrader 实例，未连接时抛出异常。"""

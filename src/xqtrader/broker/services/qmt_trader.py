@@ -10,7 +10,7 @@ from xtquant.xttype import StockAccount
 
 from framework.commons.exceptions import BusinessException
 from framework.config.settings import settings
-from xqtrader.domain.broker.services.qmt_connection import QmtConnection
+from xqtrader.broker.services.qmt_connection import QmtConnection
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +24,11 @@ class QmtTrader:
 
     def __init__(self) -> None:
         self._connection = QmtConnection.get_instance()
+
+    def _ensure_connected(self) -> None:
+        """确保交易连接已建立，未连接时抛出业务异常。"""
+        if not self._connection.is_connected:
+            raise BusinessException("QMT 交易连接未建立，请先调用 /broker/connect")
 
     def _get_account(self) -> StockAccount:
         """获取当前配置的交易账号。"""
@@ -59,6 +64,7 @@ class QmtTrader:
             order_id (>0 成功, -1 失败)
         """
         account = self._get_account()
+        self._ensure_connected()
         trader = self._connection.trader
 
         logger.info(
@@ -94,6 +100,7 @@ class QmtTrader:
         参数同 order_stock，返回请求序号 seq。
         """
         account = self._get_account()
+        self._ensure_connected()
         trader = self._connection.trader
 
         logger.info(
@@ -122,6 +129,7 @@ class QmtTrader:
             0 成功, -1 失败
         """
         account = self._get_account()
+        self._ensure_connected()
         trader = self._connection.trader
 
         logger.info("撤单: order_id=%s", order_id)
@@ -140,6 +148,7 @@ class QmtTrader:
     async def cancel_order_async(self, order_id: int) -> int:
         """异步撤单，回报通过 QmtCallbackHandler.on_cancel_order_stock_async_response 推送。"""
         account = self._get_account()
+        self._ensure_connected()
         trader = self._connection.trader
 
         logger.info("异步撤单: order_id=%s", order_id)
@@ -156,6 +165,7 @@ class QmtTrader:
     async def query_asset(self) -> dict[str, Any]:
         """查询资金资产。"""
         account = self._get_account()
+        self._ensure_connected()
         trader = self._connection.trader
 
         asset = await asyncio.to_thread(trader.query_stock_asset, account)
@@ -179,6 +189,7 @@ class QmtTrader:
             cancelable_only: 是否仅查询可撤委托
         """
         account = self._get_account()
+        self._ensure_connected()
         trader = self._connection.trader
 
         orders = await asyncio.to_thread(trader.query_stock_orders, account, cancelable_only)
@@ -187,6 +198,7 @@ class QmtTrader:
     async def query_order(self, order_id: int) -> dict[str, Any] | None:
         """查询单笔委托。"""
         account = self._get_account()
+        self._ensure_connected()
         trader = self._connection.trader
 
         order = await asyncio.to_thread(trader.query_stock_order, account, order_id)
@@ -195,6 +207,7 @@ class QmtTrader:
     async def query_trades(self) -> list[dict[str, Any]]:
         """查询当日成交。"""
         account = self._get_account()
+        self._ensure_connected()
         trader = self._connection.trader
 
         trades = await asyncio.to_thread(trader.query_stock_trades, account)
@@ -203,6 +216,7 @@ class QmtTrader:
     async def query_positions(self) -> list[dict[str, Any]]:
         """查询所有持仓。"""
         account = self._get_account()
+        self._ensure_connected()
         trader = self._connection.trader
 
         positions = await asyncio.to_thread(trader.query_stock_positions, account)
@@ -211,6 +225,7 @@ class QmtTrader:
     async def query_position(self, stock_code: str) -> dict[str, Any] | None:
         """查询单只股票持仓。"""
         account = self._get_account()
+        self._ensure_connected()
         trader = self._connection.trader
 
         position = await asyncio.to_thread(trader.query_stock_position, account, stock_code)
@@ -218,6 +233,7 @@ class QmtTrader:
 
     async def query_account_infos(self) -> list[dict[str, Any]]:
         """查询所有资金账号。"""
+        self._ensure_connected()
         trader = self._connection.trader
 
         infos = await asyncio.to_thread(trader.query_account_infos)
@@ -234,6 +250,7 @@ class QmtTrader:
     async def subscribe_account(self) -> int:
         """订阅账号信息（资金/委托/成交/持仓推送）。"""
         account = self._get_account()
+        self._ensure_connected()
         trader = self._connection.trader
 
         result: int = await asyncio.to_thread(trader.subscribe, account)
@@ -243,6 +260,7 @@ class QmtTrader:
     async def unsubscribe_account(self) -> int:
         """反订阅账号信息。"""
         account = self._get_account()
+        self._ensure_connected()
         trader = self._connection.trader
 
         result: int = await asyncio.to_thread(trader.unsubscribe, account)

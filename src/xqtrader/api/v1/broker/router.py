@@ -7,10 +7,10 @@ from typing import Any
 from fastapi import APIRouter, Query
 
 from framework.commons.exceptions import BusinessException
-from xqtrader.domain.broker.services.qmt_callback_handler import QmtCallbackHandler
-from xqtrader.domain.broker.services.qmt_connection import QmtConnection
-from xqtrader.domain.broker.services.qmt_data_collector import QmtDataCollector
-from xqtrader.domain.broker.services.qmt_trader import QmtTrader
+from xqtrader.broker.services.qmt_callback_handler import QmtCallbackHandler
+from xqtrader.broker.services.qmt_connection import QmtConnection
+from xqtrader.broker.services.qmt_data_collector import QmtDataCollector
+from xqtrader.broker.services.qmt_trader import QmtTrader
 
 router = APIRouter(prefix="/broker", tags=["券商代理"])
 
@@ -79,38 +79,42 @@ async def disconnect_data() -> dict:
     return {"message": "行情服务已断开"}
 
 
-@router.get("/data/market", summary="获取行情数据")
-async def get_market_data(
-    stock_list: str = Query(..., description="证券代码，逗号分隔，如 600000.SH,000001.SZ"),
-    period: str = Query(default="1d", description="周期: tick/1m/5m/15m/30m/1h/1d/1w/1mon"),
-    start_time: str = Query(default="", description="起始时间 YYYYMMDD"),
-    end_time: str = Query(default="", description="结束时间 YYYYMMDD"),
-    count: int = Query(default=-1, description="数据条数，-1为全部"),
-    dividend_type: str = Query(default="none", description="复权: none/front/back"),
+@router.get("/data/daily-kline", summary="获取日线行情")
+async def fetch_daily_kline(
+    stock_list: str = Query(..., description="证券代码，逗号分隔，如 600000.SH 或 600000.SH,000001.SZ"),
+    start_time: str = Query(default="", description="起始日期 YYYYMMDD"),
+    end_time: str = Query(default="", description="结束日期 YYYYMMDD"),
+    dividend_type: str = Query(default="front", description="复权: none/front/back/front_ratio/back_ratio"),
 ) -> dict:
-    """获取 K线行情数据。"""
+    """获取日线行情数据（先下载补缓存，再获取）。
+
+    支持单支和批量，stock_list 传逗号分隔的证券代码。
+    返回 {stock_code: {count, columns, data}} 格式，每只股票包含
+    trade_date/open/close/high/low/volume/amount/change/pre_close/pct_chg 列。
+    """
     codes = [s.strip() for s in stock_list.split(",") if s.strip()]
     if not codes:
         raise BusinessException("stock_list 不能为空")
 
-    data = await _data_collector.get_market_data_ex(
+    raw = await _data_collector.fetch_kline_daily(
         stock_list=codes,
-        period=period,
         start_time=start_time,
         end_time=end_time,
-        count=count,
         dividend_type=dividend_type,
     )
 
     result: dict[str, Any] = {}
-    for code, df in data.items():
-        result[code] = {
-            "columns": list(df.columns),
-            "index": [str(t) for t in df.index],
-            "data": df.values.tolist(),
-        }
+    for code, df in raw.items():
+        if df.empty:
+            result[code] = {"count": 0, "columns": [], "data": []}
+        else:
+            result[code] = {
+                "count": len(df),
+                "columns": list(df.columns),
+                "data": df.values.tolist(),
+            }
 
-    return {"stock_list": codes, "period": period, "data": result}
+    return {"stock_list": codes, "data": result}
 
 
 @router.get("/data/tick", summary="获取全推Tick数据")
@@ -126,46 +130,44 @@ async def get_full_tick(
     return {"data": {code: str(val) for code, val in data.items()}}
 
 
-@router.post("/data/download", summary="下载历史数据")
-async def download_history_data(
-    stock_list: str = Query(..., description="证券代码，逗号分隔"),
-    period: str = Query(default="1d", description="周期"),
-    start_time: str = Query(default="", description="起始时间"),
-    end_time: str = Query(default="", description="结束时间"),
-) -> dict:
-    """下载历史行情数据到本地。"""
-    codes = [s.strip() for s in stock_list.split(",") if s.strip()]
-    if not codes:
-        raise BusinessException("stock_list 不能为空")
-
-    if len(codes) == 1:
-        await _data_collector.download_history_data(codes[0], period, start_time, end_time)
-    else:
-        await _data_collector.download_history_data2(codes, period, start_time, end_time)
-
-    return {"message": f"已下载 {len(codes)} 只证券历史数据", "stock_list": codes}
-
-
 @router.get("/data/financial", summary="获取财务数据")
-async def get_financial_data(
+async def fetch_financial_data(
     stock_list: str = Query(..., description="证券代码，逗号分隔"),
-    table_list: str = Query(default="", description="报表名，逗号分隔，如 Balance,Income"),
+    table_list: str = Query(default="", description="报表名，逗号分隔，如 Balance,Income,CashFlow"),
     start_time: str = Query(default="", description="起始时间"),
     end_time: str = Query(default="", description="结束时间"),
 ) -> dict:
-    """获取财务数据。"""
+    """获取财务数据。
+
+    返回格式: {stock_code: {table_name: {count, columns, data}}}
+    """
     codes = [s.strip() for s in stock_list.split(",") if s.strip()]
     tables = [s.strip() for s in table_list.split(",") if s.strip()] or None
     if not codes:
         raise BusinessException("stock_list 不能为空")
 
-    data = await _data_collector.get_financial_data(
+    raw = await _data_collector.fetch_financial_data(
         stock_list=codes,
         table_list=tables,
         start_time=start_time,
         end_time=end_time,
     )
-    return {"data": {code: str(val) for code, val in data.items()}}
+
+    result: dict[str, Any] = {}
+    for code, tables_data in raw.items():
+        if not tables_data:
+            result[code] = {}
+            continue
+        tables_result: dict[str, Any] = {}
+        for tbl_name, df in tables_data.items():
+            tables_result[tbl_name] = {
+                "count": len(df),
+                "columns": list(df.columns),
+                "data": df.values.tolist(),
+            }
+        result[code] = tables_result
+
+    return {"data": result}
 
 
 @router.get("/data/instrument", summary="获取合约信息")
@@ -328,4 +330,3 @@ async def query_account_infos() -> dict:
     """查询所有资金账号。"""
     accounts = await _trader.query_account_infos()
     return {"accounts": accounts}
-

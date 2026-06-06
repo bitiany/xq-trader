@@ -7,6 +7,8 @@ from typing import Any
 
 from xtquant.xttrader import XtQuantTraderCallback
 
+from xqtrader.broker.services.qmt_connection import QmtConnection
+
 logger = logging.getLogger(__name__)
 
 
@@ -17,11 +19,16 @@ class QmtCallbackHandler(XtQuantTraderCallback):
     记录关键交易事件日志，便于追踪委托/成交/持仓变动。
     """
 
+    def __init__(self) -> None:
+        super().__init__()
+        self._connection = QmtConnection.get_instance()
+
     def on_connected(self) -> None:
         logger.info("QMT 交易回调: 连接成功")
 
     def on_disconnected(self) -> None:
         logger.warning("QMT 交易回调: 连接断开")
+        self._connection.mark_disconnected()
 
     def on_account_status(self, status: Any) -> None:
         logger.info(
