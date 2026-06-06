@@ -72,5 +72,5 @@ disallow_untyped_defs = true
 packages = ["framework", "xqtrader", "skills"]
 
 [[tool.mypy.overrides]]
-module = ["psycopg2"]
+module = ["psycopg2", "xtquant.*"]
 ignore_missing_imports = true
