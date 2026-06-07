@@ -30,7 +30,8 @@ def _load_beat_schedule() -> dict:
     from pathlib import Path
 
     import yaml
-    from celery.schedules import crontab
+
+    from framework.scheduler.cron_utils import parse_cron_to_crontab
 
     schedule_dir = Path(settings.APP.ROOT_DIR) / "schedules"
     if not schedule_dir.exists():
@@ -47,21 +48,15 @@ def _load_beat_schedule() -> dict:
         pipeline_name = config["name"]
         cron_expr = config.get("cron")
         if cron_expr and config.get("enabled", True):
-            parts = cron_expr.strip().split()
-            if len(parts) != 5:
+            try:
+                beat_schedule[pipeline_name] = {
+                    "task": "worker.orchestration.trigger_pipeline",
+                    "schedule": parse_cron_to_crontab(cron_expr),
+                    "kwargs": {"pipeline_name": pipeline_name},
+                    "options": {"queue": config.get("queue", "celery")},
+                }
+            except Exception:
                 continue
-            beat_schedule[pipeline_name] = {
-                "task": "worker.orchestration.trigger_pipeline",
-                "schedule": crontab(
-                    minute=parts[0],
-                    hour=parts[1],
-                    day_of_month=parts[2],
-                    month_of_year=parts[3],
-                    day_of_week=parts[4],
-                ),
-                "kwargs": {"pipeline_name": pipeline_name},
-                "options": {"queue": config.get("queue", "celery")},
-            }
     return beat_schedule
 
 

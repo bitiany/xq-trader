@@ -6,6 +6,7 @@ import json
 import logging
 from typing import Any
 
+from framework.commons.exceptions import OrchestrationNotFoundError
 from framework.commons.redis_client import redis_client
 
 logger = logging.getLogger(__name__)
@@ -44,7 +45,7 @@ class OrchestrationTracker:
     def update_status(self, orchestration_id: str, status: str) -> None:
         existing = self.get(orchestration_id)
         if existing is None:
-            raise ValueError(f"Orchestration '{orchestration_id}' not found")
+            raise OrchestrationNotFoundError(f"Orchestration '{orchestration_id}' not found")
         from datetime import datetime
 
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -115,11 +116,9 @@ class OrchestrationTracker:
             )
 
         try:
-            if async_runner._loop is not None and async_runner._loop.is_running():
+            if async_runner.is_running:
                 async_runner.run(_upsert())
             else:
-                import asyncio
-
-                asyncio.run(_upsert())
+                logger.warning("AsyncTaskRunner 未启动，跳过写入 TaskExec(编排): %s", orchestration_id)
         except Exception:
             logger.warning("写入 TaskExec(编排) 失败: %s", orchestration_id, exc_info=True)

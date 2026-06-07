@@ -12,24 +12,9 @@ from typing import Any
 import pandas as pd
 from xtquant import xtdata
 
-from framework.commons.exceptions import BusinessException
+from framework.commons.exceptions import DataCollectionError
 
 logger = logging.getLogger(__name__)
-
-_xtdata_lock = threading.Lock()
-_LOCK_TIMEOUT = 60
-_DOWNLOAD_WAIT_SECONDS = 5
-
-
-def _with_lock(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
-    """在 xtdata 全局锁保护下执行同步调用。"""
-    acquired = _xtdata_lock.acquire(timeout=_LOCK_TIMEOUT)
-    if not acquired:
-        raise TimeoutError(f"QMT lock acquire timed out after {_LOCK_TIMEOUT}s")
-    try:
-        return fn(*args, **kwargs)
-    finally:
-        _xtdata_lock.release()
 
 
 class QmtDataCollector:
@@ -42,19 +27,34 @@ class QmtDataCollector:
     确保返回完整的历史数据。全程加锁避免多线程并发 xtdata。
     """
 
+    _LOCK_TIMEOUT = 60
+    _DOWNLOAD_WAIT_SECONDS = 5
+    _xtdata_lock = threading.Lock()
+
+    @classmethod
+    def _with_lock(cls, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        """在 xtdata 全局锁保护下执行同步调用。"""
+        acquired = cls._xtdata_lock.acquire(timeout=cls._LOCK_TIMEOUT)
+        if not acquired:
+            raise TimeoutError(f"QMT lock acquire timed out after {cls._LOCK_TIMEOUT}s")
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            cls._xtdata_lock.release()
+
     async def connect(self) -> None:
         """连接 MiniQMT 行情服务。
 
         xtdata.connect() 成功时返回 IPythonApiClient 对象，失败时抛异常。
         """
-        result = await asyncio.to_thread(_with_lock, xtdata.connect)
+        result = await asyncio.to_thread(self._with_lock, xtdata.connect)
         logger.info("QMT 行情连接完成: result=%s", result)
         if result is None:
-            raise BusinessException("QMT 行情连接失败: 返回值为空")
+            raise DataCollectionError("QMT 行情连接失败: 返回值为空")
 
     async def disconnect(self) -> None:
         """断开行情连接。"""
-        await asyncio.to_thread(_with_lock, xtdata.disconnect)
+        await asyncio.to_thread(self._with_lock, xtdata.disconnect)
         logger.info("QMT 行情连接已断开")
 
     # ── 日线行情 ──────────────────────────────────────────
@@ -155,21 +155,20 @@ class QmtDataCollector:
         dividend_type: str = "front",
     ) -> dict[str, Any]:
         """同步方法：先下载补缓存，再获取K线数据。全程加锁。"""
-        acquired = _xtdata_lock.acquire(timeout=_LOCK_TIMEOUT)
+        acquired = self._xtdata_lock.acquire(timeout=self._LOCK_TIMEOUT)
         if not acquired:
             raise TimeoutError(
-                f"QMT lock acquire timed out after {_LOCK_TIMEOUT}s for batch {start_time}~{end_time}"
+                f"QMT lock acquire timed out after {self._LOCK_TIMEOUT}s for batch {start_time}~{end_time}"
             )
         try:
             try:
                 xtdata.download_history_data2(stock_list, "1d", start_time, end_time)
             except Exception as e:
-                logger.error(
-                    "download_history_data2 失败 range=%s~%s count=%d: %s",
-                    start_time, end_time, len(stock_list), e,
-                )
+                raise DataCollectionError(
+                    f"下载历史数据失败 range={start_time}~{end_time} count={len(stock_list)}: {e}"
+                ) from e
 
-            time.sleep(_DOWNLOAD_WAIT_SECONDS)
+            time.sleep(self._DOWNLOAD_WAIT_SECONDS)
 
             raw = xtdata.get_market_data_ex(
                 field_list=[],
@@ -182,7 +181,7 @@ class QmtDataCollector:
                 fill_data=True,
             )
         finally:
-            _xtdata_lock.release()
+            self._xtdata_lock.release()
 
         if not isinstance(raw, dict):
             logger.warning("get_market_data_ex 非 dict range=%s~%s", start_time, end_time)
@@ -199,7 +198,7 @@ class QmtDataCollector:
             code_list: 证券代码列表
         """
         logger.info("获取全推Tick: codes=%s", code_list)
-        return await asyncio.to_thread(_with_lock, xtdata.get_full_tick, code_list)
+        return await asyncio.to_thread(self._with_lock, xtdata.get_full_tick, code_list)
 
     # ── 财务数据 ──────────────────────────────────────────
 
@@ -259,17 +258,17 @@ class QmtDataCollector:
         report_type: str,
     ) -> dict[str, Any]:
         """同步方法：获取财务数据。全程加锁。"""
-        acquired = _xtdata_lock.acquire(timeout=_LOCK_TIMEOUT)
+        acquired = self._xtdata_lock.acquire(timeout=self._LOCK_TIMEOUT)
         if not acquired:
             raise TimeoutError(
-                f"QMT lock acquire timed out after {_LOCK_TIMEOUT}s for financial data"
+                f"QMT lock acquire timed out after {self._LOCK_TIMEOUT}s for financial data"
             )
         try:
             raw = xtdata.get_financial_data(
                 stock_list, table_list, start_time, end_time, report_type,
             )
         finally:
-            _xtdata_lock.release()
+            self._xtdata_lock.release()
 
         if not isinstance(raw, dict):
             logger.warning("get_financial_data 非 dict")
@@ -282,7 +281,7 @@ class QmtDataCollector:
     async def get_instrument_detail(self, stock_code: str) -> dict[str, Any] | None:
         """获取合约基础信息。"""
         logger.info("获取合约信息: stock=%s", stock_code)
-        return await asyncio.to_thread(_with_lock, xtdata.get_instrument_detail, stock_code)
+        return await asyncio.to_thread(self._with_lock, xtdata.get_instrument_detail, stock_code)
 
     async def get_trading_dates(
         self,
@@ -301,7 +300,7 @@ class QmtDataCollector:
         """
         logger.info("获取交易日: market=%s start=%s end=%s", market, start_time, end_time)
         return await asyncio.to_thread(
-            _with_lock, xtdata.get_trading_dates, market, start_time, end_time, count,
+            self._with_lock, xtdata.get_trading_dates, market, start_time, end_time, count,
         )
 
     # ── 板块与指数 ────────────────────────────────────────
@@ -309,14 +308,14 @@ class QmtDataCollector:
     async def get_sector_list(self) -> list[str]:
         """获取板块列表。"""
         logger.info("获取板块列表")
-        return await asyncio.to_thread(_with_lock, xtdata.get_sector_list)
+        return await asyncio.to_thread(self._with_lock, xtdata.get_sector_list)
 
     async def get_stock_list_in_sector(self, sector_name: str) -> list[str]:
         """获取板块成分股。"""
         logger.info("获取板块成分股: sector=%s", sector_name)
-        return await asyncio.to_thread(_with_lock, xtdata.get_stock_list_in_sector, sector_name)
+        return await asyncio.to_thread(self._with_lock, xtdata.get_stock_list_in_sector, sector_name)
 
     async def get_index_weight(self, index_code: str) -> dict[str, Any]:
         """获取指数成分权重。"""
         logger.info("获取指数权重: index=%s", index_code)
-        return await asyncio.to_thread(_with_lock, xtdata.get_index_weight, index_code)
+        return await asyncio.to_thread(self._with_lock, xtdata.get_index_weight, index_code)

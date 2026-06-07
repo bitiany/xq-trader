@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta
 from typing import Any, cast
+from zoneinfo import ZoneInfo
 
+from framework.commons.exceptions import InvalidCycleWindowError
 from framework.commons.redis_client import redis_client
+
+logger = logging.getLogger(__name__)
 
 
 class CycleManager:
@@ -18,8 +23,6 @@ class CycleManager:
         self._cycle_ttl = cycle_ttl
 
     def _get_now(self) -> datetime:
-        from zoneinfo import ZoneInfo
-
         tz = ZoneInfo(self._tz_name)
         return datetime.now(tz)
 
@@ -37,7 +40,7 @@ class CycleManager:
         elif window == "month":
             return now.strftime("%Y-%m")
         else:
-            raise ValueError(f"Unsupported cycle window: {window}")
+            raise InvalidCycleWindowError(f"Unsupported cycle window: {window}")
 
     def set_cycle_status(self, cycle_id: str, status: str) -> None:
         key = f"cycle:{cycle_id}:status"
@@ -92,11 +95,9 @@ class CycleManager:
             if cycle_date is not None and cycle_date < cutoff:
                 self.set_cycle_status(cycle_id, "TIMEOUT")
         except Exception:
-            pass
+            logger.warning("标记超时周期失败: cycle_id=%s", cycle_id, exc_info=True)
 
     def _parse_cycle_id(self, cycle_id: str) -> datetime | None:
-        from zoneinfo import ZoneInfo
-
         tz = ZoneInfo(self._tz_name)
         for fmt in ("%Y-%m-%d-%H", "%Y-%m-%d", "%Y-%m"):
             try:

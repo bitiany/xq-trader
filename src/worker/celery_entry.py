@@ -11,8 +11,9 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from celery.signals import beat_init, worker_init, worker_ready, worker_shutdown
+from celery.signals import beat_init, worker_init, worker_shutdown
 
+from framework.commons.exceptions import PipelineNotFoundError, RecoveryFailedError
 from framework.commons.logger import get_logger
 from framework.config.settings import settings
 from worker.celery_app import celery_app
@@ -78,12 +79,6 @@ def on_worker_init(**kwargs: object) -> None:
     _init_scheduler()
 
     logger.info("Worker 初始化完成")
-
-
-@worker_ready.connect
-def on_worker_ready(**kwargs: object) -> None:
-    """Worker 就绪后无需延迟初始化（调度器已在 worker_init 中同步初始化）。"""
-    pass
 
 
 @worker_shutdown.connect
@@ -295,7 +290,7 @@ def _trigger_pipeline(pipeline_name: str) -> dict:
     # 找到属于该编排的步骤
     step_names = pipeline_steps.get(pipeline_name, [])
     if not step_names:
-        raise ValueError(f"编排 '{pipeline_name}' 未找到或无步骤")
+        raise PipelineNotFoundError(f"编排 '{pipeline_name}' 未找到或无步骤")
 
     # 判断编排模式：优先从编排级 DAG 节点获取，否则从步骤节点获取
     pipeline_node = dag.nodes.get(pipeline_name)
@@ -450,7 +445,7 @@ def _recover_pipeline(orchestration_id: str) -> dict:
 
     task_id = recovery_manager.recover_orchestration(orchestration_id)
     if task_id is None:
-        raise ValueError(f"编排 {orchestration_id} 无法恢复（状态不允许或无剩余步骤）")
+        raise RecoveryFailedError(f"编排 {orchestration_id} 无法恢复（状态不允许或无剩余步骤）")
 
     logger.info("恢复编排 %s, 新任务ID=%s", orchestration_id, task_id)
     return {"orchestration_id": orchestration_id, "task_id": task_id, "status": "RECOVERING"}

@@ -8,6 +8,8 @@ import threading
 from collections.abc import Coroutine
 from typing import Any, TypeVar
 
+from framework.commons.exceptions import WorkerNotInitializedError
+
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
@@ -48,7 +50,7 @@ class AsyncTaskRunner:
 
     def run(self, coro: Coroutine[Any, Any, T], timeout: float = 600) -> T:
         if self._loop is None or not self._loop.is_running():
-            raise RuntimeError("AsyncTaskRunner is not started")
+            raise WorkerNotInitializedError("AsyncTaskRunner is not started")
         future = asyncio.run_coroutine_threadsafe(coro, self._loop)
         try:
             return future.result(timeout=timeout)
@@ -60,8 +62,13 @@ class AsyncTaskRunner:
     @property
     def loop(self) -> asyncio.AbstractEventLoop:
         if self._loop is None:
-            raise RuntimeError("AsyncTaskRunner is not started")
+            raise WorkerNotInitializedError("AsyncTaskRunner is not started")
         return self._loop
+
+    @property
+    def is_running(self) -> bool:
+        """检查 AsyncTaskRunner 是否已启动且事件循环正在运行。"""
+        return self._loop is not None and self._loop.is_running()
 
     def _run_loop(self) -> None:
         self._loop = asyncio.new_event_loop()

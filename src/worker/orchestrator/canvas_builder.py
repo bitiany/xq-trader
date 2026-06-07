@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from celery import Signature, chain, chord, group
+
+from framework.commons.exceptions import InvalidWorkflowError, TaskNotFoundError
 
 logger = logging.getLogger(__name__)
 
@@ -13,10 +16,28 @@ logger = logging.getLogger(__name__)
 class CanvasBuilder:
     def __init__(self, task_registry: dict[str, Any]) -> None:
         self._task_registry = task_registry
+        self._workflow_builders: dict[str, Callable[..., Signature]] = {
+            "chain": self._build_chain_workflow,
+            "group": self._build_group_workflow,
+            "chord": self._build_chord_workflow,
+        }
+
+    def _build_chain_workflow(self, workflow: dict, prev_result: Any = None) -> Signature:
+        steps = workflow.get("steps", [])
+        return self.build_chain(steps, prev_result)
+
+    def _build_group_workflow(self, workflow: dict, prev_result: Any = None) -> Signature:
+        tasks = workflow.get("tasks", [])
+        return self.build_group(tasks)
+
+    def _build_chord_workflow(self, workflow: dict, prev_result: Any = None) -> Signature:
+        header = workflow.get("header", [])
+        body = workflow.get("body", "")
+        return self.build_chord(header, body)
 
     def _sig(self, task_name: str, prev_result: Any = None) -> Signature:
         if task_name not in self._task_registry:
-            raise ValueError(f"Task '{task_name}' not found in registry")
+            raise TaskNotFoundError(f"Task '{task_name}' not found in registry")
         task = self._task_registry[task_name]
         if isinstance(task, Signature):
             # 已经是 Signature（可能包含 kwargs），克隆并注入 prev_result
@@ -32,14 +53,14 @@ class CanvasBuilder:
         """获取任务的 Signature（不传递前一步结果）。"""
         task = self._task_registry.get(task_name)
         if task is None:
-            raise ValueError(f"Task '{task_name}' not found in registry")
+            raise TaskNotFoundError(f"Task '{task_name}' not found in registry")
         if isinstance(task, Signature):
             return task.clone()
         return task.s()  # type: ignore[no-any-return]
 
     def build_chain(self, steps: list[str], prev_result: Any = None) -> chain:
         if not steps:
-            raise ValueError("Chain requires at least one step")
+            raise InvalidWorkflowError("Chain requires at least one step")
         logger.debug("Building chain: %s", steps)
         signatures = []
         for i, step in enumerate(steps):
@@ -51,34 +72,26 @@ class CanvasBuilder:
 
     def build_group(self, tasks: list[str]) -> group:
         if not tasks:
-            raise ValueError("Group requires at least one task")
+            raise InvalidWorkflowError("Group requires at least one task")
         logger.debug("Building group: %s", tasks)
         signatures = [self._sig(t) for t in tasks]
         return group(*signatures)
 
     def build_chord(self, header: list[str], body: str) -> chord:
         if not header:
-            raise ValueError("Chord header requires at least one task")
+            raise InvalidWorkflowError("Chord header requires at least one task")
         logger.debug("Building chord: header=%s, body=%s", header, body)
         header_sigs = [self._sig(t) for t in header]
         body_sig = self._sig(body)
         return chord(header_sigs, body_sig)
 
     def build_from_workflow(self, workflow: dict, prev_result: Any = None) -> Signature:
-        workflow_type = workflow.get("type")
+        workflow_type: str = workflow.get("type", "")
         logger.info("Building from workflow: type=%s", workflow_type)
-        if workflow_type == "chain":
-            steps = workflow.get("steps", [])
-            return self.build_chain(steps, prev_result)
-        elif workflow_type == "group":
-            tasks = workflow.get("tasks", [])
-            return self.build_group(tasks)
-        elif workflow_type == "chord":
-            header = workflow.get("header", [])
-            body = workflow.get("body", "")
-            return self.build_chord(header, body)
-        else:
-            raise ValueError(f"Unknown workflow type: {workflow_type}")
+        builder = self._workflow_builders.get(workflow_type)
+        if builder is None:
+            raise InvalidWorkflowError(f"Unknown workflow type: {workflow_type}")
+        return builder(workflow, prev_result)
 
     def build_from_dag(self, dag: Any, step_names: list[str]) -> Signature:
         """从 DAG 拓扑构建 Canvas 工作流。
@@ -114,7 +127,7 @@ class CanvasBuilder:
             level_groups.setdefault(level, []).append(name)
 
         if not level_groups:
-            raise ValueError("DAG has no nodes to build canvas from")
+            raise InvalidWorkflowError("DAG has no nodes to build canvas from")
 
         logger.info("Building from DAG: steps=%d, levels=%d", len(levels), max_level + 1)
 

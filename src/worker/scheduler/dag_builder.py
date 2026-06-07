@@ -6,6 +6,8 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any
 
+from framework.commons.exceptions import CyclicDependencyError, UnknownDependencyError
+
 
 @dataclass
 class DAGNode:
@@ -61,7 +63,7 @@ class DAG:
         if len(sorted_nodes) != len(self.nodes):
             visited = set(sorted_nodes)
             cycle_nodes = [name for name in self.nodes if name not in visited]
-            raise ValueError(f"Cyclic dependency detected among tasks: {cycle_nodes}")
+            raise CyclicDependencyError(f"Cyclic dependency detected among tasks: {cycle_nodes}")
 
     def get_upstream(self, task_name: str) -> list[str]:
         if task_name not in self.nodes:
@@ -102,7 +104,7 @@ def build_dag(config_dict: dict) -> DAG:
     for name, node in dag.nodes.items():
         for dep in node.depends_on:
             if dep not in dag.nodes:
-                raise ValueError(f"Task '{name}' depends on unknown task '{dep}'")
+                raise UnknownDependencyError(f"Task '{name}' depends on unknown task '{dep}'")
             if name not in dag.nodes[dep].downstream:
                 dag.nodes[dep].downstream.append(name)
 

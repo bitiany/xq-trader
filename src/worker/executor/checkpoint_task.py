@@ -95,12 +95,12 @@ class CheckpointTask:
             )
 
         try:
-            if async_runner._loop is not None and async_runner._loop.is_running():
+            if async_runner.is_running:
                 async_runner.run(_upsert())
             else:
-                # Worker 未启动时（如测试），使用独立事件循环
-                import asyncio
-
-                asyncio.run(_upsert())
+                logger.warning(
+                    "AsyncTaskRunner 未启动，跳过写入 TaskExec: %s:%s",
+                    self._orchestration_id, self._step_index,
+                )
         except Exception:
             logger.warning("写入 TaskExec 失败: %s:%s", self._orchestration_id, self._step_index, exc_info=True)

@@ -12,6 +12,7 @@ from framework.middleware import (
 )
 from xqtrader.api import router as api_router
 from xqtrader.lifespan import app_lifespan
+from xqtrader.ws import ticket_router, ws_router
 
 
 def create_app() -> FastAPI:
@@ -37,6 +38,8 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(api_router)
+    app.include_router(ws_router)
+    app.include_router(ticket_router)
 
     return app
 

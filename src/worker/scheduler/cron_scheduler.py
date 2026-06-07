@@ -5,8 +5,8 @@ from __future__ import annotations
 import logging
 
 from celery import Celery
-from celery.schedules import crontab
 
+from framework.scheduler.cron_utils import parse_cron_to_crontab
 from worker.scheduler.dag_builder import DAG
 
 logger = logging.getLogger(__name__)
@@ -23,7 +23,7 @@ class CronScheduler:
                 continue
             beat_schedule[name] = {
                 "task": node.celery_task_name or name,
-                "schedule": self._parse_cron(node.schedule),
+                "schedule": parse_cron_to_crontab(node.schedule),
                 "args": (),
                 "kwargs": dict(node.kwargs or {}),
                 "options": {"queue": node.queue or "celery"},
@@ -38,7 +38,7 @@ class CronScheduler:
         current_config = self._app.conf.beat_schedule or {}
         if task_name not in current_config:
             raise KeyError(f"Cron task not found in beat schedule: {task_name}")
-        current_config[task_name]["schedule"] = self._parse_cron(schedule)
+        current_config[task_name]["schedule"] = parse_cron_to_crontab(schedule)
         self._app.conf.beat_schedule = current_config
         logger.info("Updated cron task: %s", task_name)
 
@@ -49,16 +49,3 @@ class CronScheduler:
         del current_config[task_name]
         self._app.conf.beat_schedule = current_config
         logger.info("Removed cron task: %s", task_name)
-
-    @staticmethod
-    def _parse_cron(expression: str) -> crontab:
-        parts = expression.strip().split()
-        if len(parts) != 5:
-            raise ValueError(f"Invalid cron expression (expected 5 fields): {expression}")
-        return crontab(
-            minute=parts[0],
-            hour=parts[1],
-            day_of_month=parts[2],
-            month_of_year=parts[3],
-            day_of_week=parts[4],
-        )

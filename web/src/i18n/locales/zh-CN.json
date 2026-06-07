@@ -38,9 +38,13 @@
   },
   "statusbar": {
     "marketConnected": "行情已连接",
+    "marketDisconnected": "行情未连接",
+    "tradingConnected": "交易已连接",
+    "tradingDisconnected": "交易未连接",
     "latency": "延迟 {{ms}}ms",
     "strategiesRunning": "运行策略 {{running}} / {{total}}",
     "todayPnl": "今日 P&L",
+    "totalAsset": "总资产",
     "benchmark": "SSE · 沪深300",
     "wsStatus": {
       "idle": "行情未连接",

@@ -39,7 +39,7 @@ class WatermarkService:
             - None: 水位已是最新，无需增量采集
             - date: 水位日期，作为增量采集的起始日期
         """
-        ref_date = self._get_reference_date()
+        ref_date = self.get_reference_date()
 
         latest_trade_date = await TradeCalendar.get_latest_trade_date(
             exchange=self._exchange,
@@ -85,7 +85,7 @@ class WatermarkService:
             dict[watermark_code, start_date | None]
             - None 表示水位已最新，无需增量
         """
-        ref_date = self._get_reference_date()
+        ref_date = self.get_reference_date()
         latest_trade_date = await TradeCalendar.get_latest_trade_date(
             exchange=self._exchange,
             on_or_before=ref_date,
@@ -109,7 +109,7 @@ class WatermarkService:
         return result
 
     @staticmethod
-    def _get_reference_date(now: datetime | None = None) -> date:
+    def get_reference_date(now: datetime | None = None) -> date:
         """根据当前时间确定参考日期。
 
         规则：15:00 前 → 前一日，15:00 及之后 → 当日。
@@ -121,3 +121,11 @@ class WatermarkService:
         if current.hour < 15:
             ref_date = ref_date - timedelta(days=1)
         return ref_date
+
+    async def get_latest_trade_date(self) -> date | None:
+        """获取最新交易日。"""
+        ref_date = self.get_reference_date()
+        return await TradeCalendar.get_latest_trade_date(
+            exchange=self._exchange,
+            on_or_before=ref_date,
+        )

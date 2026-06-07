@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 
+from framework.commons.exceptions import OrchestrationNotFoundError, RecoveryFailedError
 from worker.orchestrator.checkpoint_manager import CheckpointManager
 from worker.orchestrator.orchestration_tracker import OrchestrationTracker
 
@@ -23,7 +24,7 @@ class RecoveryManager:
     def recover_orchestration(self, orchestration_id: str) -> str | None:
         record = self._tracker.get(orchestration_id)
         if record is None:
-            raise ValueError(f"Orchestration '{orchestration_id}' not found")
+            raise OrchestrationNotFoundError(f"Orchestration '{orchestration_id}' not found")
         status = record.get("status")
         if status not in ("RUNNING", "INTERRUPTED", "FAILED", "FAILURE"):
             return None
@@ -35,7 +36,7 @@ class RecoveryManager:
         steps: list[str] = json.loads(record.get("steps", "[]"))
         remaining_steps = steps[resume_from:]
         if not remaining_steps:
-            raise ValueError(f"No remaining steps to rebuild for orchestration '{orchestration_id}'")
+            raise RecoveryFailedError(f"No remaining steps to rebuild for orchestration '{orchestration_id}'")
 
         cycle_id = record.get("cycle_id", "")
         first_task_id = self._dispatch_remaining_steps(remaining_steps, cycle_id, orchestration_id, all_steps=steps)

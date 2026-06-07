@@ -154,30 +154,15 @@ def _register(manifest: PluginManifest) -> None:
 
 def _register_beat(task_name: str, manifest: PluginManifest) -> None:
     """将调度配置注册到 Celery Beat schedule。"""
-    from celery.schedules import crontab
+    from framework.scheduler.cron_utils import parse_cron_to_crontab  # noqa: I001
 
     from worker.celery_app import celery_app
 
-    cron_params = _parse_cron(manifest.schedule)
     celery_app.conf.beat_schedule[task_name] = {
         "task": task_name,
-        "schedule": crontab(**cron_params),
+        "schedule": parse_cron_to_crontab(manifest.schedule),
         "kwargs": {},
         "options": {"queue": manifest.queue},
-    }
-
-
-def _parse_cron(expr: str) -> dict[str, str]:
-    """解析 cron 表达式。"""
-    parts = expr.strip().split()
-    if len(parts) != 5:
-        raise ValueError(f"Invalid cron expression: {expr}")
-    return {
-        "minute": parts[0],
-        "hour": parts[1],
-        "day_of_month": parts[2],
-        "month_of_year": parts[3],
-        "day_of_week": parts[4],
     }
 
 
@@ -204,12 +189,10 @@ def _sync_task_def(manifest: PluginManifest) -> None:
     try:
         from worker.executor.async_runner import async_runner
 
-        if async_runner._loop is not None and async_runner._loop.is_running():
+        if async_runner.is_running:
             async_runner.run(_upsert())
         else:
-            import asyncio
-
-            asyncio.run(_upsert())
+            logger.warning("AsyncTaskRunner 未启动，跳过同步 TaskDef: %s", manifest.name)
     except Exception:
         logger.warning("同步 TaskDef 到 DB 失败: %s", manifest.name, exc_info=True)
 

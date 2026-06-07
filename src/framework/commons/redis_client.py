@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import redis as redis_lib
 
 from framework.config.settings import settings
@@ -27,7 +29,7 @@ class _RedisClient:
                 port=settings.REDIS.REDIS_PORT,
                 password=settings.REDIS.REDIS_PASSWORD or None,
                 db=settings.REDIS.REDIS_DB,
-                decode_responses=False,
+                decode_responses=True,
             )
         return self._client
 
@@ -37,7 +39,7 @@ class _RedisClient:
     def delete(self, *names: str | bytes) -> int:
         return self.client.delete(*names)  # type: ignore[return-value]
 
-    def get(self, name: str | bytes) -> bytes | None:
+    def get(self, name: str | bytes) -> str | None:
         return self.client.get(name)  # type: ignore[return-value]
 
     def ping(self) -> bool:
@@ -47,6 +49,30 @@ class _RedisClient:
         if self._client is not None:
             self._client.close()
             self._client = None
+
+    # ==================== Pub/Sub ====================
+
+    def publish(self, channel: str, message: dict) -> int:
+        """发布消息到频道。"""
+        return self.client.publish(channel, json.dumps(message, ensure_ascii=False))
+
+    def pubsub(self) -> redis_lib.client.PubSub:
+        """创建PubSub对象。"""
+        return self.client.pubsub()
+
+    # ==================== Set 操作 ====================
+
+    def sadd(self, name: str, *values: str) -> int:
+        return self.client.sadd(name, *values)
+
+    def srem(self, name: str, *values: str) -> int:
+        return self.client.srem(name, *values)
+
+    def scard(self, name: str) -> int:
+        return self.client.scard(name)
+
+    def smembers(self, name: str) -> set:
+        return self.client.smembers(name)
 
 
 # 全局单例

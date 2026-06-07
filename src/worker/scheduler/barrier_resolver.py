@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from framework.commons.redis_client import redis_client
@@ -15,6 +16,11 @@ class BarrierResolver:
     def __init__(self, dag: DAG, dry_run: bool = False) -> None:
         self._dag = dag
         self._dry_run = dry_run
+        self._dependency_strategies: dict[str, Callable[..., None]] = {
+            "all_success": self._strategy_all_success,
+            "all_done": self._strategy_all_done,
+            "any_success": self._strategy_any_success,
+        }
 
     def on_task_completed(self, task_name: str, cycle_id: str, status: str, **fields: Any) -> None:
         self._set_task_status(cycle_id, task_name, status, **fields)
@@ -48,30 +54,35 @@ class BarrierResolver:
         mode = downstream_node.dependency_mode
         upstream_names = downstream_node.depends_on
 
-        if mode == "all_success":
-            all_ok = all(self._is_success(cycle_id, name) for name in upstream_names)
-            if all_ok:
-                self._set_barrier_status(cycle_id, downstream_name, "SATISFIED")
-                self._trigger_task(downstream_name, cycle_id)
-            else:
-                self._set_barrier_status(cycle_id, downstream_name, "BROKEN")
-                self._skip_task(downstream_name, cycle_id)
-                # 屏障破裂：更新编排状态为 FAILED
-                self._update_orchestration_status(cycle_id, "FAILED")
+        strategy = self._dependency_strategies.get(mode)
+        if strategy is None:
+            logger.warning("未知的依赖模式: %s, 跳过下游任务 %s", mode, downstream_name)
+            return
+        strategy(downstream_name, cycle_id, upstream_names)
 
-        elif mode == "all_done":
+    def _strategy_all_success(self, downstream_name: str, cycle_id: str, upstream_names: list[str]) -> None:
+        all_ok = all(self._is_success(cycle_id, name) for name in upstream_names)
+        if all_ok:
             self._set_barrier_status(cycle_id, downstream_name, "SATISFIED")
             self._trigger_task(downstream_name, cycle_id)
+        else:
+            self._set_barrier_status(cycle_id, downstream_name, "BROKEN")
+            self._skip_task(downstream_name, cycle_id)
+            self._update_orchestration_status(cycle_id, "FAILED")
 
-        elif mode == "any_success":
-            any_ok = any(self._is_success(cycle_id, name) for name in upstream_names)
-            if any_ok:
-                self._set_barrier_status(cycle_id, downstream_name, "SATISFIED")
-                self._trigger_task(downstream_name, cycle_id)
-            else:
-                self._set_barrier_status(cycle_id, downstream_name, "BROKEN")
-                self._skip_task(downstream_name, cycle_id)
-                self._update_orchestration_status(cycle_id, "FAILED")
+    def _strategy_all_done(self, downstream_name: str, cycle_id: str, upstream_names: list[str]) -> None:
+        self._set_barrier_status(cycle_id, downstream_name, "SATISFIED")
+        self._trigger_task(downstream_name, cycle_id)
+
+    def _strategy_any_success(self, downstream_name: str, cycle_id: str, upstream_names: list[str]) -> None:
+        any_ok = any(self._is_success(cycle_id, name) for name in upstream_names)
+        if any_ok:
+            self._set_barrier_status(cycle_id, downstream_name, "SATISFIED")
+            self._trigger_task(downstream_name, cycle_id)
+        else:
+            self._set_barrier_status(cycle_id, downstream_name, "BROKEN")
+            self._skip_task(downstream_name, cycle_id)
+            self._update_orchestration_status(cycle_id, "FAILED")
 
     def _trigger_task(self, task_name: str, cycle_id: str) -> None:
         if self._dry_run:

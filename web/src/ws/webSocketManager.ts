@@ -1,5 +1,6 @@
 import { useWebSocketStore } from '@/stores/webSocketStore'
 import {
+  fetchTicket,
   getWebSocketUrl,
   type WsClientMessage,
   type WsServerMessage,
@@ -16,6 +17,9 @@ class WebSocketManager {
   private ws: WebSocket | null = null
   private requestId = 1
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private _connecting = false
+  private _connectId = 0
+  private _abortController: AbortController | null = null
   private readonly topicHandlers = new Map<string, Set<TopicHandler>>()
   private readonly topicRefCount = new Map<string, number>()
 
@@ -77,7 +81,7 @@ class WebSocketManager {
       this.reconnectTimer = null
     }
 
-    if (this.ws?.readyState === WebSocket.OPEN || this.ws?.readyState === WebSocket.CONNECTING) {
+    if (this.ws?.readyState === WebSocket.OPEN || this.ws?.readyState === WebSocket.CONNECTING || this._connecting) {
       return
     }
 
@@ -99,77 +103,136 @@ class WebSocketManager {
   private connect(): void {
     this.disconnect(false)
     this.setStatus('connecting')
+    this._connecting = true
+    this._connectId++
+    const currentConnectId = this._connectId
 
-    const ws = new WebSocket(getWebSocketUrl())
-    this.ws = ws
+    // 取消之前的ticket请求
+    this._abortController = new AbortController()
 
-    ws.onopen = () => {
-      this.setStatus('open')
-      const topics = this.getActiveTopics()
-      if (topics.length > 0) {
-        this.sendSubscribe(topics)
-      }
-    }
+    // 先获取ticket，再建立WS连接
+    fetchTicket(this._abortController.signal)
+      .then((ticket) => {
+        this._abortController = null
 
-    ws.onmessage = (event) => {
-      let payload: WsServerMessage
-      try {
-        payload = JSON.parse(String(event.data)) as WsServerMessage
-      } catch {
-        return
-      }
-
-      const channel = payload.channel
-      if (!channel) {
-        return
-      }
-
-      const handlers = this.topicHandlers.get(channel)
-      if (!handlers || handlers.size === 0) {
-        return
-      }
-
-      if (payload.type === 'SNAPSHOT') {
-        for (const handler of handlers) {
-          handler.onSnapshot?.(payload.data)
+        // 连接可能已被disconnect取消，或已有新的connect调用
+        if (currentConnectId !== this._connectId || this.getActiveTopics().length === 0) {
+          this._connecting = false
+          this.setStatus('idle')
+          return
         }
-        return
-      }
 
-      if (payload.type === 'UPDATE') {
-        for (const handler of handlers) {
-          handler.onUpdate?.(payload.data)
+        const baseUrl = getWebSocketUrl()
+        const url = baseUrl.includes('?') ? `${baseUrl}&ticket=${ticket}` : `${baseUrl}?ticket=${ticket}`
+        const ws = new WebSocket(url)
+        this.ws = ws
+
+        ws.onopen = () => {
+          // 检查是否仍是当前连接
+          if (currentConnectId !== this._connectId) {
+            ws.close()
+            return
+          }
+          this._connecting = false
+          this.setStatus('open')
+          const topics = this.getActiveTopics()
+          if (topics.length > 0) {
+            this.sendSubscribe(topics)
+          }
         }
-        return
-      }
 
-      if (payload.type === 'ERROR') {
-        for (const handler of handlers) {
-          handler.onError?.(payload.code, payload.message)
+        ws.onmessage = (event) => {
+          let payload: WsServerMessage
+          try {
+            payload = JSON.parse(String(event.data)) as WsServerMessage
+          } catch {
+            return
+          }
+
+          // 处理服务端PING，回复PONG
+          if (payload.type === 'PING') {
+            this.sendClientPong(payload.id)
+            return
+          }
+
+          // 处理服务端PONG（客户端主动PING的响应）
+          if (payload.type === 'PONG') {
+            return
+          }
+
+          const channel = payload.channel
+          if (!channel) {
+            return
+          }
+
+          const handlers = this.topicHandlers.get(channel)
+          if (!handlers || handlers.size === 0) {
+            return
+          }
+
+          if (payload.type === 'SNAPSHOT') {
+            for (const handler of handlers) {
+              handler.onSnapshot?.(payload.data)
+            }
+            return
+          }
+
+          if (payload.type === 'UPDATE') {
+            for (const handler of handlers) {
+              handler.onUpdate?.(payload.data)
+            }
+            return
+          }
+
+          if (payload.type === 'ERROR') {
+            for (const handler of handlers) {
+              handler.onError?.(payload.code, payload.message)
+            }
+          }
         }
-      }
-    }
 
-    ws.onerror = () => {
-      this.setStatus('error')
-    }
+        ws.onerror = () => {
+          if (currentConnectId === this._connectId) {
+            this._connecting = false
+            this.setStatus('error')
+          }
+        }
 
-    ws.onclose = () => {
-      if (this.ws === ws) {
-        this.ws = null
-      }
+        ws.onclose = () => {
+          if (currentConnectId !== this._connectId) {
+            return
+          }
+          this._connecting = false
+          if (this.ws === ws) {
+            this.ws = null
+          }
 
-      if (this.getActiveTopics().length > 0) {
-        this.setStatus('connecting')
-        this.reconnectTimer = setTimeout(() => {
-          this.reconnectTimer = null
-          this.ensureConnected()
-        }, 1500)
-        return
-      }
+          if (this.getActiveTopics().length > 0) {
+            this.setStatus('connecting')
+            this.reconnectTimer = setTimeout(() => {
+              this.reconnectTimer = null
+              this.ensureConnected()
+            }, 1500)
+            return
+          }
 
-      this.setStatus('closed')
-    }
+          this.setStatus('closed')
+        }
+      })
+      .catch(() => {
+        if (currentConnectId !== this._connectId) {
+          return
+        }
+        this._connecting = false
+        this._abortController = null
+        this.setStatus('error')
+        if (this.getActiveTopics().length > 0) {
+          this.reconnectTimer = setTimeout(() => {
+            this.reconnectTimer = null
+            this.ensureConnected()
+          }, 3000)
+        }
+      })
   }
 
   private disconnect(updateStatus = true): void {
@@ -177,6 +240,15 @@ class WebSocketManager {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
     }
+
+    // 取消正在进行的ticket请求
+    if (this._abortController) {
+      this._abortController.abort()
+      this._abortController = null
+    }
+
+    this._connecting = false
+    this._connectId++
 
     if (this.ws) {
       this.ws.onopen = null
@@ -214,6 +286,18 @@ class WebSocketManager {
       method: 'UNSUBSCRIBE',
       params: topics,
       id: this.requestId++,
+    }
+    this.ws.send(JSON.stringify(message))
+  }
+
+  private sendClientPong(id: number | string | null | undefined): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return
+    }
+
+    const message: WsClientMessage = {
+      method: 'PING',
+      id: id ?? this.requestId++,
     }
     this.ws.send(JSON.stringify(message))
   }

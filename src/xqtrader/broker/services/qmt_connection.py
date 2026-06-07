@@ -7,6 +7,7 @@ import logging
 import threading
 from typing import TYPE_CHECKING
 
+from framework.commons.exceptions import BrokerConfigError, BrokerConnectionError
 from framework.config.settings import settings
 
 if TYPE_CHECKING:
@@ -55,7 +56,7 @@ class QmtConnection:
     def trader(self) -> XtQuantTrader:
         """获取 XtQuantTrader 实例，未连接时抛出异常。"""
         if self._trader is None or not self._connected:
-            raise RuntimeError("QMT 交易连接未建立，请先调用 connect()")
+            raise BrokerConnectionError("QMT 交易连接未建立，请先调用 connect()")
         return self._trader
 
     def connect(self) -> int:
@@ -72,7 +73,7 @@ class QmtConnection:
 
         qmt = settings.QMT
         if not qmt.QMT_USERDATA_PATH:
-            raise ValueError("QMT_USERDATA_PATH 未配置，无法连接交易服务")
+            raise BrokerConfigError("QMT_USERDATA_PATH 未配置，无法连接交易服务")
 
         self._session_id += 1
         self._trader = XtQuantTrader(qmt.QMT_USERDATA_PATH, self._session_id)

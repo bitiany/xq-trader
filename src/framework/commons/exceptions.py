@@ -25,6 +25,83 @@ class ConflictException(BusinessException):
         super().__init__(message=message, code=409)
 
 
+# ==================== Broker 异常层级 ====================
+
+class BrokerError(BusinessException):
+    """Broker 基础异常。"""
+
+
+class BrokerConnectionError(BrokerError):
+    """Broker 连接异常。"""
+
+    def __init__(self, message: str = "Broker 连接未建立"):
+        super().__init__(message=message, code=503)
+
+
+class BrokerConfigError(BrokerError):
+    """Broker 配置异常。"""
+
+    def __init__(self, message: str = "Broker 配置缺失"):
+        super().__init__(message=message, code=500)
+
+
+class DataCollectionError(BusinessException):
+    """数据采集异常。"""
+
+    def __init__(self, message: str = "数据采集失败"):
+        super().__init__(message=message, code=500)
+
+
+# ==================== Worker/Scheduler 异常层级 ====================
+
+class WorkerError(Exception):
+    """Worker 基础异常。"""
+
+
+class WorkerNotInitializedError(WorkerError):
+    """Worker 组件未初始化。"""
+
+
+class TaskNotFoundError(WorkerError):
+    """任务未找到。"""
+
+
+class InvalidWorkflowError(WorkerError):
+    """无效的工作流定义。"""
+
+
+class OrchestrationNotFoundError(WorkerError):
+    """编排记录未找到。"""
+
+
+class RecoveryFailedError(WorkerError):
+    """编排恢复失败。"""
+
+
+class SchedulerNotInitializedError(WorkerError):
+    """调度器未初始化。"""
+
+
+class InvalidCronExpressionError(WorkerError):
+    """无效的 cron 表达式。"""
+
+
+class InvalidCycleWindowError(WorkerError):
+    """无效的周期窗口。"""
+
+
+class CyclicDependencyError(WorkerError):
+    """检测到循环依赖。"""
+
+
+class UnknownDependencyError(WorkerError):
+    """未知的依赖任务。"""
+
+
+class PipelineNotFoundError(WorkerError):
+    """编排未找到或无步骤。"""
+
+
 # ==================== 工作流异常层级 ====================
 
 class WorkflowError(Exception):

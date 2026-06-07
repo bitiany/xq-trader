@@ -1,18 +1,22 @@
-import type { ConnectionStatus, SignalItem, StrategyInstanceItem } from '@/api/trading'
+// ── Topic 常量（与后端 WsTopic 对齐） ──
+export const TOPIC_BROKER_STATUS = 'ws.broker.status'
+export const TOPIC_TRADING_PNL = 'ws.trading.pnl'
 
-// ── Topic 常量 ──
-export const TOPIC_MARKET_INDEX_MAJOR = 'market.index.major'
-export const TOPIC_TRADING_ACCOUNT_SUMMARY = 'trading.account.summary'
-export const TOPIC_TRADING_POSITIONS = 'trading.positions'
-export const TOPIC_TRADING_CONNECTION = 'trading.connection'
-export const TOPIC_TRADING_SIGNALS = 'trading.signals'
-export const TOPIC_TRADING_STRATEGY_INSTANCES = 'trading.strategy.instances'
-export const TOPIC_STOCK_QUOTE_PREFIX = 'market.stock.'
+// ── WS 数据类型 ──
+export interface BrokerStatusData {
+  market_status: 'connected' | 'disconnected'
+  trading_status: 'connected' | 'disconnected'
+  timestamp: number
+}
 
-// ── WS 数据类型（与 API 类型对齐） ──
-export type ConnectionStatusData = ConnectionStatus
-export type SignalData = SignalItem
-export type StrategyInstanceData = StrategyInstanceItem
+export interface TradingPnlData {
+  cash: number
+  frozen_cash: number
+  market_value: number
+  total_asset: number
+  reason?: string
+  timestamp: number
+}
 
 // ── WS 连接 ──
 export function getWebSocketUrl(): string {
@@ -23,8 +27,22 @@ export function getWebSocketUrl(): string {
   return `${protocol}//${window.location.host}/ws`
 }
 
+// ── Ticket 认证 ──
+export async function fetchTicket(signal?: AbortSignal): Promise<string> {
+  const resp = await fetch('/api/v1/ws/ticket', { method: 'POST', signal })
+  if (!resp.ok) {
+    throw new Error(`Failed to fetch WS ticket: ${resp.status}`)
+  }
+  const json = await resp.json()
+  const ticket = json.data?.ticket ?? json.ticket
+  if (typeof ticket !== 'string' || !ticket) {
+    throw new Error('Invalid ticket response')
+  }
+  return ticket
+}
+
 // ── 消息协议 ──
-export type WsServerMessageType = 'SNAPSHOT' | 'UPDATE' | 'ACK' | 'ERROR' | 'PONG' | 'RESULT'
+export type WsServerMessageType = 'SNAPSHOT' | 'UPDATE' | 'ACK' | 'PING' | 'PONG' | 'ERROR' | 'RESULT'
 
 export interface WsServerMessage<T = unknown> {
   type: WsServerMessageType

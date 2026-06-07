@@ -7,18 +7,14 @@ import {
   PanelRightClose,
   PanelRightOpen,
 } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Badge, Popover, List, Tag, Empty, Button } from 'antd'
-import { CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons'
 import { LocaleSwitch } from '@/components/common/LocaleSwitch'
 import { ThemeSwitch } from '@/components/common/ThemeSwitch'
 import { GlobalStockSearch } from '@/components/stock/GlobalStockSearch'
 import { useLayoutStore } from '@/stores/layoutStore'
 import { useSignalNotificationStore } from '@/stores/signalNotificationStore'
-import { usePageWebSocket } from '@/ws/usePageWebSocket'
-import { TOPIC_TRADING_SIGNALS } from '@/ws/protocol'
-import { pnlClass } from '@/utils/format'
 import { SIGNAL_SIDE_COLOR, SIGNAL_SIDE_KEYS } from '@/utils/trading'
 import './TopBar.css'
 
@@ -102,19 +98,18 @@ function SignalNotificationBell() {
   const clearAll = useSignalNotificationStore((s) => s.clearAll)
   const [open, setOpen] = useState(false)
 
-  // 订阅 WS 信号推送
-  usePageWebSocket({
-    topics: [TOPIC_TRADING_SIGNALS],
-    onUpdate: (_channel, data) => {
-      if (data && typeof data === 'object') {
-        addNotification(data as Parameters<typeof addNotification>[0])
-      }
-    },
-    onSnapshot: (_channel, data) => {
-      // 快照返回 unconsumed_count，不处理
-      void data
-    },
-  })
+  // 信号推送WS订阅暂未实现，后续对接ws.trading.signals topic
+  // usePageWebSocket({
+  //   topics: [TOPIC_TRADING_SIGNALS],
+  //   onUpdate: (_channel, data) => {
+  //     if (data && typeof data === 'object') {
+  //       addNotification(data as Parameters<typeof addNotification>[0])
+  //     }
+  //   },
+  //   onSnapshot: (_channel, data) => {
+  //     void data
+  //   },
+  // })
 
   const handleOpenChange = useCallback((nextOpen: boolean) => {
     setOpen(nextOpen)

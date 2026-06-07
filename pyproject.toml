@@ -2,9 +2,10 @@
 name = "xqtrader"
 version = "0.1.0"
 description = "Quantitative trading platform API service"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "alembic>=1.13,<2.0",
+    "apscheduler>=3.10,<4.0",
     "asyncpg>=0.29,<1.0",
     "celery[redis]>=5.4,<6.0",
     "cryptography>=42.0,<45.0",
@@ -67,7 +68,7 @@ select = ["E", "F", "I", "N", "W", "UP"]
 known-first-party = ["framework", "xqtrader"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true

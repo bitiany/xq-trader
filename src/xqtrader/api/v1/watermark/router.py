@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Query
 
-from xqtrader.domain.watermark.models.trade_calendar import TradeCalendar
 from xqtrader.domain.watermark.services.watermark_service import WatermarkService
 
 router = APIRouter(prefix="/watermarks", tags=["水位"])
@@ -20,8 +19,7 @@ async def get_incremental_start_date(
     - latest_trade_date: 最新交易日
     """
     start_date = await _service.get_incremental_start_date(pipeline_name, watermark_code)
-    ref_date = _service._get_reference_date()
-    latest_trade_date = await TradeCalendar.get_latest_trade_date(on_or_before=ref_date)
+    latest_trade_date = await _service.get_latest_trade_date()
 
     return {
         "pipeline_name": pipeline_name,

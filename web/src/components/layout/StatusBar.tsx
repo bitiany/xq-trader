@@ -1,70 +1,79 @@
-import { useState } from 'react'
-import { Circle, Clock, Server, Wifi, WifiOff } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Clock, Server, Wifi, WifiOff } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useLocaleStore } from '@/stores/localeStore'
-import { useWebSocketStore } from '@/stores/webSocketStore'
 import { usePageWebSocket } from '@/ws/usePageWebSocket'
-import { TOPIC_TRADING_CONNECTION, type ConnectionStatusData } from '@/ws/protocol'
-import { formatSignedMoney } from '@/utils/format'
-import type { PageWebSocketStatus } from '@/ws/usePageWebSocket'
+import { TOPIC_BROKER_STATUS, TOPIC_TRADING_PNL, type BrokerStatusData, type TradingPnlData } from '@/ws/protocol'
+import { formatMoney } from '@/utils/format'
 import './StatusBar.css'
-
-function wsDotClass(status: PageWebSocketStatus): string {
-  switch (status) {
-    case 'open':
-      return 'statusbar__dot--ok'
-    case 'connecting':
-    case 'idle':
-      return 'statusbar__dot--warn'
-    case 'error':
-    case 'closed':
-      return 'statusbar__dot--error'
-    default:
-      return 'statusbar__dot--warn'
-  }
-}
 
 export function StatusBar() {
   const { t } = useTranslation()
   const locale = useLocaleStore((s) => s.locale)
-  const wsStatus = useWebSocketStore((s) => s.status)
   const now = new Date()
   const timeStr = now.toLocaleTimeString(locale, { hour12: false })
 
-  /* --- QMT connection status via WebSocket --- */
-  const [qmtStatus, setQmtStatus] = useState<ConnectionStatusData | null>(null)
-  usePageWebSocket<ConnectionStatusData>({
-    topics: [TOPIC_TRADING_CONNECTION],
-    onSnapshot: (channel, data) => {
-      if (channel === TOPIC_TRADING_CONNECTION && data && typeof data === 'object') {
-        setQmtStatus(data as ConnectionStatusData)
+  /* --- Broker status via WebSocket --- */
+  const [brokerStatus, setBrokerStatus] = useState<BrokerStatusData | null>(null)
+  const { status: wsStatus } = usePageWebSocket<BrokerStatusData>({
+    topics: [TOPIC_BROKER_STATUS],
+    onSnapshot: (_channel, data) => {
+      if (data && typeof data === 'object') {
+        setBrokerStatus(data as BrokerStatusData)
       }
     },
-    onUpdate: (channel, data) => {
-      if (channel === TOPIC_TRADING_CONNECTION && data && typeof data === 'object') {
-        setQmtStatus(data as ConnectionStatusData)
+    onUpdate: (_channel, data) => {
+      if (data && typeof data === 'object') {
+        setBrokerStatus(data as BrokerStatusData)
       }
     },
   })
 
-  /* --- Unified QMT status --- */
-  const qmtConnected = qmtStatus?.status === 'connected'
-  const qmtPartial = qmtStatus?.status === 'partial'
+  // WS断开时重置状态数据
+  useEffect(() => {
+    if (wsStatus !== 'open') {
+      setBrokerStatus(null)
+      setPnlData(null)
+    }
+  }, [wsStatus])
+
+  /* --- Account asset via WebSocket --- */
+  const [pnlData, setPnlData] = useState<TradingPnlData | null>(null)
+  usePageWebSocket<TradingPnlData>({
+    topics: [TOPIC_TRADING_PNL],
+    onSnapshot: (_channel, data) => {
+      if (data && typeof data === 'object') {
+        setPnlData(data as TradingPnlData)
+      }
+    },
+    onUpdate: (_channel, data) => {
+      if (data && typeof data === 'object') {
+        setPnlData(data as TradingPnlData)
+      }
+    },
+  })
+
+  const marketConnected = brokerStatus?.market_status === 'connected'
+  const tradingConnected = brokerStatus?.trading_status === 'connected'
 
   return (
     <footer className="statusbar">
       <div className="statusbar__section">
         <span className="statusbar__item">
-          <Circle size={8} className={`statusbar__dot ${wsDotClass(wsStatus)}`} />
-          {t(`statusbar.wsStatus.${wsStatus}`)}
-        </span>
-        <span className="statusbar__item">
-          {qmtConnected || qmtPartial ? (
-            <Wifi size={10} style={{ color: qmtConnected ? 'var(--color-live)' : 'var(--color-loss)' }} />
+          {marketConnected ? (
+            <Wifi size={10} style={{ color: 'var(--color-live)' }} />
           ) : (
             <WifiOff size={10} style={{ color: 'var(--color-loss)' }} />
           )}
-          QMT {qmtConnected ? t('trading.connection.connected') : qmtPartial ? t('trading.connection.partial') : t('trading.connection.disconnected')}
+          {marketConnected ? t('statusbar.marketConnected') : t('statusbar.marketDisconnected')}
+        </span>
+        <span className="statusbar__item">
+          {tradingConnected ? (
+            <Wifi size={10} style={{ color: 'var(--color-live)' }} />
+          ) : (
+            <WifiOff size={10} style={{ color: 'var(--color-loss)' }} />
+          )}
+          {tradingConnected ? t('statusbar.tradingConnected') : t('statusbar.tradingDisconnected')}
         </span>
         <span className="statusbar__item">
           <Server size={10} />
@@ -74,9 +83,9 @@ export function StatusBar() {
 
       <div className="statusbar__section statusbar__section--center">
         <span className="statusbar__pnl">
-          {t('statusbar.todayPnl')}
+          {t('statusbar.totalAsset')}
           <strong className="statusbar__pnl-value">
-            {formatSignedMoney(0)}
+            {formatMoney(pnlData?.total_asset ?? 0)}
           </strong>
         </span>
       </div>

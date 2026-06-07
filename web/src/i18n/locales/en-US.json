@@ -38,9 +38,13 @@
   },
   "statusbar": {
     "marketConnected": "Market connected",
+    "marketDisconnected": "Market disconnected",
+    "tradingConnected": "Trading connected",
+    "tradingDisconnected": "Trading disconnected",
     "latency": "Latency {{ms}}ms",
     "strategiesRunning": "Strategies {{running}} / {{total}}",
     "todayPnl": "Today P&L",
+    "totalAsset": "Total Asset",
     "benchmark": "SSE · CSI 300",
     "wsStatus": {
       "idle": "Market idle",
