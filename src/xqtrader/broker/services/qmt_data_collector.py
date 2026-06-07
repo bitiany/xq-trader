@@ -89,7 +89,7 @@ class QmtDataCollector:
             logger.warning("fetch_kline_daily 忽略倒置区间 start=%s end=%s", sd, ed)
             return {s: pd.DataFrame() for s in stock_list}
 
-        logger.info(
+        logger.debug(
             "获取日线: stocks=%d range=%s~%s dividend=%s",
             len(stock_list), sd, ed, dividend_type,
         )
@@ -108,7 +108,7 @@ class QmtDataCollector:
             else:
                 out[sym] = pd.DataFrame()
 
-        logger.info(
+        logger.debug(
             "获取日线完成: range=%s~%s 请求=%d 有数据=%d 总行数=%d",
             sd, ed, len(stock_list), nonempty, row_sum,
         )

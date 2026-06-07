@@ -427,11 +427,20 @@ def apply_yaml_config(task_cls: type[BaseTask], manifest: Any) -> type[BaseTask]
 
 
 def ensure_async_run(task_cls: type[BaseTask]) -> type[BaseTask]:
-    """确保 _run_impl() 方法支持异步桥接 — 若 _run_impl 是 async，自动包装为同步调用。"""
+    """确保 _run_impl() 方法支持异步桥接 — 若 _run_impl 是 async，自动包装为同步调用。
+
+    优先使用 AsyncTaskRunner 的事件循环（复用 asyncpg 连接池），
+    仅在 Worker 未启动时回退到 asyncio.new_event_loop()。
+    """
     original_run_impl = task_cls._run_impl
 
     if asyncio.iscoroutinefunction(original_run_impl):
         def sync_run_impl(self: BaseTask, **kwargs: Any) -> Any:
+            from worker.executor.async_runner import async_runner
+
+            if async_runner._loop is not None and async_runner._loop.is_running():
+                return async_runner.run(original_run_impl(self, **kwargs))
+
             loop = asyncio.new_event_loop()
             try:
                 return loop.run_until_complete(original_run_impl(self, **kwargs))
