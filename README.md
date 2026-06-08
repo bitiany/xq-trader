@@ -62,19 +62,7 @@ DATABASES_DEFAULT_DB=xqtrader
 ### 3. 启动服务
 
 ```powershell
-python -m xqtrader.main
-```
-
-或使用 uvicorn：
-
-```powershell
 uvicorn xqtrader.main:create_app --factory --host 0.0.0.0 --port 8096
-```
-
-或使用项目入口命令：
-
-```powershell
-xqtrader-api
 ```
 
 ### 4. 启动 Worker（异步任务调度）
@@ -83,14 +71,8 @@ xqtrader-api
 # 启动 Celery Worker（支持 4 个并发任务）
 celery -A worker.celery_entry worker --loglevel=info -c 4
 
-# 或使用项目入口命令（需要先安装项目）
-xqtrader-worker
-
 # 启动 Celery Beat（定时任务）
 celery -A worker.celery_entry beat --loglevel=info
-
-# 或使用项目入口命令
-xqtrader-beat
 ```
 
 **参数说明**：
