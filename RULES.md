@@ -50,6 +50,20 @@ mypy src/
 - **禁止 asyncio.run()**：异步上下文中禁止嵌套事件循环
 - **禁止上帝代码**：函数/类职责过多须拆分，单个函数体不超过 80 行；类方法数不做硬性限制，但须保持职责单一
 
+## Skill 使用规范
+
+项目配置了以下 Skill，在对应场景下**必须**加载并遵循：
+
+| Skill | 适用场景 | 说明 |
+|-------|----------|------|
+| **dal-orm** | 定义/修改 ORM 模型、单表 CRUD、事务操作 | 模型继承 `Base`/`AuditedBase`，CRUD 遵循 `Base` API，事务用 `@transactional` |
+| **framework** | API 路由开发、异常处理、日志使用、测试编写 | 路由按领域模块组织，异常用 `BusinessException` 体系，日志用 `get_logger()` |
+| **db-tools** | 查看表结构、只读查询、写操作/DDL、运行 SQL 脚本 | **禁止**绕过 db-tools 直接使用 psql/pgAdmin 等访问数据库 |
+| **celery-plugin** | 开发定时任务、编排任务、涉及 `worker/plugins` 目录 | 插件结构：`plugin.yaml` + `task.py`（继承 `BaseTask`） |
+| **workflow-guide** | 创建/配置/调用工作流、工作流 JSON 配置、API 调用 | 工作流配置在 `flow/` 目录，通过 API 启动/查询/恢复/停止 |
+
+**与 db-tools 的分工**：业务代码走 DAL ORM；需要直接查库验证表结构或执行 SQL 时，使用 db-tools。
+
 ## 环境与命令
 
 - **Windows + PowerShell**；命令用 `;` 分隔；HTTP 用 `Invoke-RestMethod`；环境变量 `$env:KEY="value"`
