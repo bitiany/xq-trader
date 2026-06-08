@@ -1,16 +1,12 @@
 # 每日行情处理流水线
 name: daily_market_pipeline
-description: "每日行情采集 → 因子计算"
+description: "每日行情采集"
+mode: canvas
 cron: "30 16 * * 1-5"
-queue: default
+queue: celery
 enabled: true
 
 steps:
   - name: collect
-    task: market.daily
-    args: {}
-
-  - name: calc_factor
-    task: factor.calc_daily
-    depends_on: [collect]
+    task: market.daily_kline_collect
     args: {}

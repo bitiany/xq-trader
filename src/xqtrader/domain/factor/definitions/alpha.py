@@ -1,0 +1,36 @@
+"""G类: 复合Alpha因子定义。"""
+
+from xqtrader.domain.factor.definitions.factor_def import FactorDefinition as F
+
+ALPHA_FACTORS: list[F] = [
+    F(factor_id="alpha_equal_weight", display_name="等权复合Alpha", category="alpha",
+      group_id="composite", direction="DESC", data_origin="computed",
+      compute_engine="composite", update_freq="daily",
+      dependencies="", tags="composite,equal_weight",
+      description="A/B级因子等权合成"),
+    F(factor_id="alpha_ic_weighted", display_name="IC加权复合Alpha", category="alpha",
+      group_id="composite", direction="DESC", data_origin="computed",
+      compute_engine="composite", update_freq="daily",
+      dependencies="", tags="composite,ic_weighted",
+      description="按IC均值加权合成"),
+    F(factor_id="alpha_icir_weighted", display_name="ICIR加权复合Alpha", category="alpha",
+      group_id="composite", direction="DESC", data_origin="computed",
+      compute_engine="composite", update_freq="daily",
+      dependencies="", tags="composite,icir_weighted",
+      description="按ICIR加权合成"),
+    F(factor_id="alpha_lasso", display_name="Lasso合成Alpha", category="alpha",
+      group_id="composite", direction="DESC", data_origin="computed",
+      compute_engine="composite", update_freq="daily",
+      dependencies="", tags="composite,lasso",
+      description="Lasso回归合成"),
+    F(factor_id="alpha_ml_xgb", display_name="XGBoost融合Alpha", category="alpha",
+      group_id="composite", direction="DESC", data_origin="computed",
+      compute_engine="composite", update_freq="daily",
+      dependencies="", tags="composite,ml,xgboost",
+      description="XGBoost模型融合"),
+    F(factor_id="alpha_ml_ensemble", display_name="集成融合Alpha", category="alpha",
+      group_id="composite", direction="DESC", data_origin="computed",
+      compute_engine="composite", update_freq="daily",
+      dependencies="", tags="composite,ml,ensemble",
+      description="多模型Stacking集成"),
+]

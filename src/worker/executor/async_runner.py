@@ -48,15 +48,19 @@ class AsyncTaskRunner:
         self._thread = None
         logger.info("AsyncTaskRunner stopped")
 
-    def run(self, coro: Coroutine[Any, Any, T], timeout: float = 600) -> T:
+    def run(self, coro: Coroutine[Any, Any, T], timeout: float | None = None) -> T:
         if self._loop is None or not self._loop.is_running():
             raise WorkerNotInitializedError("AsyncTaskRunner is not started")
+        effective_timeout = timeout if timeout is not None else 600
         future = asyncio.run_coroutine_threadsafe(coro, self._loop)
         try:
-            return future.result(timeout=timeout)
+            return future.result(timeout=effective_timeout)
         except TimeoutError:
             future.cancel()
-            logger.error("AsyncTaskRunner coroutine timed out after %ss, cancelled", timeout)
+            logger.error(
+                "AsyncTaskRunner coroutine timed out after %ss, cancelled",
+                effective_timeout,
+            )
             raise
 
     @property

@@ -235,7 +235,7 @@ class BaseTask(Task):
         retry_count = getattr(self.request, "retries", 0)
         get_logger("TASK").error(
             "[FAILURE] task=%s id=%s duration=%dms retry=%d error=%s",
-            self.name, task_id, duration_ms, retry_count, exc,
+            self.name, task_id, duration_ms, retry_count, repr(exc),
         )
 
         # 更新 TaskExec 记录
@@ -267,7 +267,7 @@ class BaseTask(Task):
         # 标准化控制台日志
         get_logger("TASK").warning(
             "[RETRY] task=%s id=%s retry=%d error=%s",
-            self.name, task_id, retry_count, exc,
+            self.name, task_id, retry_count, repr(exc),
         )
 
         # 仅更新 retry_count，不改变 status（status 由最终 on_success/on_failure 决定）
@@ -439,7 +439,10 @@ def ensure_async_run(task_cls: type[BaseTask]) -> type[BaseTask]:
             from worker.executor.async_runner import async_runner
 
             if async_runner._loop is not None and async_runner._loop.is_running():
-                return async_runner.run(original_run_impl(self, **kwargs))
+                return async_runner.run(
+                    original_run_impl(self, **kwargs),
+                    timeout=self.time_limit,
+                )
 
             loop = asyncio.new_event_loop()
             try:

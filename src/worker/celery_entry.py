@@ -40,6 +40,9 @@ logger = get_logger("ENTRY")
 @worker_init.connect
 def on_worker_init(**kwargs: object) -> None:
     """Worker 启动时初始化：AsyncTaskRunner + 数据源 + 建表 + 发现插件 + 调度器。"""
+    # 桥接业务日志到 Celery 日志系统
+    _bridge_logging()
+
     logger.info("Worker 初始化开始...")
 
     # 1. 启动 AsyncTaskRunner
@@ -128,6 +131,38 @@ def _init_datasource() -> None:
     loader = DatasourceLoader(settings.APP.DB_CONFIG_PATH)
     register_datasource_sync(loader.datasources)
     logger.info("数据源初始化完成")
+
+
+def _bridge_logging() -> None:
+    """桥接业务日志到 Celery 日志系统。
+
+    Celery Worker 启动后会接管 logging 系统，设置自己的 handler 和格式。
+    业务代码通过 get_logger() 创建的 logger 默认输出到 stdout，
+    但 Celery 的日志输出到 stderr 且可能禁用 propagate。
+    此函数确保业务 logger 的日志能通过 Celery 的日志系统正确输出。
+    """
+    import logging
+
+    # 获取 Celery 配置的根 logger
+    celery_logger = logging.getLogger("celery")
+
+    # 如果 Celery 已经配置了 handler，将业务 logger 的 propagate 设为 True
+    # 这样业务日志会冒泡到根 logger，由 Celery 的 handler 输出
+    root_logger = logging.getLogger()
+    if celery_logger.handlers:
+        # Celery 已配置日志系统，确保根 logger 能输出
+        root_logger.setLevel(logging.INFO)
+        # 移除 setup_logging 添加的 stdout handler，避免重复输出
+        for handler in root_logger.handlers[:]:
+            if isinstance(handler, logging.StreamHandler) and handler.stream.name == "<stdout>":
+                root_logger.removeHandler(handler)
+        # 确保 propagate 开启，让业务日志冒泡到 Celery 的 handler
+        root_logger.propagate = True
+
+    # 标记 setup_logging 已执行，避免 get_logger 重复添加 handler
+    import framework.commons.logger as logger_mod
+
+    logger_mod._root_configured = True
 
 
 async def _init_tables() -> None:

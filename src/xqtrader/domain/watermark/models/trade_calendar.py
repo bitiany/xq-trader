@@ -1,4 +1,5 @@
 from datetime import date
+from typing import Any
 
 from sqlalchemy import Boolean, Date, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
@@ -48,6 +49,33 @@ class TradeCalendar(Base):
         if not rows:
             return None
         return rows[0].cal_date
+
+    @classmethod
+    async def get_trade_dates(
+        cls,
+        *,
+        start: date | None = None,
+        end: date | None = None,
+        exchange: str = DEFAULT_TRADE_EXCHANGE,
+    ) -> list[date]:
+        """获取指定区间内的交易日列表（升序）。
+
+        Args:
+            start: 起始日期（含），None 表示不限制
+            end: 截止日期（含），None 表示不限制
+            exchange: 交易所代码
+
+        Returns:
+            交易日列表，按日期升序排列
+        """
+        filters: dict[str, Any] = {"exchange": exchange, "is_open": True}
+        if start is not None:
+            filters["cal_date__gte"] = start
+        if end is not None:
+            filters["cal_date__lte"] = end
+
+        rows = await cls.filter(**filters, order_by=cls.cal_date.asc())
+        return [r.cal_date for r in rows]
 
     @classmethod
     async def count_trading_days_after(

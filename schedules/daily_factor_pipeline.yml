@@ -1,0 +1,23 @@
+# 每日因子流水线 — 计算 → 合成 → 评估
+# 原始数据采集（daily_kline等）由 daily_market_pipeline 单独编排
+name: daily_factor_pipeline
+description: "每日因子计算+合成+评估流水线"
+mode: canvas
+cron: "0 17 * * 1-5"
+queue: factor
+enabled: true
+
+steps:
+  - name: factor_compute
+    task: factor.compute_daily
+    args: {}
+
+  - name: factor_compose
+    task: factor.compose_daily
+    depends_on: [factor_compute]
+    args: {}
+
+  - name: factor_evaluate
+    task: factor.evaluate_daily
+    depends_on: [factor_compute]
+    args: {}

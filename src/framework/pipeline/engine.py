@@ -132,6 +132,7 @@ class PipelineEngine:
         errors: list[ItemError] = []
         succeeded_count = 0
         skipped_count = 0
+        progress_interval = max(1, total // 20)  # 每5%输出一次进度
 
         async def _process_item(item: Any) -> None:
             """处理单条数据，受 Semaphore 控制并发。"""
@@ -159,6 +160,17 @@ class PipelineEngine:
                         stage_name=getattr(e, "stage_name", getattr(e, "aspect_name", "unknown")),
                         error=str(e),
                     ))
+
+                # 进度汇报
+                done = succeeded_count + skipped_count + len(errors)
+                if done % progress_interval == 0:
+                    elapsed_s = time.monotonic() - start_time
+                    pct = done * 100 // total
+                    logger.info(
+                        "PipelineEngine progress: pipeline=%s %d/%d (%d%%) ok=%d skip=%d err=%d elapsed=%.1fs",
+                        pipeline.name, done, total, pct,
+                        succeeded_count, skipped_count, len(errors), elapsed_s,
+                    )
 
         # 并发执行所有任务
         await asyncio.gather(*[_process_item(item) for item in item_list])

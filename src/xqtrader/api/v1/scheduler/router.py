@@ -1,6 +1,9 @@
 """调度管理 API — 任务查询、手动触发、编排管理。"""
 
+from typing import Any
+
 from fastapi import APIRouter, Query
+from pydantic import BaseModel
 
 from framework.commons.exceptions import NotFoundException
 from framework.commons.pagination import build_paginated_response, paginate
@@ -30,14 +33,21 @@ async def get_task_def(task_name: str) -> dict:
     return task.to_dict()
 
 
+class TriggerTaskRequest(BaseModel):
+    """手动触发任务请求体。"""
+
+    kwargs: dict[str, Any] | None = None
+
+
 @router.post("/tasks/{task_name}/trigger", summary="手动触发任务")
-async def trigger_task(task_name: str) -> dict:
+async def trigger_task(task_name: str, body: TriggerTaskRequest | None = None) -> dict:
     task_def = await TaskDef.get_one_or_none(name=task_name)
     if task_def is None:
         raise NotFoundException(message=f"任务 {task_name} 不存在")
     from worker.celery_app import celery_app
 
-    result = celery_app.send_task(task_name)
+    task_kwargs = body.kwargs if body and body.kwargs else {}
+    result = celery_app.send_task(task_name, kwargs=task_kwargs)
     return {"task_id": result.id, "task_name": task_name, "status": "PENDING"}
 
 

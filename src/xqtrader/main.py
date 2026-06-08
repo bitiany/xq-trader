@@ -14,6 +14,9 @@ from xqtrader.api import router as api_router
 from xqtrader.lifespan import app_lifespan
 from xqtrader.ws import ticket_router, ws_router
 
+# 确保新因子系统模型被 import，以便 DatasourceManager 自动发现并建表
+import xqtrader.domain.factor.models  # noqa: F401
+
 
 def create_app() -> FastAPI:
     app = FastAPI(

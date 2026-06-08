@@ -50,5 +50,5 @@ datasource:
     echo: false
 
 timescale:
-  enabled: false
+  enabled: true
   overrides: {}

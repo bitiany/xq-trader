@@ -1,0 +1,26 @@
+name: factor_compose
+celery_task_name: factor.compose_daily
+version: "1.0.0"
+task_name: 因子日频合成
+task_name_en: Daily Factor Compose
+description: 基于Barra/AQR框架的复合因子合成，IC加权合成Alpha因子
+category: compute
+task_type: on_demand
+queue: factor
+timeout: 1800
+retry_config:
+  max_retries: 2
+  retry_backoff: true
+  retry_backoff_max: 600
+params_schema:
+  type: object
+  properties:
+    trade_date:
+      type: string
+      title: 交易日期
+      description: 指定合成日期（格式 YYYY-MM-DD），为空时取最新交易日
+    pool_id:
+      type: string
+      title: 样本池标识
+      description: 样本池标识，默认 all
+      default: all
