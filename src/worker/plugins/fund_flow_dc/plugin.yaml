@@ -1,0 +1,40 @@
+name: fund_flow_dc
+celery_task_name: market.fund_flow_dc_collect
+version: "1.0.0"
+task_name: 个股资金流向采集(DC)
+task_name_en: Fund Flow DC Collection
+description: 基于管道引擎并发采集A股全市场个股资金流向数据（东方财富数据源），支持增量采集和水位管理
+category: io
+task_type: on_demand
+queue: celery
+timeout: 1800
+retry_config:
+  max_retries: 2
+  retry_backoff: true
+  retry_backoff_max: 600
+params_schema:
+  type: object
+  properties:
+    pipeline_name:
+      type: string
+      title: 管线名称
+      default: fund_flow_dc
+    concurrency:
+      type: integer
+      title: 并发数
+      default: 3
+    stock_codes:
+      type: array
+      title: 股票代码列表
+      description: 为空时采集全市场
+      items:
+        type: string
+    max_count:
+      type: integer
+      title: 最大标的数量
+      description: 用于测试，0 表示不限
+      default: 0
+    collect_date:
+      type: string
+      title: 采集日期
+      description: 指定采集起始日期（格式 YYYY-MM-DD），为空时按水位日期增量采集
