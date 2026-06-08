@@ -11,6 +11,8 @@ from typing import Any, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from framework.commons.exceptions import TransactionConflictError, TransactionRequiredError
+
 logger = logging.getLogger("TRANSACTION")
 
 
@@ -142,7 +144,7 @@ class TransactionManager:
 
         elif propagation == Propagation.MANDATORY:
             if not current_ctx or current_ctx._committed or current_ctx._rolled_back:
-                raise RuntimeError(
+                raise TransactionRequiredError(
                     "Mandatory transaction required but none exists")
 
         elif propagation == Propagation.NOT_SUPPORTED:
@@ -154,7 +156,7 @@ class TransactionManager:
 
         elif propagation == Propagation.NEVER:
             if current_ctx and not current_ctx._committed and not current_ctx._rolled_back:
-                raise RuntimeError(
+                raise TransactionConflictError(
                     "Transaction exists but execution must be non-transactional")
 
         # 创建新的事务

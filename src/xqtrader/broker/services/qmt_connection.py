@@ -88,7 +88,7 @@ class QmtConnection:
             )
         else:
             self._trader = None
-            logger.error("QMT 交易连接失败: result=%s path=%s", result, qmt.QMT_USERDATA_PATH)
+            logger.error("QMT 交易连接失败: result=%s path=%s", result, qmt.QMT_USERDATA_PATH, exc_info=True)
 
         return int(result)
 

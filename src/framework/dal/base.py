@@ -8,13 +8,28 @@ AuditedBase: 继承 Base，增加 id / created_at / updated_at 审计字段
 import logging
 from typing import Any, TypeVar, cast
 
-from sqlalchemy import DateTime, Integer, and_, delete, func, or_, select
+from sqlalchemy import (
+    DateTime,
+    Integer,
+    UniqueConstraint,
+    and_,
+    delete,
+    func,
+    or_,
+    select,
+)
+from sqlalchemy import String as SaString
 from sqlalchemy import func as sql_func
+from sqlalchemy import (
+    update as sql_update,
+)
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.sql.schema import Table
 from typing_extensions import Self
+
+from framework.commons.exceptions import DatasourceNotInitializedError
 
 T = TypeVar('T', bound='Base')
 
@@ -471,8 +486,6 @@ class Base(DeclarativeBase):
                 )
                 return count
         """
-        from sqlalchemy import update as sql_update
-
         try:
             async with cls._get_engines_manager().get_transaction_session(
                 cls._get_bind_key()
@@ -845,123 +858,93 @@ class Base(DeclarativeBase):
         update_fields: list[str] | None = None,
         db: AsyncSession | None = None,
     ) -> int:
-        """
-        执行单批次 upsert 操作（使用指定的 session）
-
-        Args:
-            instances: 当前批次的实例列表
-            on_conflict: 冲突检测字段
-            update_fields: 更新字段列表
-            db: SQLAlchemy session 对象
-
-        Returns:
-            处理的记录数
-        """
-        # 获取表名和列信息
+        """执行单批次 upsert 操作（使用指定的 session）。"""
         table = cast(Table, cls.__table__)
 
-        # 确定唯一约束字段
-        if on_conflict is None:
-            # 默认使用主键
-            conflict_columns = [col.name for col in table.primary_key.columns]
-        else:
-            conflict_columns = on_conflict
+        conflict_columns = on_conflict or [col.name for col in table.primary_key.columns]
+        update_columns = cls._resolve_update_columns(table, conflict_columns, update_fields)
+        values_list = cls._build_upsert_values(table, instances)
 
-        # 确定需要更新的字段
-        if update_fields is None:
-            # 排除冲突字段、主键字段和审计字段
-            exclude_fields = set(conflict_columns + ['created_at'])
-            # 排除所有主键字段
-            for col in table.primary_key.columns:
-                exclude_fields.add(col.name)
-            update_columns = [
-                col.name for col in table.columns
-                if col.name not in exclude_fields
-            ]
-        else:
-            update_columns = update_fields
-        # 构建批量插入数据
-        values_list = []
+        if not values_list:
+            return 0
+
+        stmt = cls._build_upsert_stmt(table, values_list, conflict_columns, update_columns)
+
+        if db is None:
+            raise DatasourceNotInitializedError("db session is required for upsert")
+        result = await db.execute(stmt)
+
+        rowcount = getattr(result, "rowcount", None)
+        return int(rowcount) if rowcount else len(instances)
+
+    @classmethod
+    def _resolve_update_columns(
+        cls,
+        table: Table,
+        conflict_columns: list[str],
+        update_fields: list[str] | None,
+    ) -> list[str]:
+        """确定 upsert 时需要更新的字段列表。"""
+        if update_fields is not None:
+            return update_fields
+        exclude_fields = set(conflict_columns + ['created_at'])
+        for col in table.primary_key.columns:
+            exclude_fields.add(col.name)
+        return [col.name for col in table.columns if col.name not in exclude_fields]
+
+    @classmethod
+    def _build_upsert_values(cls, table: Table, instances: list["Base"]) -> list[dict[str, Any]]:
+        """构建 upsert 的批量插入数据。"""
+        values_list: list[dict[str, Any]] = []
         for instance in instances:
-            row_data = {}
+            row_data: dict[str, Any] = {}
             for col in table.columns:
-                # 只跳过明确设置为 autoincrement=True 的整数自增主键
-                # 业务主键（如 symbol, trade_date 组成的联合主键）不应该被跳过
                 if col.autoincrement is True:
                     continue
-
                 value = getattr(instance, col.name, None)
-                # 跳过服务器默认值字段（如 created_at）
                 if col.server_default is not None and value is None:
                     continue
                 row_data[col.name] = value
             values_list.append(row_data)
-        if not values_list:
-            return 0
+        return values_list
 
-        # 构建 PostgreSQL UPSERT 语句
+    @classmethod
+    def _build_upsert_stmt(
+        cls,
+        table: Table,
+        values_list: list[dict[str, Any]],
+        conflict_columns: list[str],
+        update_columns: list[str],
+    ) -> Any:
+        """构建 PostgreSQL UPSERT 语句。"""
         stmt = pg_insert(table).values(values_list)
+        set_ = {col: getattr(stmt.excluded, col) for col in update_columns}
 
-        from sqlalchemy import String as SaString
-
-        has_string_conflict = False
-        for cn in conflict_columns:
-            conflict_col = table.c.get(cn)
-            if conflict_col is not None and isinstance(conflict_col.type, SaString):
-                has_string_conflict = True
-                break
+        has_string_conflict = any(
+            isinstance(table.c.get(cn).type, SaString)
+            for cn in conflict_columns
+            if table.c.get(cn) is not None
+        )
 
         if has_string_conflict:
-            pk_constraint = table.primary_key
-            constraint_name: str | None = (
-                str(pk_constraint.name) if pk_constraint.name else None
-            )
-            if not constraint_name:
-                from sqlalchemy import UniqueConstraint
-                for uc in table.constraints:
-                    if isinstance(uc, UniqueConstraint) and uc.name:
-                        uc_cols = {c.name for c in uc.columns}
-                        if uc_cols == set(conflict_columns):
-                            constraint_name = str(uc.name)
-                            break
-
+            constraint_name = cls._find_unique_constraint_name(table, conflict_columns)
             if constraint_name:
-                stmt = stmt.on_conflict_do_update(
-                    constraint=constraint_name,
-                    set_={
-                        col: getattr(stmt.excluded, col)
-                        for col in update_columns
-                    }
-                )
-            else:
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=conflict_columns,
-                    set_={
-                        col: getattr(stmt.excluded, col)
-                        for col in update_columns
-                    }
-                )
-        else:
-            stmt = stmt.on_conflict_do_update(
-                index_elements=conflict_columns,
-                set_={
-                    col: getattr(stmt.excluded, col)
-                    for col in update_columns
-                }
-            )
+                return stmt.on_conflict_do_update(constraint=constraint_name, set_=set_)
 
-        # 执行批量 upsert
-        if db is None:
-            raise RuntimeError("db session is required for upsert")
-        result = await db.execute(stmt)
+        return stmt.on_conflict_do_update(index_elements=conflict_columns, set_=set_)
 
-        # 统计插入和更新的数量
-        # PostgreSQL 返回的是受影响的行数，无法直接区分 insert/update
-        # 这里采用简化策略：假设所有行都被处理
-        rowcount = getattr(result, "rowcount", None)
-        total_processed = int(rowcount) if rowcount else len(instances)
-
-        return total_processed
+    @classmethod
+    def _find_unique_constraint_name(cls, table: Table, conflict_columns: list[str]) -> str | None:
+        """查找匹配冲突字段的唯一约束名称。"""
+        pk_constraint = table.primary_key
+        if pk_constraint.name:
+            return str(pk_constraint.name)
+        for uc in table.constraints:
+            if isinstance(uc, UniqueConstraint) and uc.name:
+                uc_cols = {c.name for c in uc.columns}
+                if uc_cols == set(conflict_columns):
+                    return str(uc.name)
+        return None
 
     @classmethod
     async def bulk_update(

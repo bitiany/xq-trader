@@ -79,7 +79,7 @@ class QmtTrader:
         )
 
         if order_id < 0:
-            logger.error("下单失败: stock=%s order_id=%s", stock_code, order_id)
+            logger.error("下单失败: stock=%s order_id=%s", stock_code, order_id, exc_info=True)
             raise BusinessException(f"下单失败: stock={stock_code}, order_id={order_id}")
 
         logger.info("下单成功: stock=%s order_id=%s", stock_code, order_id)
@@ -139,7 +139,7 @@ class QmtTrader:
         )
 
         if result < 0:
-            logger.error("撤单失败: order_id=%s result=%s", order_id, result)
+            logger.error("撤单失败: order_id=%s result=%s", order_id, result, exc_info=True)
             raise BusinessException(f"撤单失败: order_id={order_id}, result={result}")
 
         logger.info("撤单成功: order_id=%s", order_id)

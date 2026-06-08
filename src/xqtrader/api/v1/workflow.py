@@ -226,5 +226,5 @@ async def workflow_list() -> list[dict]:
                         "description": cfg.get("description", ""),
                     })
                 except Exception as e:
-                    logger.error("Failed to load flow config '%s': %s", fname, e)
+                    logger.error("Failed to load flow config '%s': %s", fname, e, exc_info=True)
     return flows

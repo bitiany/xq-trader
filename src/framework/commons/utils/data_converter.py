@@ -29,9 +29,12 @@ import pandas as pd
 from sqlalchemy import Boolean, Date, DateTime, Float, Integer, Numeric, String
 from sqlalchemy.orm import DeclarativeBase
 
+from framework.commons.logger import get_logger
 from framework.commons.utils.date_utils import parse_date, parse_datetime
 
 T = TypeVar('T', bound='DeclarativeBase')
+
+logger = get_logger("DATA_CONVERTER")
 
 class DataFrameToModelConverter:
     """
@@ -67,7 +70,7 @@ class DataFrameToModelConverter:
         model_fields = cls._get_model_fields(model_class)
 
         if not model_fields:
-            print(f"Warning: No fields found for model {model_class.__name__}")
+            logger.warning("No fields found for model %s", model_class.__name__)
             return []
 
         # 2. 预处理 DataFrame (重命名列以匹配模型字段)
@@ -92,8 +95,8 @@ class DataFrameToModelConverter:
                         # 如果字段在 DataFrame 中，使用其值；否则传入 None 让自定义转换处理默认值
                         raw_value = row[field_name] if field_name in work_df.columns else None
                         val = custom_transforms[field_name](raw_value)
-                    except Exception:
-                        # print(f"Custom transform error for {field_name}: {e}")
+                    except Exception as e:
+                        logger.warning("Custom transform error for %s: %s", field_name, e, exc_info=True)
                         val = None
                 elif field_name in work_df.columns:
                     # 5. 自动类型转换 (仅当字段在 DataFrame 中存在)
@@ -111,12 +114,7 @@ class DataFrameToModelConverter:
                     instance = model_class(**instance_data)
                     instances.append(instance)
             except Exception as e:
-                print(f"Warning: Failed to create instance for row index {index}: {e}")
-                print(f"Data: {instance_data}")
-                # 打印出错的字段类型，方便调试
-                for k, v in instance_data.items():
-                    if v is not None:
-                        print(f"  Field '{k}' type: {type(v)}, value: {v}")
+                logger.warning("Failed to create instance for row index %s: %s", index, e, exc_info=True)
 
         return instances
 
@@ -174,7 +172,8 @@ class DataFrameToModelConverter:
                 import pandas as pd
                 if isinstance(value, pd.Series):
                     value = value.iloc[0] if len(value) > 0 else None
-            except Exception:
+            except Exception as e:
+                logger.warning("Series value extraction failed: %s", e, exc_info=True)
                 return None
 
         # 空值检查（安全调用）

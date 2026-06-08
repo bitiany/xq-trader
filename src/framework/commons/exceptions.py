@@ -102,6 +102,22 @@ class PipelineNotFoundError(WorkerError):
     """编排未找到或无步骤。"""
 
 
+class DatasourceNotInitializedError(WorkerError):
+    """数据源引擎未初始化。"""
+
+
+class DatasourceConfigNotFoundError(WorkerError):
+    """未找到数据源配置。"""
+
+
+class TransactionRequiredError(WorkerError):
+    """事务必须存在但未开启。"""
+
+
+class TransactionConflictError(WorkerError):
+    """事务冲突（已存在不同事务）。"""
+
+
 # ==================== 工作流异常层级 ====================
 
 class WorkflowError(Exception):

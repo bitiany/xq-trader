@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime
 from typing import Any
 
 from framework.commons.exceptions import OrchestrationNotFoundError
@@ -24,8 +25,6 @@ class OrchestrationTracker:
         task_name: str,
         steps: list[str],
     ) -> None:
-        from datetime import datetime
-
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         data: dict[str, str] = {
             "orchestration_id": orchestration_id,
@@ -46,8 +45,6 @@ class OrchestrationTracker:
         existing = self.get(orchestration_id)
         if existing is None:
             raise OrchestrationNotFoundError(f"Orchestration '{orchestration_id}' not found")
-        from datetime import datetime
-
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         existing["status"] = status
         existing["updated_at"] = now

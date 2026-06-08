@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
+from framework.commons.exceptions import DatasourceConfigNotFoundError, DatasourceNotInitializedError
 from framework.dal.datasource import DatasourceConfig
 from framework.dal.transaction.manager import TransactionManager
 
@@ -41,7 +42,7 @@ class EnginesManager:
             return
         try:
             if not datasources_dict:
-                raise ValueError("未找到数据源配置，请检查 datasource.yml 或环境变量")
+                raise DatasourceConfigNotFoundError("未找到数据源配置，请检查 datasource.yml 或环境变量")
 
             logger.info(f"***** 开始初始化数据源：{list(datasources_dict)} *****")
 
@@ -126,11 +127,11 @@ class EnginesManager:
         if bind_key is None:
             # 返回第一个引擎作为默认
             if not self._engines:
-                raise RuntimeError("没有可用的数据源引擎")
+                raise DatasourceNotInitializedError("没有可用的数据源引擎")
             return next(iter(self._engines.values()))
 
         if bind_key not in self._engines:
-            raise ValueError(f"数据源 '{bind_key}' 未注册")
+            raise DatasourceConfigNotFoundError(f"数据源 '{bind_key}' 未注册")
 
         return self._engines[bind_key]
 
@@ -147,11 +148,11 @@ class EnginesManager:
         if bind_key is None:
             # 返回第一个 session 工厂作为默认
             if not self._session_makers:
-                raise RuntimeError("没有可用的 session 工厂")
+                raise DatasourceNotInitializedError("没有可用的 session 工厂")
             return next(iter(self._session_makers.values()))
 
         if bind_key not in self._session_makers:
-            raise ValueError(f"数据源 '{bind_key}' 未注册")
+            raise DatasourceConfigNotFoundError(f"数据源 '{bind_key}' 未注册")
 
         return self._session_makers[bind_key]
     @asynccontextmanager

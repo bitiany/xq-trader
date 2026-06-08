@@ -31,6 +31,8 @@ from langgraph.checkpoint.base import (
 )
 from psycopg.rows import dict_row
 
+from framework.commons.exceptions import DatasourceConfigNotFoundError, DatasourceNotInitializedError
+
 if TYPE_CHECKING:
     from langgraph.checkpoint.postgres import PostgresSaver
 
@@ -151,11 +153,11 @@ class CheckpointManager:
         from framework.dal.enginee import engines_manager
 
         if not engines_manager.is_initialized():
-            raise RuntimeError("数据源引擎未初始化，无法创建 LangGraph checkpointer")
+            raise DatasourceNotInitializedError("数据源引擎未初始化，无法创建 LangGraph checkpointer")
 
         ds_config = engines_manager.datasource_configs.get("research")
         if ds_config is None:
-            raise RuntimeError("未找到 research 数据源配置")
+            raise DatasourceConfigNotFoundError("未找到 research 数据源配置")
 
         url = ds_config.url
 

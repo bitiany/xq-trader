@@ -84,6 +84,7 @@ class QmtCallbackHandler(XtQuantTraderCallback):
             getattr(order_error, "order_id", ""),
             getattr(order_error, "error_id", ""),
             getattr(order_error, "error_msg", ""),
+            exc_info=True,
         )
 
     def on_cancel_error(self, cancel_error: Any) -> None:
@@ -92,6 +93,7 @@ class QmtCallbackHandler(XtQuantTraderCallback):
             getattr(cancel_error, "order_id", ""),
             getattr(cancel_error, "error_id", ""),
             getattr(cancel_error, "error_msg", ""),
+            exc_info=True,
         )
 
     def on_order_stock_async_response(self, response: Any) -> None:

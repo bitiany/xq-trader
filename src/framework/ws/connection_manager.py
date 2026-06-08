@@ -154,8 +154,8 @@ class ConnectionManager:
                 await ws.close()
             except WsConnectionError:
                 raise
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("关闭 WebSocket 连接异常: conn=%s error=%s", conn_id[:8], e, exc_info=True)
 
         logger.info(f"Connection {conn_id[:8]} disconnected, cleaned {len(topics)} subscriptions")
 

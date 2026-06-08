@@ -44,7 +44,7 @@ def create_tool_instance(name: str, class_path: str) -> Any:
             return tool_class
         return tool_class()
     except (ImportError, AttributeError) as e:
-        logger.error(f"Cannot load tool '{name}' from '{class_path}': {e}")
+        logger.error(f"Cannot load tool '{name}' from '{class_path}': {e}", exc_info=True)
         raise WorkflowToolLoadError(f"Cannot load tool '{name}' from '{class_path}': {e}") from e
 
 

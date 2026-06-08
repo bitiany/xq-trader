@@ -6,6 +6,7 @@ from collections.abc import Callable
 from functools import wraps
 from typing import Any
 
+from framework.commons.exceptions import DatasourceNotInitializedError
 from framework.dal.transaction.manager import Propagation, TransactionManager
 
 
@@ -44,7 +45,7 @@ def transactional(
             transaction_manager = _get_transaction_manager()
 
             if transaction_manager is None:
-                raise RuntimeError("TransactionManager 未初始化，请确保 EnginesManager 已初始化")
+                raise DatasourceNotInitializedError("TransactionManager 未初始化，请确保 EnginesManager 已初始化")
 
             async with transaction_manager.transaction(
                 propagation=propagation,

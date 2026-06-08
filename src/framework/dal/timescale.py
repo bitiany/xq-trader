@@ -110,7 +110,8 @@ class TimescaleManager:
                     {"table_name": table_name, "schema": self.schema},
                 )
                 return bool(result.scalar())
-        except Exception:
+        except Exception as e:
+            logger.warning("检查 hypertable 失败: table=%s, error=%s", table_name, e, exc_info=True)
             return False
 
     async def is_partitioned_table(self, table_name: str) -> bool:
@@ -129,7 +130,8 @@ class TimescaleManager:
                     {"table_name": table_name, "schema": self.schema},
                 )
                 return bool(result.scalar())
-        except Exception:
+        except Exception as e:
+            logger.warning("检查分区表失败: table=%s, error=%s", table_name, e, exc_info=True)
             return False
 
     async def _drop_incompatible_unique_indexes(

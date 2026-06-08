@@ -29,6 +29,7 @@ import json
 import os
 import re
 from typing import Any
+from urllib.parse import quote_plus
 
 from jsonpath_ng import parse  # type: ignore[import-untyped]
 
@@ -84,98 +85,81 @@ class PlaceholderResolver:
 
         Returns:
             解析后的值
-
-        Examples:
-            >>> resolver = PlaceholderResolver()
-            >>> os.environ['DB_HOST'] = 'localhost'
-            >>> resolver.resolve("${DB_HOST:-127.0.0.1}")
-            'localhost'
-
-            >>> state = {'variables': {'start': {'city': '北京'}}}
-            >>> resolver.resolve("${start.city}", context=state)
-            '北京'
         """
         if not isinstance(template, str) or '${' not in template:
             return template
-        # 如果 preserve_type=True 且模板只包含一个占位符，直接返回解析后的值（不转换为字符串）
+
+        # preserve_type=True 且模板只包含一个占位符时，直接返回解析后的值
         if preserve_type:
             match = self.PATTERN.fullmatch(template.strip())
             if match:
-                var_path = match.group(1).strip()
-                default_value = match.group(2) if match.group(2) is not None else None
-
-                # 处理加密值 ${ENC:encrypted}
-                if var_path.startswith('ENC:'):
-                    encrypted_value = var_path[4:].strip()
-                    try:
-                        decrypted = CryptoUtils.decrypt(encrypted_value)
-                        return decrypted
-                    except Exception as e:
-                        logger.warning(f"解密失败: {e}")
-                        return default_value
-
-                # 确定数据源
-                data_source = context if context is not None else self.env_dict
-
-                # 构建 JSONPath 表达式
-                jsonpath_expr = f'$.{var_path}'
-
-                # 查找值
-                value = self._jsonpath_search(jsonpath_expr, data_source)
-                logger.debug(f"解析 {var_path} 为 {value}")
-
-                if value is not None:
-                    # 对密码字段进行 URL 编码
-                    if ('PASSWORD' in var_path.upper() or 'PASSWD' in var_path.upper()):
-                        from urllib.parse import quote_plus
-                        return quote_plus(str(value))
-                    return value  # 直接返回原始类型（dict/list等）
-                else:
-                    return default_value
+                return self._resolve_single_placeholder(match, context)
 
         # 原有逻辑：使用 re.sub 进行替换（返回字符串）
-        def replace_match(match: re.Match[str]) -> str:
-            var_path = match.group(1).strip()
-            default_value = match.group(2) if match.group(2) is not None else ''
+        return self.PATTERN.sub(
+            lambda m: self._replace_match_str(m, context), template
+        )
 
-            # 处理加密值 ${ENC:encrypted}
-            if var_path.startswith('ENC:'):
-                encrypted_value = var_path[4:].strip()
-                try:
-                    decrypted = CryptoUtils.decrypt(encrypted_value)
-                    return decrypted
-                except Exception as e:
-                    logger.warning(f"解密失败: {e}")
-                    return default_value
-            # 确定数据源
-            if context is not None:
-                # 工作流场景：从 context 中查找
-                data_source = context
-            else:
-                # 配置中心场景：从环境变量中查找
-                data_source = self.env_dict
+    def _resolve_single_placeholder(self, match: re.Match[str], context: dict[str, Any] | None) -> Any:
+        """解析单个占位符，保留原始类型。"""
+        var_path = match.group(1).strip()
+        default_value = match.group(2) if match.group(2) is not None else None
 
-            # 构建 JSONPath 表达式
-            # ${VAR} → $.VAR
-            # ${nested.path} → $.nested.path
-            jsonpath_expr = f'$.{var_path}'
+        enc_result = self._try_decrypt(var_path, default_value)
+        if enc_result is not None:
+            return enc_result
 
-            # 查找值
-            value = self._jsonpath_search(jsonpath_expr, data_source)
+        data_source = context if context is not None else self.env_dict
+        value = self._lookup_value(var_path, data_source)
 
-            if value is not None:
-                # 对密码字段进行 URL 编码
-                if ('PASSWORD' in var_path.upper() or 'PASSWD' in var_path.upper()):
-                    from urllib.parse import quote_plus
-                    return quote_plus(str(value))
-                # 对于 dict/list 类型，使用 JSON 序列化而不是 str()
-                if isinstance(value, (dict, list)):
-                    return json.dumps(value, ensure_ascii=False, default=str)
-                return str(value)
-            else:
-                return default_value
+        if value is not None:
+            if self._is_password_field(var_path):
+                return quote_plus(str(value))
+            return value
+        return default_value
 
-        return self.PATTERN.sub(replace_match, template)
+    def _replace_match_str(self, match: re.Match[str], context: dict[str, Any] | None) -> str:
+        """替换匹配的占位符为字符串。"""
+        var_path = match.group(1).strip()
+        default_value = match.group(2) if match.group(2) is not None else ''
+
+        enc_result = self._try_decrypt(var_path, default_value)
+        if enc_result is not None:
+            return enc_result
+
+        data_source = context if context is not None else self.env_dict
+        value = self._lookup_value(var_path, data_source)
+
+        if value is not None:
+            if self._is_password_field(var_path):
+                return quote_plus(str(value))
+            if isinstance(value, (dict, list)):
+                return json.dumps(value, ensure_ascii=False, default=str)
+            return str(value)
+        return default_value
+
+    def _try_decrypt(self, var_path: str, default_value: Any) -> Any:
+        """尝试解密 ENC: 前缀的值，非加密值返回 None。"""
+        if not var_path.startswith('ENC:'):
+            return None
+        encrypted_value = var_path[4:].strip()
+        try:
+            return CryptoUtils.decrypt(encrypted_value)
+        except Exception as e:
+            logger.warning(f"解密失败: {e}")
+            return default_value
+
+    def _lookup_value(self, var_path: str, data_source: dict[str, Any]) -> Any:
+        """通过 JSONPath 查找变量值。"""
+        jsonpath_expr = f'$.{var_path}'
+        value = self._jsonpath_search(jsonpath_expr, data_source)
+        logger.debug(f"解析 {var_path} 为 {value}")
+        return value
+
+    @staticmethod
+    def _is_password_field(var_path: str) -> bool:
+        """判断变量路径是否为密码字段。"""
+        return 'PASSWORD' in var_path.upper() or 'PASSWD' in var_path.upper()
 
     def resolve_dict(self, data: Any, context: dict[str, Any] | None = None) -> Any:
         """
@@ -236,104 +220,6 @@ class PlaceholderResolver:
         try:
             matches = expr.find(data)
             return matches[0].value if matches else None
-        except Exception:
-            # JSONPath 查询失败时静默返回 None
+        except Exception as e:
+            logger.warning("JSONPath 查询失败: %s, 错误: %s", jsonpath_expr, e, exc_info=True)
             return None
-
-
-if __name__ == "__main__":
-    import time
-
-    print("=" * 70)
-    print("PlaceholderResolver 测试")
-    print("=" * 70)
-
-    resolver = PlaceholderResolver()
-
-    # 测试1: 配置中心场景
-    print("\n[TEST 1] 配置中心场景")
-    os.environ['TEST_DB_HOST'] = 'test-host'
-    os.environ['TEST_DB_PORT'] = '5432'
-
-    # 重新初始化以包含新变量
-    resolver = PlaceholderResolver()
-
-    result = resolver.resolve("${TEST_DB_HOST:-localhost}")
-    print("  模板: ${TEST_DB_HOST:-localhost}")
-    print(f"  结果: {result}")
-    assert result == 'test-host', f"期望 'test-host'，实际 '{result}'"
-    print("  ✅ 通过")
-
-    # 测试2: 带默认值
-    print("\n[TEST 2] 带默认值")
-    result = resolver.resolve("${UNDEFINED_VAR:-default_value}")
-    print("  模板: ${UNDEFINED_VAR:-default_value}")
-    print(f"  结果: {result}")
-    assert result == 'default_value'
-    print("  ✅ 通过")
-
-    # 测试3: 工作流场景
-    print("\n[TEST 3] 工作流场景")
-    state = {
-        'variables': {
-            'start': {'city': '北京'},
-            'llm': {'response': '天气晴朗'}
-        }
-    }
-    # 工作流中，context 应该是 variables + context 的合并
-    context = {**state.get('variables', {}), **state.get('context', {})}
-    result = resolver.resolve("${start.city}", context=context)
-    print("  模板: ${start.city}")
-    print(f"  结果: {result}")
-    assert result == '北京'
-    print("  ✅ 通过")
-
-    # 测试4: 递归解析字典
-    print("\n[TEST 4] 递归解析字典")
-    config = {
-        "database": {
-            "host": "${TEST_DB_HOST:-localhost}",
-            "port": "${TEST_DB_PORT:-3306}",
-            "pool_size": "${POOL_SIZE:-10}"
-        }
-    }
-    result = resolver.resolve_dict(config)
-    print(f"  原始配置: {config}")
-    print(f"  解析结果: {result}")
-    assert result['database']['host'] == 'test-host'
-    assert result['database']['port'] == '5432'
-    assert result['database']['pool_size'] == '10'
-    print("  ✅ 通过")
-
-    # 测试5: 加密值测试
-    print("\n[TEST 5] 加密值测试")
-    from framework.commons.crypto import CryptoUtils
-    test_secret = "test_password"
-    encrypted = CryptoUtils.encrypt(test_secret)
-    encrypted_placeholder = f"${{ENC:{encrypted}}}"
-
-    result = resolver.resolve(encrypted_placeholder)
-    print(f"  加密值: {encrypted[:20]}...")
-    print(f"  解密结果: {result}")
-    assert result == test_secret
-    print("  ✅ 加密值测试通过")
-
-    # 测试6: 性能测试
-    print("\n[TEST 6] 性能测试")
-
-    # 预热缓存
-    for _ in range(100):
-        resolver.resolve("${TEST_DB_HOST}")
-
-    # 测试 JSONPath 方案
-    start = time.time()
-    for _ in range(10000):
-        resolver.resolve("${TEST_DB_HOST:-localhost}")
-    jsonpath_time = time.time() - start
-
-    print(f"  JSONPath 方案: {jsonpath_time:.3f}s")
-    print("  性能测试完成")
-
-    print("\n" + "=" * 70)
-    print("✅ 所有测试通过！")
-    print("=" * 70)

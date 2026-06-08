@@ -43,11 +43,11 @@ class WsHandler:
         except WebSocketDisconnect:
             logger.info(f"Connection {conn_id[:8]} disconnected")
         except WsConnectionError as e:
-            logger.error(f"Connection {conn_id[:8]} error: {e}")
+            logger.error(f"Connection {conn_id[:8]} error: {e}", exc_info=True)
         except WsMessageError as e:
-            logger.error(f"Connection {conn_id[:8]} message error: {e}")
+            logger.error(f"Connection {conn_id[:8]} message error: {e}", exc_info=True)
         except Exception as e:
-            logger.error(f"Connection {conn_id[:8]} unexpected error: {e}")
+            logger.error(f"Connection {conn_id[:8]} unexpected error: {e}", exc_info=True)
         finally:
             await connection_manager.disconnect(conn_id)
 

@@ -6,6 +6,7 @@ from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
+from framework.commons.exceptions import BusinessException
 from framework.commons.logger import get_logger
 
 logger = get_logger("CRYPTO")
@@ -64,8 +65,8 @@ class CryptoUtils:
         try:
             return CryptoUtils.decrypt(encrypted_part, secret)
         except Exception as e:
-            logger.error(f"解密失败: {e}")
-            raise ValueError(f"密码解密失败，请检查密文或加密密钥: {e}")
+            logger.error(f"解密失败: {e}", exc_info=True)
+            raise BusinessException(f"密码解密失败，请检查密文或加密密钥: {e}")
 
     @staticmethod
     def hash_sha256(value: str) -> str:
