@@ -1,0 +1,56 @@
+name: factor_compute
+celery_task_name: factor.compute_daily
+version: "1.0.0"
+task_name: 日频因子计算
+task_name_en: Daily Factor Compute
+description: 逐标的计算技术/量价/资金流因子，写入fac_factor_value（不含估值和财务截面因子）
+description_en: Compute per-security factors (tech/volume/money-flow) and persist to fac_factor_value
+category: compute
+task_type: scheduled
+queue: celery
+timeout: 14400
+retry_config:
+  max_retries: 2
+  retry_backoff: true
+  retry_backoff_max: 600
+schedule: "0 17 * * 1-5"
+params_schema:
+  type: object
+  properties:
+    symbols:
+      type: array
+      items:
+        type: string
+      title: 证券代码列表
+      description: 为空时计算全市场
+    start_date:
+      type: string
+      format: date
+      title: 开始日期
+    end_date:
+      type: string
+      format: date
+      title: 结束日期
+    factor_ids:
+      type: array
+      items:
+        type: string
+      title: 因子ID列表
+      description: 为空时计算所有活跃因子
+    max_workers:
+      type: integer
+      title: 最大并发数
+      default: 10
+    mode:
+      type: string
+      title: 计算模式
+      description: incremental（增量，仅计算5年+预热）或 full（全量）
+      default: incremental
+      enum:
+        - incremental
+        - full
+    warmup_bars:
+      type: integer
+      title: 预热K线数
+      description: 无状态因子增量模式下的前向补充条数
+      default: 300

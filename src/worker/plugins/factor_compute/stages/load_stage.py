@@ -1,0 +1,153 @@
+"""加载阶段 — 加载K线行情和资金流数据（不含估值和财务）。
+
+根据架构设计，估值指标和财务因子属于截面因子，不在因子计算任务中加载。
+"""
+
+from __future__ import annotations
+
+from datetime import date, datetime
+from typing import Any
+
+import pandas as pd
+
+from framework.commons.logger import get_logger
+from framework.pipeline import PipelineContext, Stage, StageResult
+from xqtrader.domain.market.models.candlestick import CandlestickDaily
+from xqtrader.domain.market.models.fund_flow import FundFlowIndividual
+
+logger = get_logger("factor.load")
+
+
+def _parse_date(value: str) -> date | None:
+    if not value:
+        return None
+    for fmt in ("%Y%m%d", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(value, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+class FactorLoadStage(Stage):
+    """加载阶段 — 加载K线行情和资金流数据。"""
+
+    @property
+    def name(self) -> str:
+        return "factor_load"
+
+    async def process(self, item: Any, ctx: PipelineContext) -> StageResult:
+        symbol: str = item
+        start_date = str(ctx.get("start_date", ""))
+        end_date = str(ctx.get("end_date", ""))
+
+        # 加载K线行情
+        df_kline = await self._load_kline(symbol, start_date, end_date)
+        if df_kline.empty:
+            logger.info("[load] %s no kline data | range=%s~%s", symbol, start_date, end_date)
+            ctx.set("skip_persist", True)
+            ctx.set("kline_df", df_kline)
+            return StageResult.ok(data={"symbol": symbol, "rows": 0})
+
+        # 加载资金流数据
+        df_flow = await self._load_fund_flow(symbol, start_date, end_date)
+
+        # 合并K线和资金流
+        if not df_flow.empty:
+            df_merged = self._merge_kline_flow(df_kline, df_flow)
+        else:
+            df_merged = df_kline
+
+        ctx.set("kline_df", df_merged)
+        ctx.set("skip_persist", False)
+
+        date_range = ""
+        if "trade_date" in df_merged.columns:
+            dates = df_merged["trade_date"]
+            date_range = f"{dates.iloc[0]}~{dates.iloc[-1]}"
+
+        logger.info(
+            "[load] %s rows=%d date=%s | flow=%s",
+            symbol, len(df_merged), date_range,
+            "yes" if not df_flow.empty else "no",
+        )
+        return StageResult.ok(data={"symbol": symbol, "rows": len(df_merged)})
+
+    async def _load_kline(self, symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
+        filters: dict[str, Any] = {"symbol": symbol}
+        sd = _parse_date(start_date)
+        ed = _parse_date(end_date)
+        if sd:
+            filters["trade_date__gte"] = sd
+        if ed:
+            filters["trade_date__lte"] = ed
+
+        rows = await CandlestickDaily.filter(
+            **filters,
+            order_by=CandlestickDaily.trade_date.asc(),
+        )
+        if not rows:
+            return pd.DataFrame()
+
+        df = pd.DataFrame([r.to_dict() for r in rows])
+        for col in ["open", "close", "high", "low", "volume", "amount"]:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+        return df
+
+    async def _load_fund_flow(self, symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
+        filters: dict[str, Any] = {"symbol": symbol}
+        sd = _parse_date(start_date)
+        ed = _parse_date(end_date)
+        if sd:
+            filters["trade_date__gte"] = sd
+        if ed:
+            filters["trade_date__lte"] = ed
+
+        rows = await FundFlowIndividual.filter(
+            **filters,
+            order_by=FundFlowIndividual.trade_date.asc(),
+        )
+        if not rows:
+            return pd.DataFrame()
+
+        df = pd.DataFrame([r.to_dict() for r in rows])
+        numeric_cols = [
+            "main_net_amt", "main_net_pct", "huge_net_amt", "huge_net_pct",
+            "big_net_amt", "big_net_pct", "mid_net_amt", "mid_net_pct",
+            "small_net_amt", "small_net_pct", "net_mf_amt",
+        ]
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+
+        # 统一 tushare 数据源，按 source 优先级排序后去重（tushare 优先于 dc 等旧数据源）
+        if "trade_date" in df.columns and "source" in df.columns:
+            source_priority = {"tushare": 0, "dc": 1}
+            df["_src_rank"] = df["source"].map(source_priority).fillna(99)
+            df = df.sort_values("_src_rank").drop_duplicates(subset=["trade_date"], keep="first")
+            df = df.drop(columns=["_src_rank"])
+        elif "trade_date" in df.columns:
+            df = df.drop_duplicates(subset=["trade_date"], keep="first")
+        return df
+
+    @staticmethod
+    def _merge_kline_flow(df_kline: pd.DataFrame, df_flow: pd.DataFrame) -> pd.DataFrame:
+        """合并K线和资金流数据 — 精确日期匹配，不前向填充。"""
+        # 排除 close/pct_change：K线已有 close，资金流的 close/pct_change 为 dc 遗留字段
+        flow_cols = [
+            c for c in df_flow.columns
+            if c not in ("symbol", "trade_date", "source", "close", "pct_change")
+        ]
+        if not flow_cols:
+            return df_kline
+
+        df_merge = df_flow[["trade_date"] + flow_cols].copy()
+        df_kline_sorted = df_kline.sort_values("trade_date")
+
+        # 统一 trade_date 类型为 date，确保精确匹配
+        df_kline_sorted["trade_date"] = pd.to_datetime(df_kline_sorted["trade_date"]).dt.date
+        df_merge["trade_date"] = pd.to_datetime(df_merge["trade_date"]).dt.date
+
+        df_merged = df_kline_sorted.merge(df_merge, on="trade_date", how="left")
+        return df_merged

@@ -1,0 +1,95 @@
+﻿"""资产负债表 ORM 模型。"""
+
+# ruff: noqa: E501
+
+from datetime import date
+
+from sqlalchemy import Date, Float, String
+from sqlalchemy.orm import Mapped, mapped_column
+
+from framework.dal.base import Base
+
+
+class BalanceSheet(Base):
+    """资产负债表"""
+
+    __bind_key__ = "stock"
+    __tablename__ = "sdc_balance_sheet"
+
+    symbol: Mapped[str] = mapped_column(String(20), primary_key=True, comment="TS股票代码")
+    ann_date: Mapped[date | None] = mapped_column(Date, comment="公告日期")
+    f_ann_date: Mapped[date | None] = mapped_column(Date, comment="实际公告日期")
+    end_date: Mapped[date] = mapped_column(Date, primary_key=True, comment="报告期")
+    report_type: Mapped[str | None] = mapped_column(String(10), comment="报表类型")
+    comp_type: Mapped[str | None] = mapped_column(String(10), comment="公司类型(1一般工商业2银行3保险4证券)")
+    end_type: Mapped[str | None] = mapped_column(String(10), comment="报告期类型")
+    update_flag: Mapped[str] = mapped_column(String(1), primary_key=True, comment="更新标识(1最新)")
+    total_share: Mapped[float | None] = mapped_column(Float, comment="期末总股本")
+    cap_rese: Mapped[float | None] = mapped_column(Float, comment="资本公积金")
+    undistr_porfit: Mapped[float | None] = mapped_column(Float, comment="未分配利润")
+    surplus_rese: Mapped[float | None] = mapped_column(Float, comment="盈余公积金")
+    special_rese: Mapped[float | None] = mapped_column(Float, comment="专项储备")
+    money_cap: Mapped[float | None] = mapped_column(Float, comment="货币资金")
+    trad_asset: Mapped[float | None] = mapped_column(Float, comment="交易性金融资产")
+    notes_receiv: Mapped[float | None] = mapped_column(Float, comment="应收票据")
+    accounts_receiv: Mapped[float | None] = mapped_column(Float, comment="应收账款")
+    oth_receiv: Mapped[float | None] = mapped_column(Float, comment="其他应收款")
+    prepayment: Mapped[float | None] = mapped_column(Float, comment="预付款项")
+    div_receiv: Mapped[float | None] = mapped_column(Float, comment="应收股利")
+    int_receiv: Mapped[float | None] = mapped_column(Float, comment="应收利息")
+    inventories: Mapped[float | None] = mapped_column(Float, comment="存货")
+    amor_exp: Mapped[float | None] = mapped_column(Float, comment="待摊费用")
+    nca_within_1y: Mapped[float | None] = mapped_column(Float, comment="一年内到期的非流动资产")
+    total_cur_assets: Mapped[float | None] = mapped_column(Float, comment="流动资产合计")
+    fa_avail_for_sale: Mapped[float | None] = mapped_column(Float, comment="可供出售金融资产")
+    htm_invest: Mapped[float | None] = mapped_column(Float, comment="持有至到期投资")
+    lt_eqt_invest: Mapped[float | None] = mapped_column(Float, comment="长期股权投资")
+    invest_real_estate: Mapped[float | None] = mapped_column(Float, comment="投资性房地产")
+    time_deposits: Mapped[float | None] = mapped_column(Float, comment="定期存款")
+    oth_assets: Mapped[float | None] = mapped_column(Float, comment="其他资产")
+    lt_rec: Mapped[float | None] = mapped_column(Float, comment="长期应收款")
+    fix_assets: Mapped[float | None] = mapped_column(Float, comment="固定资产")
+    cip: Mapped[float | None] = mapped_column(Float, comment="在建工程")
+    const_materials: Mapped[float | None] = mapped_column(Float, comment="工程物资")
+    fixed_assets_disp: Mapped[float | None] = mapped_column(Float, comment="固定资产清理")
+    intan_assets: Mapped[float | None] = mapped_column(Float, comment="无形资产")
+    r_and_d: Mapped[float | None] = mapped_column(Float, comment="研发支出")
+    goodwill: Mapped[float | None] = mapped_column(Float, comment="商誉")
+    lt_amor_exp: Mapped[float | None] = mapped_column(Float, comment="长期待摊费用")
+    defer_tax_assets: Mapped[float | None] = mapped_column(Float, comment="递延所得税资产")
+    oth_nca: Mapped[float | None] = mapped_column(Float, comment="其他非流动资产")
+    total_nca: Mapped[float | None] = mapped_column(Float, comment="非流动资产合计")
+    total_assets: Mapped[float | None] = mapped_column(Float, comment="资产总计")
+    lt_borr: Mapped[float | None] = mapped_column(Float, comment="长期借款")
+    st_borr: Mapped[float | None] = mapped_column(Float, comment="短期借款")
+    trading_fl: Mapped[float | None] = mapped_column(Float, comment="交易性金融负债")
+    notes_payable: Mapped[float | None] = mapped_column(Float, comment="应付票据")
+    acct_payable: Mapped[float | None] = mapped_column(Float, comment="应付账款")
+    adv_receipts: Mapped[float | None] = mapped_column(Float, comment="预收款项")
+    payroll_payable: Mapped[float | None] = mapped_column(Float, comment="应付职工薪酬")
+    taxes_payable: Mapped[float | None] = mapped_column(Float, comment="应交税费")
+    int_payable: Mapped[float | None] = mapped_column(Float, comment="应付利息")
+    div_payable: Mapped[float | None] = mapped_column(Float, comment="应付股利")
+    oth_payable: Mapped[float | None] = mapped_column(Float, comment="其他应付款")
+    non_cur_liab_due_1y: Mapped[float | None] = mapped_column(Float, comment="一年内到期的非流动负债")
+    oth_cur_liab: Mapped[float | None] = mapped_column(Float, comment="其他流动负债")
+    total_cur_liab: Mapped[float | None] = mapped_column(Float, comment="流动负债合计")
+    bond_payable: Mapped[float | None] = mapped_column(Float, comment="应付债券")
+    lt_payable: Mapped[float | None] = mapped_column(Float, comment="长期应付款")
+    specific_payables: Mapped[float | None] = mapped_column(Float, comment="专项应付款")
+    estimated_liab: Mapped[float | None] = mapped_column(Float, comment="预计负债")
+    defer_tax_liab: Mapped[float | None] = mapped_column(Float, comment="递延所得税负债")
+    oth_ncl: Mapped[float | None] = mapped_column(Float, comment="其他非流动负债")
+    total_ncl: Mapped[float | None] = mapped_column(Float, comment="非流动负债合计")
+    oth_liab: Mapped[float | None] = mapped_column(Float, comment="其他负债")
+    total_liab: Mapped[float | None] = mapped_column(Float, comment="负债合计")
+    treasury_share: Mapped[float | None] = mapped_column(Float, comment="库存股")
+    ordin_risk_reser: Mapped[float | None] = mapped_column(Float, comment="一般风险准备")
+    forex_differ: Mapped[float | None] = mapped_column(Float, comment="外币报表折算差额")
+    invest_loss_unconf: Mapped[float | None] = mapped_column(Float, comment="未确认投资损失")
+    minority_int: Mapped[float | None] = mapped_column(Float, comment="少数股东权益")
+    total_hldr_eqy_exc_min_int: Mapped[float | None] = mapped_column(Float, comment="归属母公司股东权益合计")
+    total_hldr_eqy_inc_min_int: Mapped[float | None] = mapped_column(Float, comment="股东权益合计(含少数股东权益)")
+    total_liab_hldr_eqy: Mapped[float | None] = mapped_column(Float, comment="负债及股东权益合计")
+
+    __table_args__ = ({"comment": "资产负债表 - 存储上市公司资产负债表数据"},)

@@ -98,3 +98,55 @@ class TushareDataCollector:
             raise DataCollectionError(
                 f"moneyflow_dc 采集失败 ts_code={ts_code} trade_date={trade_date}: {e}"
             ) from e
+
+    async def fetch_moneyflow(
+        self,
+        ts_code: str = "",
+        trade_date: str = "",
+        start_date: str = "",
+        end_date: str = "",
+    ) -> pd.DataFrame:
+        """获取 tushare 原生个股资金流向数据。
+
+        接口：moneyflow
+        限制：单次最大 5000 条
+        字段：买卖量/金额（手/万元），无占比字段
+
+        Args:
+            ts_code: 股票代码，如 "000001.SZ"
+            trade_date: 交易日期 YYYYMMDD
+            start_date: 开始日期 YYYYMMDD
+            end_date: 结束日期 YYYYMMDD
+
+        Returns:
+            DataFrame，包含 ts_code/trade_date/buy_sm_amount/sell_sm_amount 等字段
+        """
+        if not ts_code and not trade_date:
+            raise DataCollectionError("ts_code 和 trade_date 至少输入一个")
+
+        try:
+            await self._limiter.acquire()
+            result = await asyncio.to_thread(
+                self._pro.moneyflow,
+                ts_code=ts_code,
+                trade_date=trade_date,
+                start_date=start_date,
+                end_date=end_date,
+            )
+            df = pd.DataFrame() if result is None else pd.DataFrame(result)
+            if df.empty:
+                logger.debug(
+                    "moneyflow 无数据: ts_code=%s trade_date=%s range=%s~%s",
+                    ts_code, trade_date, start_date, end_date,
+                )
+                return pd.DataFrame()
+
+            logger.debug(
+                "moneyflow 获取完成: ts_code=%s rows=%d",
+                ts_code, len(df),
+            )
+            return df
+        except Exception as e:
+            raise DataCollectionError(
+                f"moneyflow 采集失败 ts_code={ts_code} trade_date={trade_date}: {e}"
+            ) from e

@@ -79,7 +79,7 @@ src/xqtrader/domain/factor/
 | 5 | 注册表同步幂等 | 连续执行 2 次同步 | 第 2 次无 INSERT，仅 UPDATE |
 | 6 | 样本池初始化 | 查询 `SELECT count(*) FROM research.fac_factor_pool` | ≥ 3 行（all, idx_300, idx_1000） |
 | 7 | DAL CRUD 可用 | 单元测试 | create/filter/update/delete 全部通过 |
-| 8 | 旧表不受影响 | 查询 `SELECT count(*) FROM stock.sdc_factor_value` | 行数不变 |
+| 8 | 旧表不受影响 | 查询 `SELECT count(*) FROM stock.fac_factor_value` | 行数不变 |
 
 ### P1.5 实施步骤
 
@@ -155,7 +155,7 @@ src/worker/plugins/factor_compute/
 | 5 | 因子值写入新表 | 执行计算任务后查询 `SELECT count(*) FROM stock.fac_factor_value WHERE trade_date = '<当日>'` | 行数 = 标的数 × 当日活跃因子数 |
 | 6 | Celery任务可调度 | 手动触发 factor.compute_daily 任务 | 任务状态 SUCCESS |
 | 7 | 编排依赖正确 | daily_pipeline 执行 | collect → factor_compute 顺序执行 |
-| 8 | 旧表不受影响 | 查询 `SELECT count(*) FROM stock.sdc_factor_value` | 行数不变 |
+| 8 | 旧表不受影响 | 查询 `SELECT count(*) FROM stock.fac_factor_value` | 行数不变 |
 
 ### P2.5 实施步骤
 
@@ -325,10 +325,9 @@ graph LR
 
 | 编排 | Cron | 队列 | 依赖 |
 |------|------|------|------|
-| daily_market_pipeline | 30 16 * * 1-5 | celery | collect → factor_compute |
-| factor_evaluate_pipeline | 0 10 * * 6 | celery | factor_compute（周六评估） |
-| factor_synthesize_pipeline | 30 10 * * 6 | celery | factor_evaluate（评估后合成） |
-| ml_factor_evaluate | 0 10 * * 6 | celery | factor_compute（周六ML评估） |
+| daily_factor_pipeline | 0 17 * * 1-5 | celery | collect → daily_factor_compute + quarterly_factor_compute → signal_compute |
+| weekly_factor_pipeline | 0 8 * * 6 | celery | factor_evaluate → alpha_synthesize |
+| ml_factor_evaluate | 0 10 * * 6 | celery | factor_evaluate（周六ML评估） |
 
 ---
 

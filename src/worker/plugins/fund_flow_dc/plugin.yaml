@@ -1,9 +1,9 @@
 name: fund_flow_dc
-celery_task_name: market.fund_flow_dc_collect
-version: "1.0.0"
-task_name: 个股资金流向采集(DC)
-task_name_en: Fund Flow DC Collection
-description: 基于管道引擎并发采集A股全市场个股资金流向数据（东方财富数据源），支持增量采集和水位管理
+celery_task_name: market.fund_flow_collect
+version: "2.0.0"
+task_name: 个股资金流向采集
+task_name_en: Fund Flow Collection
+description: 基于管道引擎并发采集A股全市场个股资金流向数据（Tushare原生数据源），支持增量采集和水位管理
 category: io
 task_type: on_demand
 queue: celery
@@ -18,7 +18,7 @@ params_schema:
     pipeline_name:
       type: string
       title: 管线名称
-      default: fund_flow_dc
+      default: fund_flow
     concurrency:
       type: integer
       title: 并发数
