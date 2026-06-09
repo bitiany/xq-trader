@@ -707,7 +707,7 @@ class Base(DeclarativeBase):
     @classmethod
     async def bulk_create_or_update(
         cls,
-        instances: list["Base"],
+        instances: list[Self],
         on_conflict: list[str] | None = None,
         update_fields: list[str] | None = None,
         batch_size: int = 500
@@ -828,7 +828,7 @@ class Base(DeclarativeBase):
     @classmethod
     async def _execute_batch_upsert(
         cls,
-        instances: list["Base"],
+        instances: list[Self],
         on_conflict: list[str] | None = None,
         update_fields: list[str] | None = None
     ) -> int:
@@ -853,7 +853,7 @@ class Base(DeclarativeBase):
     @classmethod
     async def _execute_batch_upsert_with_session(
         cls,
-        instances: list["Base"],
+        instances: list[Self],
         on_conflict: list[str] | None = None,
         update_fields: list[str] | None = None,
         db: AsyncSession | None = None,
@@ -893,7 +893,7 @@ class Base(DeclarativeBase):
         return [col.name for col in table.columns if col.name not in exclude_fields]
 
     @classmethod
-    def _build_upsert_values(cls, table: Table, instances: list["Base"]) -> list[dict[str, Any]]:
+    def _build_upsert_values(cls, table: Table, instances: list[Self]) -> list[dict[str, Any]]:
         """构建 upsert 的批量插入数据。"""
         values_list: list[dict[str, Any]] = []
         for instance in instances:
@@ -921,7 +921,7 @@ class Base(DeclarativeBase):
         set_ = {col: getattr(stmt.excluded, col) for col in update_columns}
 
         has_string_conflict = any(
-            isinstance(table.c.get(cn).type, SaString)
+            isinstance(table.c.get(cn).type, SaString)  # type: ignore[union-attr]
             for cn in conflict_columns
             if table.c.get(cn) is not None
         )

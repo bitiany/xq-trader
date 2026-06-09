@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import concurrent.futures
 
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.interval import IntervalTrigger
+from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[import-untyped]
+from apscheduler.triggers.interval import IntervalTrigger  # type: ignore[import-untyped]
 
 from framework.commons.logger import get_logger
 from framework.ws.connection_manager import connection_manager
@@ -120,8 +120,10 @@ class WsTopicScheduler:
 
         try:
             spi = spi_cls()
+            if cls._executor is None:
+                raise WsSpiError("Executor not initialized")
             future = cls._executor.submit(spi.execute)
-            result = future.result(timeout=10)
+            result: dict = future.result(timeout=10)  # type: ignore[assignment]
             ws_publisher.publish_update(topic, result)
             return result
         except WsSpiError:

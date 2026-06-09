@@ -13,7 +13,7 @@ ws_router = APIRouter()
 
 
 @ws_router.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
+async def websocket_endpoint(websocket: WebSocket) -> None:
     await ws_handler.handle(websocket)
 
 
@@ -28,7 +28,7 @@ class TicketResponse(BaseModel):
 
 
 @ticket_router.post("/ticket", response_model=TicketResponse)
-async def create_ticket():
+async def create_ticket() -> TicketResponse:
     """生成WebSocket连接Ticket"""
     ticket = ticket_auth.generate()
     return TicketResponse(data={"ticket": ticket, "expires_in": TICKET_EXPIRE_SECONDS})

@@ -1,4 +1,13 @@
-"""技术波动率因子 — ATR / Volatility / NATR / DownsideVol / Amihud / VolOsc / ADV。"""
+"""技术波动率因子 — ATR / Volatility / NATR / DownsideVol / Amihud / VolOsc / ADV。
+
+因子ID命名遵循 factor-catalog.md 规范：
+  - hist_vol_10 / hist_vol_20 / hist_vol_60: 历史波动率
+  - atr_14 / natr_14: ATR系列
+  - downside_vol: 下行波动率
+  - amihud: Amihud非流动性
+  - vol_osc: 成交量振荡
+  - adv_20: 平均成交额
+"""
 
 from __future__ import annotations
 
@@ -44,7 +53,7 @@ class VolatilityFactor(FactorPlugin):
     factor_id: str = ""
     display_name: str = ""
     category: str = "tech_volatility"
-    group_id: str = "volatility"
+    group_id: str = "hist_vol"
     direction: str = "DESC"
     scope: str = "both"
     signal_type: str = "continuous"
@@ -54,8 +63,8 @@ class VolatilityFactor(FactorPlugin):
 
     def __init__(self, period: int = 20, **kwargs: Any) -> None:
         self.period = period
-        self.factor_id = f"volatility_{period}"
-        self.display_name = f"Volatility({period})"
+        self.factor_id = f"hist_vol_{period}"
+        self.display_name = f"HistVol({period})"
         self.min_periods = period
         self.params = {"period": period}
 
@@ -96,8 +105,8 @@ class NatrFactor(FactorPlugin):
 class DownsideVolFactor(FactorPlugin):
     """下行波动率因子。"""
 
-    factor_id: str = "downside_vol"
-    display_name: str = "下行波动率"
+    factor_id: str = ""
+    display_name: str = ""
     category: str = "tech_volatility"
     group_id: str = "downside_vol"
     direction: str = "DESC"
@@ -107,19 +116,26 @@ class DownsideVolFactor(FactorPlugin):
     min_periods: int = 20
     requires_full_history: bool = False
 
+    def __init__(self, period: int = 20, **kwargs: Any) -> None:
+        self.period = period
+        self.factor_id = f"downside_vol_{period}" if period != 20 else "downside_vol"
+        self.display_name = f"下行波动率({period})"
+        self.min_periods = period
+        self.params = {"period": period}
+
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         close = df["close"].astype(float)
         ret = close.pct_change()
         down_ret = ret.where(ret < 0, 0)
-        down_vol = down_ret.rolling(window=20).std() * np.sqrt(252)
+        down_vol = down_ret.rolling(window=self.period).std() * np.sqrt(252)
         return pd.DataFrame({self.factor_id: down_vol.values}, index=df.index)
 
 
 class AmihudFactor(FactorPlugin):
     """Amihud 非流动性因子。"""
 
-    factor_id: str = "amihud_20"
-    display_name: str = "Amihud(20)"
+    factor_id: str = ""
+    display_name: str = ""
     category: str = "tech_volatility"
     group_id: str = "amihud"
     direction: str = "ASC"
@@ -129,11 +145,18 @@ class AmihudFactor(FactorPlugin):
     min_periods: int = 20
     requires_full_history: bool = False
 
+    def __init__(self, period: int = 20, **kwargs: Any) -> None:
+        self.period = period
+        self.factor_id = f"amihud_{period}" if period != 20 else "amihud"
+        self.display_name = f"Amihud({period})"
+        self.min_periods = period
+        self.params = {"period": period}
+
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         close = df["close"].astype(float)
         amount = df["amount"].astype(float)
         ret = close.pct_change().abs()
-        amihud = (ret / amount.abs().replace(0, np.nan)).rolling(window=20).mean()
+        amihud = (ret / amount.abs().replace(0, np.nan)).rolling(window=self.period).mean()
         return pd.DataFrame({self.factor_id: amihud.values}, index=df.index)
 
 
@@ -151,10 +174,16 @@ class VolOscFactor(FactorPlugin):
     min_periods: int = 20
     requires_full_history: bool = False
 
+    def __init__(self, short_period: int = 5, long_period: int = 20, **kwargs: Any) -> None:
+        self.short_period = short_period
+        self.long_period = long_period
+        self.min_periods = long_period
+        self.params = {"short_period": short_period, "long_period": long_period}
+
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         volume = df["volume"].astype(float)
-        short_ma = volume.rolling(window=5).mean()
-        long_ma = volume.rolling(window=20).mean()
+        short_ma = volume.rolling(window=self.short_period).mean()
+        long_ma = volume.rolling(window=self.long_period).mean()
         vol_osc = (short_ma - long_ma) / long_ma.replace(0, np.nan) * 100
         return pd.DataFrame({self.factor_id: vol_osc.values}, index=df.index)
 
@@ -162,8 +191,8 @@ class VolOscFactor(FactorPlugin):
 class ADVFactor(FactorPlugin):
     """平均成交额因子。"""
 
-    factor_id: str = "adv_20"
-    display_name: str = "ADV(20)"
+    factor_id: str = ""
+    display_name: str = ""
     category: str = "tech_volatility"
     group_id: str = "adv"
     direction: str = "DESC"
@@ -173,7 +202,14 @@ class ADVFactor(FactorPlugin):
     min_periods: int = 20
     requires_full_history: bool = False
 
+    def __init__(self, period: int = 20, **kwargs: Any) -> None:
+        self.period = period
+        self.factor_id = f"adv_{period}"
+        self.display_name = f"ADV({period})"
+        self.min_periods = period
+        self.params = {"period": period}
+
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         amount = df["amount"].astype(float)
-        adv = amount.rolling(window=20).mean()
+        adv = amount.rolling(window=self.period).mean()
         return pd.DataFrame({self.factor_id: adv.values}, index=df.index)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
+from typing import Any
 
 from framework.commons.logger import get_logger
 from framework.commons.redis_client import redis_client
@@ -25,17 +26,17 @@ class RedisListener:
             cls._instance = super().__new__(cls)
         return cls._instance
 
-    def __init__(self):
+    def __init__(self) -> None:
         if hasattr(self, "_initialized"):
             return
         self._initialized = True
         self._running = False
         self._thread: threading.Thread | None = None
-        self._pubsub = None
+        self._pubsub: Any = None
         self._loop: asyncio.AbstractEventLoop | None = None
         logger.info("RedisListener initialized")
 
-    def start(self):
+    def start(self) -> None:
         if self._running:
             return
         self._running = True
@@ -47,12 +48,12 @@ class RedisListener:
         self._thread.start()
         logger.info("RedisListener started")
 
-    def stop(self):
+    def stop(self) -> None:
         self._running = False
         if self._pubsub:
             self._pubsub.close()
 
-    def _run(self):
+    def _run(self) -> None:
         try:
             self._pubsub = redis_client.pubsub()
             self._pubsub.psubscribe(f"{CHANNEL_PREFIX}*")
@@ -70,7 +71,7 @@ class RedisListener:
         finally:
             logger.info("RedisListener stopped")
 
-    def _handle_message(self, message: dict):
+    def _handle_message(self, message: dict) -> None:
         try:
             channel = message.get("channel", "")
             data_str = message.get("data", "")

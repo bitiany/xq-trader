@@ -33,7 +33,7 @@ SERVER_PING_INTERVAL = 25
 class MessageHandler:
     """消息路由策略 — 按method分发到对应处理函数"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._handlers: dict[WsClientMethod, Callable[..., Any]] = {}
 
     def register(self, method: WsClientMethod, handler: Callable[..., Any]) -> None:
@@ -56,7 +56,7 @@ class ConnectionManager:
             cls._instance = super().__new__(cls)
         return cls._instance
 
-    def __init__(self):
+    def __init__(self) -> None:
         if hasattr(self, "_initialized"):
             return
         self._initialized = True
@@ -86,13 +86,13 @@ class ConnectionManager:
         self._on_topic_subscribed = on_subscribed
         self._on_topic_unsubscribed = on_unsubscribed
 
-    async def start_heartbeat(self):
+    async def start_heartbeat(self) -> None:
         if self._heartbeat_task is None:
             self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
         if self._ping_task is None:
             self._ping_task = asyncio.create_task(self._ping_loop())
 
-    async def _heartbeat_loop(self):
+    async def _heartbeat_loop(self) -> None:
         while True:
             try:
                 await asyncio.sleep(HEARTBEAT_CHECK_INTERVAL)
@@ -108,7 +108,7 @@ class ConnectionManager:
             except Exception as e:
                 raise WsConnectionError("Heartbeat check failed") from e
 
-    async def _ping_loop(self):
+    async def _ping_loop(self) -> None:
         while True:
             try:
                 await asyncio.sleep(SERVER_PING_INTERVAL)
@@ -139,7 +139,7 @@ class ConnectionManager:
         logger.info(f"Connection {conn_id[:8]} established")
         return conn_id
 
-    async def disconnect(self, conn_id: str):
+    async def disconnect(self, conn_id: str) -> None:
         """断开连接，清理订阅并通知回调"""
         topics = list(self._subscriptions.get(conn_id, set()))
         for topic in topics:
@@ -159,13 +159,13 @@ class ConnectionManager:
 
         logger.info(f"Connection {conn_id[:8]} disconnected, cleaned {len(topics)} subscriptions")
 
-    async def send(self, conn_id: str, message: WsServerMessage):
+    async def send(self, conn_id: str, message: WsServerMessage) -> None:
         """发送消息到指定连接（公共接口）"""
         ws = self._connections.get(conn_id)
         if ws:
             await self._safe_send_and_cleanup(conn_id, ws, message.model_dump(mode="json"))
 
-    async def handle_message(self, conn_id: str, raw: str):
+    async def handle_message(self, conn_id: str, raw: str) -> None:
         try:
             data = json.loads(raw)
             msg = WsClientMessage.model_validate(data)
@@ -183,22 +183,22 @@ class ConnectionManager:
 
     # ── 消息处理策略 ──
 
-    async def _handle_subscribe(self, conn_id: str, msg: WsClientMessage):
+    async def _handle_subscribe(self, conn_id: str, msg: WsClientMessage) -> None:
         topics = self._parse_params(msg.params)
         for topic in topics:
             self._add_subscription(conn_id, topic)
         await self.send(conn_id, WsServerMessage(type=WsServerMessageType.ACK, id=msg.id, data=topics))
 
-    async def _handle_unsubscribe(self, conn_id: str, msg: WsClientMessage):
+    async def _handle_unsubscribe(self, conn_id: str, msg: WsClientMessage) -> None:
         topics = self._parse_params(msg.params)
         for topic in topics:
             self._remove_subscription(conn_id, topic)
         await self.send(conn_id, WsServerMessage(type=WsServerMessageType.ACK, id=msg.id, data=topics))
 
-    async def _handle_ping(self, conn_id: str, msg: WsClientMessage):
+    async def _handle_ping(self, conn_id: str, msg: WsClientMessage) -> None:
         await self.send(conn_id, WsServerMessage(type=WsServerMessageType.PONG, id=msg.id))
 
-    async def _handle_list_subscriptions(self, conn_id: str, msg: WsClientMessage):
+    async def _handle_list_subscriptions(self, conn_id: str, msg: WsClientMessage) -> None:
         subs = list(self._subscriptions.get(conn_id, set()))
         await self.send(conn_id, WsServerMessage(type=WsServerMessageType.RESULT, id=msg.id, data=subs))
 
@@ -211,7 +211,7 @@ class ConnectionManager:
 
     # ── 订阅管理 ──
 
-    def _add_subscription(self, conn_id: str, topic: str):
+    def _add_subscription(self, conn_id: str, topic: str) -> None:
         self._subscriptions.setdefault(conn_id, set()).add(topic)
         self._subscribers.setdefault(topic, set()).add(conn_id)
         redis_key = f"{SUBSCRIBERS_PREFIX}{topic}:subscribers"
@@ -221,7 +221,7 @@ class ConnectionManager:
         if self._on_topic_subscribed:
             self._on_topic_subscribed(topic)
 
-    def _remove_subscription(self, conn_id: str, topic: str):
+    def _remove_subscription(self, conn_id: str, topic: str) -> None:
         self._subscriptions.get(conn_id, set()).discard(topic)
         topic_conns = self._subscribers.get(topic, set())
         topic_conns.discard(conn_id)
@@ -237,7 +237,7 @@ class ConnectionManager:
 
     # ── 广播 ──
 
-    async def broadcast_to_topic(self, topic: str, message: WsServerMessage):
+    async def broadcast_to_topic(self, topic: str, message: WsServerMessage) -> None:
         conn_ids = list(self._subscribers.get(topic, set()))
         if not conn_ids:
             return
@@ -252,7 +252,7 @@ class ConnectionManager:
 
     # ── 发送 ──
 
-    async def _safe_send_and_cleanup(self, conn_id: str, ws: WebSocket, data: dict):
+    async def _safe_send_and_cleanup(self, conn_id: str, ws: WebSocket, data: dict) -> None:
         """安全发送消息，断连时自动清理"""
         try:
             await ws.send_json(data)

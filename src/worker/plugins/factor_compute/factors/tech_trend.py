@@ -129,7 +129,7 @@ class SARFactor(FactorPlugin):
     direction: str = "DESC"
     scope: str = "both"
     signal_type: str = "continuous"
-    dependencies: list[str] = ["high", "low", "close"]
+    dependencies: list[str] = ["high", "low"]
     min_periods: int = 5
     requires_full_history: bool = True
 
