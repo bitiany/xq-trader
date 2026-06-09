@@ -79,7 +79,58 @@ celery -A worker.celery_entry beat --loglevel=info
 - `-c 4`：启动 4 个并发工作进程，支持并行处理任务
 - `--loglevel=info`：日志级别为 info
 
-### 5. 访问文档
+### 5. Worker CLI 工具
+
+通过命令行发送任务和管理分布式锁：
+
+```powershell
+# 设置环境
+conda activate .\.conda
+$env:PYTHONPATH="src"
+```
+
+**列出所有已注册任务**：
+
+```powershell
+python -m worker.cli list
+```
+
+**发送任务**：
+
+```powershell
+# 因子计算 — 全量模式，指定标的
+python -m worker.cli run factor.compute_daily --symbols 000001.SZ,600519.SH --mode full
+
+# 因子计算 — 增量模式，全市场
+python -m worker.cli run factor.compute_daily --mode incremental
+
+# 因子计算 — 指定日期范围
+python -m worker.cli run factor.compute_daily --start-date 2024-01-01 --end-date 2024-12-31
+
+# 资金流采集
+python -m worker.cli run market.fund_flow_collect --symbols 000001.SZ
+
+# 日线行情采集
+python -m worker.cli run market.daily_kline_collect
+
+# 传递额外参数
+python -m worker.cli run factor.compute_daily --kwargs max_workers=5 warmup_bars=500
+```
+
+**管理分布式锁**：
+
+```powershell
+# 查看所有任务锁
+python -m worker.cli lock-list
+
+# 释放指定任务的锁（任务异常退出后锁未释放时使用）
+python -m worker.cli lock-release factor.compute_daily
+
+# 释放所有任务锁
+python -m worker.cli lock-release-all
+```
+
+### 6. 访问文档
 
 - Swagger UI：http://localhost:8096/docs
 - ReDoc：http://localhost:8096/redoc
