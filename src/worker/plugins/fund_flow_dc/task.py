@@ -326,7 +326,7 @@ class FundFlowCollectTask(BaseTask):
 
     入参：
       - pipeline_name: 管线名称（默认 fund_flow）
-      - concurrency: 并发数（默认 3，tushare 有频率限制不宜过高）
+      - concurrency: 并发数（默认 50，实际 API 速率由 TushareDataCollector 滑动窗口限流控制）
       - stock_codes: 股票代码列表（为空时采集全市场）
       - max_count: 最大标的数量（用于测试，0 表示不限）
       - collect_date: 采集起始日期（格式 YYYY-MM-DD，为空时按水位日期增量采集）
@@ -334,12 +334,12 @@ class FundFlowCollectTask(BaseTask):
 
     task_name = "market.fund_flow_collect"
     description = "A股个股资金流向采集-Tushare原生数据源（管道引擎并发）"
-    time_limit = 1800
-    soft_time_limit = 1770
+    time_limit = 14400
+    soft_time_limit = 14370
 
     async def _run_impl(self, **kwargs: Any) -> dict[str, Any]:
         pipeline_name = kwargs.get("pipeline_name", "fund_flow")
-        concurrency = kwargs.get("concurrency", 3)
+        concurrency = kwargs.get("concurrency", 50)
         stock_codes: list[str] | None = kwargs.get("stock_codes")
         max_count: int = kwargs.get("max_count", 0)
         collect_date: str | None = kwargs.get("collect_date")

@@ -439,7 +439,10 @@ def ensure_async_run(task_cls: type[BaseTask]) -> type[BaseTask]:
             from worker.executor.async_runner import async_runner
 
             if async_runner._loop is not None and async_runner._loop.is_running():
-                return async_runner.run(original_run_impl(self, **kwargs))
+                return async_runner.run(
+                    original_run_impl(self, **kwargs),
+                    timeout=self.time_limit,
+                )
 
             loop = asyncio.new_event_loop()
             try:

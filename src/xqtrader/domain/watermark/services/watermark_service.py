@@ -56,11 +56,11 @@ class WatermarkService:
         watermark_date = watermark.watermark_date if watermark else None
 
         if watermark_date is None:
-            logger.info(
-                "水位为空，需全量采集: pipeline=%s code=%s trade_date=%s",
-                pipeline_name, watermark_code, latest_trade_date,
+            logger.debug(
+                "水位为空，需全量采集: pipeline=%s code=%s",
+                pipeline_name, watermark_code,
             )
-            return latest_trade_date
+            return date(1990, 1, 1)
 
         if watermark_date >= latest_trade_date:
             logger.debug(
@@ -101,8 +101,10 @@ class WatermarkService:
 
         result: dict[str, date | None] = {}
         for wm in watermarks:
-            if wm.watermark_date is None or wm.watermark_date < latest_trade_date:
-                result[wm.watermark_code] = wm.watermark_date or latest_trade_date
+            if wm.watermark_date is None:
+                result[wm.watermark_code] = date(1990, 1, 1)
+            elif wm.watermark_date < latest_trade_date:
+                result[wm.watermark_code] = wm.watermark_date
             else:
                 result[wm.watermark_code] = None
 

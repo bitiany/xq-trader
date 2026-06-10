@@ -77,9 +77,6 @@ def cmd_run(args: argparse.Namespace) -> None:
     if args.start_date:
         kwargs["start_date"] = args.start_date
 
-    if args.end_date:
-        kwargs["end_date"] = args.end_date
-
     if args.factor_ids:
         kwargs["factor_ids"] = [f.strip() for f in args.factor_ids.split(",")]
 
@@ -177,7 +174,6 @@ def build_parser() -> argparse.ArgumentParser:
     sub_run.add_argument("--symbols", "-s", help="证券代码列表，逗号分隔，如 000001.SZ,600519.SH")
     sub_run.add_argument("--mode", "-m", help="计算模式: incremental / full")
     sub_run.add_argument("--start-date", help="开始日期 YYYY-MM-DD")
-    sub_run.add_argument("--end-date", help="结束日期 YYYY-MM-DD")
     sub_run.add_argument("--factor-ids", "-f", help="因子ID列表，逗号分隔")
     sub_run.add_argument("--kwargs", "-k", nargs="*", help="额外参数 key=value")
     sub_run.set_defaults(func=cmd_run)

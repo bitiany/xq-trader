@@ -9,19 +9,22 @@ from __future__ import annotations
 
 import asyncio
 import os
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 
 import pandas as pd
 import tushare as ts  # type: ignore[import-untyped]
 
 from framework.commons.exceptions import DataCollectionError
 from framework.commons.logger import get_logger
-from framework.commons.utils.rate_limiter import TokenBucketLimiter
+from framework.commons.utils.rate_limiter import SlidingWindowLimiter
 
 logger = get_logger(__name__)
 
-# tushare 限流：500 次/分钟
-_TUSHARE_CAPACITY = 500
-_TUSHARE_REFILL_RATE = 500 / 60  # ≈8.33 tokens/s
+# tushare 限流：500 次/分钟（滑动窗口）
+# 任意60秒内请求数不超过480（留20次余量避免边界误差）
+_TUSHARE_MAX_REQUESTS = 480
+_TUSHARE_WINDOW_SECONDS = 60.0
 
 
 class TushareDataCollector:
@@ -29,24 +32,34 @@ class TushareDataCollector:
 
     封装 tushare pro_api，提供个股资金流向等数据采集能力。
     tushare 接口为同步 HTTP 调用，通过 asyncio.to_thread 适配异步框架。
-    内置令牌桶限流器，每次 API 调用前自动 acquire 令牌。
+    内置滑动窗口限流器，每次 API 调用前自动 acquire 许可。
+    使用独立线程池（max_workers=3），避免默认线程池过大导致并发超限。
     """
+
+    _THREAD_POOL: ThreadPoolExecutor | None = None
 
     def __init__(
         self,
-        rate_capacity: int = _TUSHARE_CAPACITY,
-        rate_refill: float = _TUSHARE_REFILL_RATE,
+        max_requests: int = _TUSHARE_MAX_REQUESTS,
+        window_seconds: float = _TUSHARE_WINDOW_SECONDS,
     ) -> None:
         token = os.getenv("TUSHARE_TOKEN", "")
         if not token:
             logger.warning("TUSHARE_TOKEN 未配置，tushare 接口将不可用")
         ts.set_token(token)
         self._pro = ts.pro_api()
-        self._limiter = TokenBucketLimiter(capacity=rate_capacity, refill_rate=rate_refill)
+        self._limiter = SlidingWindowLimiter(max_requests=max_requests, window_seconds=window_seconds)
         logger.info(
-            "TushareDataCollector 初始化: 限流 capacity=%d refill_rate=%.2f/s",
-            rate_capacity, rate_refill,
+            "TushareDataCollector 初始化: 滑动窗口限流 max=%d/%.0fs",
+            max_requests, window_seconds,
         )
+
+    @classmethod
+    def _get_executor(cls) -> ThreadPoolExecutor:
+        """获取共享线程池（懒初始化，max_workers=20）。"""
+        if cls._THREAD_POOL is None:
+            cls._THREAD_POOL = ThreadPoolExecutor(max_workers=20, thread_name_prefix="tushare")
+        return cls._THREAD_POOL
 
     async def fetch_moneyflow_dc(
         self,
@@ -74,13 +87,15 @@ class TushareDataCollector:
 
         try:
             await self._limiter.acquire()
-            result = await asyncio.to_thread(
+            loop = asyncio.get_running_loop()
+            func = partial(
                 self._pro.moneyflow_dc,
                 ts_code=ts_code,
                 trade_date=trade_date,
                 start_date=start_date,
                 end_date=end_date,
             )
+            result = await loop.run_in_executor(self._get_executor(), func)
             df = pd.DataFrame() if result is None else pd.DataFrame(result)
             if df.empty:
                 logger.debug(
@@ -126,13 +141,15 @@ class TushareDataCollector:
 
         try:
             await self._limiter.acquire()
-            result = await asyncio.to_thread(
+            loop = asyncio.get_running_loop()
+            func = partial(
                 self._pro.moneyflow,
                 ts_code=ts_code,
                 trade_date=trade_date,
                 start_date=start_date,
                 end_date=end_date,
             )
+            result = await loop.run_in_executor(self._get_executor(), func)
             df = pd.DataFrame() if result is None else pd.DataFrame(result)
             if df.empty:
                 logger.debug(

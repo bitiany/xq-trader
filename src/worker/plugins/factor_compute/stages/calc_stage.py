@@ -1,11 +1,15 @@
 """计算阶段 — 批量调用 FactorPlugin.compute()。
 
 核心逻辑：
-  1. 从上下文获取已加载的行情数据
+  1. 从上下文获取已加载的全量行情数据
   2. 解析因子列表（通过注册表）
   3. 对每个因子执行数据门控检查
-  4. 批量计算因子值
+  4. 批量计算因子值（统一使用全量数据，确保 index 对齐）
   5. 对齐结果到完整日期范围
+
+注：有状态因子（MACD/KDJ等 requires_full_history=True）必须使用全量数据。
+    无状态因子（MA/RSI等）也使用全量数据计算，保证结果 index 与有状态因子对齐。
+    预热期数据仅参与计算，由 PersistStage 根据 start_date 截断不持久化。
 """
 
 from __future__ import annotations
@@ -64,41 +68,33 @@ class FactorCalcStage(Stage):
             return StageResult.ok(data={"symbol": symbol, "factors": 0})
 
         # 数据门控
-        valid_factors = []
+        valid_factors: list[FactorPlugin] = []
         for factor in factors:
             passed, reason = _check_data_gate(df, factor)
-            if passed:
-                valid_factors.append(factor)
-            else:
+            if not passed:
                 logger.info("[calc] %s gated: %s - %s", symbol, factor.factor_id, reason)
+                continue
+            valid_factors.append(factor)
 
         if not valid_factors:
             logger.warning("[calc] %s all factors gated out", symbol)
             ctx.set("skip_persist", True)
             return StageResult.ok(data={"symbol": symbol, "factors": 0})
 
-        # 批量计算 — 全量计算所有加载的数据（已包含预热期）
-        # 预热数据保证5年起点的因子值有效，持久化阶段截断5年内数据
+        # 批量计算 — 统一使用全量数据，确保 index 对齐
         result_parts: dict[str, pd.Series] = {}
+        stateful_count = 0
+
         for factor in valid_factors:
-            try:
-                result_df = factor.compute(df)
-                if result_df.empty:
-                    continue
-                for col_name in result_df.columns:
-                    series = result_df[col_name]
-                    if series is None or series.empty:
-                        continue
-                    result_parts[col_name] = pd.Series(series.values, index=df.index, name=str(series.name))
-            except Exception as e:
-                logger.warning(
-                    "[calc] %s failed: %s - %s", symbol, factor.factor_id, e, exc_info=True,
-                )
+            if factor.requires_full_history:
+                stateful_count += 1
+            self._compute_factor(symbol, factor, df, result_parts)
 
         if not result_parts:
             ctx.set("skip_persist", True)
             return StageResult.ok(data={"symbol": symbol, "factors": 0})
 
+        # 构建结果 DataFrame — 所有因子 index 对齐到全量 df
         result_df = pd.DataFrame(result_parts, index=df.index)
         if "trade_date" in df.columns:
             result_df.insert(0, "trade_date", df["trade_date"].values)  # type: ignore[arg-type]
@@ -111,7 +107,33 @@ class FactorCalcStage(Stage):
         factor_count = len(result_parts)
 
         logger.info(
-            "[calc] %s factors=%d/%d rows=%d",
+            "[calc] %s factors=%d/%d rows=%d (stateful=%d stateless=%d)",
             symbol, factor_count, len(factors), len(result_df),
+            stateful_count, factor_count - stateful_count,
         )
         return StageResult.ok(data={"symbol": symbol, "factors": factor_count})
+
+    @staticmethod
+    def _compute_factor(
+        symbol: str,
+        factor: FactorPlugin,
+        df: pd.DataFrame,
+        result_parts: dict[str, pd.Series],
+    ) -> None:
+        """计算单个因子并合并结果。"""
+        try:
+            result_df = factor.compute(df)
+            if result_df.empty:
+                return
+            for col_name in result_df.columns:
+                series = result_df[col_name]
+                if series is None or series.empty:
+                    continue
+                # 对齐到全量 df 的 index：取前 N 行（N = 因子输出长度）
+                n = min(len(series), len(df))
+                aligned = pd.Series(series.values[:n], index=df.index[:n], name=str(series.name))
+                result_parts[col_name] = aligned
+        except Exception as e:
+            logger.warning(
+                "[calc] %s failed: %s - %s", symbol, factor.factor_id, e, exc_info=True,
+            )

@@ -1,11 +1,15 @@
-"""加载阶段 — 加载K线行情和资金流数据（不含估值和财务）。
+"""加载阶段 — 加载全量K线行情和资金流数据（不含估值和财务）。
+
+数据加载策略：
+  - 始终加载全量历史数据（无日期过滤），确保有状态因子（MACD/KDJ等）可从首根K线累计状态
+  - CalcStage 根据因子是否有状态，决定传入全量数据还是 5yr+warmup 切片
+  - PersistStage 根据 start_date 只持久化增量部分
 
 根据架构设计，估值指标和财务因子属于截面因子，不在因子计算任务中加载。
 """
 
 from __future__ import annotations
 
-from datetime import date, datetime
 from typing import Any
 
 import pandas as pd
@@ -18,19 +22,8 @@ from xqtrader.domain.market.models.fund_flow import FundFlowIndividual
 logger = get_logger("factor.load")
 
 
-def _parse_date(value: str) -> date | None:
-    if not value:
-        return None
-    for fmt in ("%Y%m%d", "%Y-%m-%d"):
-        try:
-            return datetime.strptime(value, fmt).date()
-        except ValueError:
-            continue
-    return None
-
-
 class FactorLoadStage(Stage):
-    """加载阶段 — 加载K线行情和资金流数据。"""
+    """加载阶段 — 加载全量K线行情和资金流数据。"""
 
     @property
     def name(self) -> str:
@@ -38,19 +31,17 @@ class FactorLoadStage(Stage):
 
     async def process(self, item: Any, ctx: PipelineContext) -> StageResult:
         symbol: str = item
-        start_date = str(ctx.get("start_date", ""))
-        end_date = str(ctx.get("end_date", ""))
 
-        # 加载K线行情
-        df_kline = await self._load_kline(symbol, start_date, end_date)
+        # 加载全量K线行情（无日期过滤，保证有状态因子可从首根K线累计）
+        df_kline = await self._load_kline(symbol)
         if df_kline.empty:
-            logger.info("[load] %s no kline data | range=%s~%s", symbol, start_date, end_date)
+            logger.info("[load] %s no kline data", symbol)
             ctx.set("skip_persist", True)
             ctx.set("kline_df", df_kline)
             return StageResult.ok(data={"symbol": symbol, "rows": 0})
 
-        # 加载资金流数据
-        df_flow = await self._load_fund_flow(symbol, start_date, end_date)
+        # 加载全量资金流数据
+        df_flow = await self._load_fund_flow(symbol)
 
         # 合并K线和资金流
         if not df_flow.empty:
@@ -73,14 +64,9 @@ class FactorLoadStage(Stage):
         )
         return StageResult.ok(data={"symbol": symbol, "rows": len(df_merged)})
 
-    async def _load_kline(self, symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
+    async def _load_kline(self, symbol: str) -> pd.DataFrame:
+        """加载全量K线行情数据。"""
         filters: dict[str, Any] = {"symbol": symbol}
-        sd = _parse_date(start_date)
-        ed = _parse_date(end_date)
-        if sd:
-            filters["trade_date__gte"] = sd
-        if ed:
-            filters["trade_date__lte"] = ed
 
         rows = await CandlestickDaily.filter(
             **filters,
@@ -95,14 +81,9 @@ class FactorLoadStage(Stage):
                 df[col] = pd.to_numeric(df[col], errors="coerce")
         return df
 
-    async def _load_fund_flow(self, symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
+    async def _load_fund_flow(self, symbol: str) -> pd.DataFrame:
+        """加载全量资金流数据。"""
         filters: dict[str, Any] = {"symbol": symbol}
-        sd = _parse_date(start_date)
-        ed = _parse_date(end_date)
-        if sd:
-            filters["trade_date__gte"] = sd
-        if ed:
-            filters["trade_date__lte"] = ed
 
         rows = await FundFlowIndividual.filter(
             **filters,
