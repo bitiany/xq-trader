@@ -66,7 +66,10 @@ class WatermarkAspect(Aspect):
             ctx.set("end_date", "")
 
     async def after(self, item: Any, ctx: PipelineContext, result: StageResult) -> None:
-        """后切：持久化成功后更新水位日期。"""
+        """后切：持久化成功后更新水位日期（使用 bulk_create_or_update）。
+
+        注意：record_count 仅在首次创建时设置，更新时不累加。
+        """
         if not result.success:
             return
 
@@ -77,20 +80,18 @@ class WatermarkAspect(Aspect):
 
         try:
             ref_date = self._watermark_service.get_reference_date()
-            existing = await CollectWatermark.get_one_or_none(
+            instance = CollectWatermark(
                 pipeline_name=self._pipeline_name,
                 watermark_code=stock_code,
+                watermark_date=ref_date,
+                record_count=persisted,
+                status="active",
             )
-            if existing:
-                await existing.update({"watermark_date": ref_date, "record_count": existing.record_count + persisted})
-            else:
-                await CollectWatermark.create(
-                    pipeline_name=self._pipeline_name,
-                    watermark_code=stock_code,
-                    watermark_date=ref_date,
-                    record_count=persisted,
-                    status="active",
-                )
+            await CollectWatermark.bulk_create_or_update(
+                [instance],
+                on_conflict=["pipeline_name", "watermark_code"],
+                update_fields=["watermark_date"],
+            )
             logger.debug("水位更新: %s → %s", stock_code, ref_date)
         except Exception as e:
             raise PipelineError(f"水位更新失败 {stock_code}: {e}") from e

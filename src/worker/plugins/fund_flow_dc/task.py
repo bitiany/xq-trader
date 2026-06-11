@@ -36,13 +36,9 @@
 
 from __future__ import annotations
 
-from datetime import date
 from typing import Any
 
-import pandas as pd
-
 from framework.commons.logger import get_logger
-from framework.commons.utils.data_converter import DataFrameToModelConverter
 from framework.pipeline import (
     Pipeline,
     PipelineContext,
@@ -53,8 +49,11 @@ from framework.pipeline import (
 )
 from framework.scheduler.base_task import BaseTask
 from worker.plugins.aspects import WatermarkAspect
+from worker.plugins.daily_incremental.stages.fund_flow_stage import (
+    clean_fund_flow_data,
+    persist_fund_flow_data,
+)
 from xqtrader.broker.services.tushare_data_collector import TushareDataCollector
-from xqtrader.domain.market.models.fund_flow import FundFlowIndividual
 from xqtrader.domain.security.models import Security
 
 logger = get_logger(__name__)
@@ -68,46 +67,6 @@ def _get_collector() -> TushareDataCollector:
     if _collector is None:
         _collector = TushareDataCollector()
     return _collector
-
-# moneyflow 接口字段 → FundFlowIndividual 模型字段（直接映射）
-_COLUMN_MAPPING: dict[str, str] = {
-    "ts_code": "symbol",
-    "buy_elg_amount": "huge_buy_amt",
-    "sell_elg_amount": "huge_sell_amt",
-    "buy_lg_amount": "big_buy_amt",
-    "sell_lg_amount": "big_sell_amt",
-    "buy_md_amount": "mid_buy_amt",
-    "sell_md_amount": "mid_sell_amt",
-    "buy_sm_amount": "small_buy_amt",
-    "sell_sm_amount": "small_sell_amt",
-    "net_mf_amount": "net_mf_amt",
-}
-
-# 买卖金额列（用于计算净流入额和占比）
-_BUY_SELL_PAIRS: list[tuple[str, str, str]] = [
-    # (buy_col, sell_col, net_col)
-    ("huge_buy_amt", "huge_sell_amt", "huge_net_amt"),
-    ("big_buy_amt", "big_sell_amt", "big_net_amt"),
-    ("mid_buy_amt", "mid_sell_amt", "mid_net_amt"),
-    ("small_buy_amt", "small_sell_amt", "small_net_amt"),
-]
-
-# 占比列（净流入额 / 总成交额 * 100）
-_PCT_COLS: list[str] = [
-    "main_net_pct", "huge_net_pct", "big_net_pct",
-    "mid_net_pct", "small_net_pct",
-]
-
-# 数据源标识
-_DATA_SOURCE = "tushare"
-
-# 净流入额列名 → 占比列名映射
-_net_to_pct: dict[str, str] = {
-    "huge_net_amt": "huge_net_pct",
-    "big_net_amt": "big_net_pct",
-    "mid_net_amt": "mid_net_pct",
-    "small_net_amt": "small_net_pct",
-}
 
 
 class FundFlowError(PipelineError):
@@ -169,23 +128,6 @@ class DownloadStage(Stage):
 class CleanStage(Stage):
     """清洗阶段 — 对资金流向数据进行质量校验、计算净流入额和占比。"""
 
-    _AMOUNT_COLS = [
-        "huge_buy_amt", "huge_sell_amt",
-        "big_buy_amt", "big_sell_amt",
-        "mid_buy_amt", "mid_sell_amt",
-        "small_buy_amt", "small_sell_amt",
-        "net_mf_amt",
-    ]
-
-    _ALL_NUMERIC_COLS = [
-        *_AMOUNT_COLS,
-        "main_net_amt", "main_net_pct",
-        "huge_net_amt", "huge_net_pct",
-        "big_net_amt", "big_net_pct",
-        "mid_net_amt", "mid_net_pct",
-        "small_net_amt", "small_net_pct",
-    ]
-
     @property
     def name(self) -> str:
         return "clean"
@@ -196,64 +138,13 @@ class CleanStage(Stage):
         if ctx.get("skip_persist"):
             return StageResult.ok(data={"stock_code": stock_code, "cleaned": 0})
 
-        df: pd.DataFrame | None = ctx.get("download_data")
+        df = ctx.get("download_data")
         if df is None or df.empty:
             return StageResult.ok(data={"stock_code": stock_code, "cleaned": 0})
 
         initial_len = len(df)
+        df = clean_fund_flow_data(df)
 
-        # 1. 列名映射
-        df = df.rename(columns=_COLUMN_MAPPING)
-
-        # 2. trade_date 格式统一为 YYYY-MM-DD（moneyflow 返回 YYYYMMDD）
-        if "trade_date" in df.columns:
-            df["trade_date"] = pd.to_datetime(
-                df["trade_date"], format="%Y%m%d",
-            ).dt.strftime("%Y-%m-%d")
-
-        # 3. 删除 trade_date 为空
-        df = df.dropna(subset=["trade_date"])
-        if df.empty:
-            ctx.set("download_data", df)
-            ctx.set("row_count", 0)
-            return StageResult.ok(data={"stock_code": stock_code, "cleaned": 0})
-
-        # 4. 买卖金额列强制转 numeric
-        for col in self._AMOUNT_COLS:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors="coerce")
-
-        # 5. 计算各档净流入额 = 买入金额 - 卖出金额
-        for buy_col, sell_col, net_col in _BUY_SELL_PAIRS:
-            if buy_col in df.columns and sell_col in df.columns:
-                df[net_col] = df[buy_col] - df[sell_col]
-
-        # 6. 计算主力净流入额 = 超大单净流入 + 大单净流入
-        if "huge_net_amt" in df.columns and "big_net_amt" in df.columns:
-            df["main_net_amt"] = df["huge_net_amt"] + df["big_net_amt"]
-
-        # 7. 计算各档占比 = 净流入额 / (买入金额 + 卖出金额) * 100
-        for buy_col, sell_col, net_col in _BUY_SELL_PAIRS:
-            pct_col = _net_to_pct.get(net_col)
-            if pct_col and buy_col in df.columns and sell_col in df.columns and net_col in df.columns:
-                total = df[buy_col] + df[sell_col]
-                df[pct_col] = (df[net_col] / total * 100).where(total != 0, 0)
-
-        # 8. 计算主力占比 = 主力净流入额 / (超大单+大单总成交) * 100
-        required_cols = ("main_net_amt", "huge_buy_amt", "huge_sell_amt", "big_buy_amt", "big_sell_amt")
-        if all(c in df.columns for c in required_cols):
-            main_total = df["huge_buy_amt"] + df["huge_sell_amt"] + df["big_buy_amt"] + df["big_sell_amt"]
-            df["main_net_pct"] = (df["main_net_amt"] / main_total * 100).where(main_total != 0, 0)
-
-        # 9. 数值列精度统一 4 位小数
-        for col in self._ALL_NUMERIC_COLS:
-            if col in df.columns:
-                df[col] = df[col].round(4)
-
-        # 10. 删除 symbol 或 trade_date 仍有 NaN 的行
-        df = df.dropna(subset=["symbol", "trade_date"])
-
-        df = df.reset_index(drop=True)
         ctx.set("download_data", df)
         ctx.set("row_count", len(df))
 
@@ -267,19 +158,6 @@ class CleanStage(Stage):
 class PersistStage(Stage):
     """持久化阶段 — 将资金流向数据写入 FundFlowIndividual 表。"""
 
-    _CUSTOM_TRANSFORMS = {
-        "trade_date": lambda v: date.fromisoformat(str(v)) if v and str(v) != "nan" else None,
-    }
-
-    _UPDATE_FIELDS = [
-        "huge_buy_amt", "huge_sell_amt", "huge_net_amt", "huge_net_pct",
-        "big_buy_amt", "big_sell_amt", "big_net_amt", "big_net_pct",
-        "mid_buy_amt", "mid_sell_amt", "mid_net_amt", "mid_net_pct",
-        "small_buy_amt", "small_sell_amt", "small_net_amt", "small_net_pct",
-        "main_net_amt", "main_net_pct",
-        "net_mf_amt",
-    ]
-
     @property
     def name(self) -> str:
         return "persist"
@@ -290,29 +168,12 @@ class PersistStage(Stage):
         if ctx.get("skip_persist"):
             return StageResult.ok(data={"stock_code": stock_code, "persisted": 0})
 
-        df: pd.DataFrame | None = ctx.get("download_data")
+        df = ctx.get("download_data")
         if df is None or df.empty:
             return StageResult.ok(data={"stock_code": stock_code, "persisted": 0})
 
         try:
-            # 统一数据源标记为 tushare
-            df["source"] = _DATA_SOURCE
-
-            instances = DataFrameToModelConverter.convert(
-                df=df,
-                model_class=FundFlowIndividual,
-                custom_transforms=self._CUSTOM_TRANSFORMS,
-            )
-
-            if not instances:
-                return StageResult.ok(data={"stock_code": stock_code, "persisted": 0})
-
-            count = await FundFlowIndividual.bulk_create_or_update(
-                instances,  # type: ignore[arg-type]
-                on_conflict=["symbol", "trade_date", "source"],
-                update_fields=self._UPDATE_FIELDS,
-                batch_size=100,
-            )
+            count = await persist_fund_flow_data(df)
 
             ctx.set("persisted_count", count)
             logger.debug("[fund_flow.collect] 持久化完成: %s rows=%d", stock_code, count)
