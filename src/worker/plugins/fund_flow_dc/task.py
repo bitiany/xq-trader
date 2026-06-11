@@ -152,7 +152,7 @@ class DownloadStage(Stage):
             )
 
             if df is None or df.empty:
-                logger.debug("无数据: %s range=%s~%s", stock_code, start_date, end_date)
+                logger.debug("[fund_flow.collect] 无数据: %s range=%s~%s", stock_code, start_date, end_date)
                 ctx.set("download_data", None)
                 ctx.set("row_count", 0)
                 ctx.set("skip_persist", True)
@@ -259,7 +259,7 @@ class CleanStage(Stage):
 
         cleaned = initial_len - len(df)
         if cleaned > 0:
-            logger.debug("清洗: %s removed %d invalid rows", stock_code, cleaned)
+            logger.debug("[fund_flow.collect] 清洗: %s removed %d invalid rows", stock_code, cleaned)
 
         return StageResult.ok(data={"stock_code": stock_code, "cleaned": len(df)})
 
@@ -315,7 +315,7 @@ class PersistStage(Stage):
             )
 
             ctx.set("persisted_count", count)
-            logger.debug("持久化完成: %s rows=%d", stock_code, count)
+            logger.debug("[fund_flow.collect] 持久化完成: %s rows=%d", stock_code, count)
             return StageResult.ok(data={"stock_code": stock_code, "persisted": count})
         except Exception as e:
             raise PersistError(f"持久化失败 {stock_code}: {e}") from e
@@ -348,13 +348,13 @@ class FundFlowCollectTask(BaseTask):
         if not stock_codes:
             stock_codes = await self._get_all_stock_codes()
             if not stock_codes:
-                logger.warning("未找到任何标的代码")
+                logger.warning("[fund_flow.collect] 未找到任何标的代码")
                 return {"total": 0, "succeeded": 0, "failed": 0}
 
         # 限制标的数量（用于测试）
         if max_count > 0 and len(stock_codes) > max_count:
             stock_codes = stock_codes[:max_count]
-            logger.debug("限制标的数量: max_count=%d", max_count)
+            logger.debug("[fund_flow.collect] 限制标的数量: max_count=%d", max_count)
 
         # 构建全局上下文
         global_ctx: dict[str, Any] = {}
@@ -362,7 +362,7 @@ class FundFlowCollectTask(BaseTask):
             global_ctx["collect_date"] = collect_date
 
         logger.info(
-            "开始采集: pipeline=%s concurrency=%d stocks=%d collect_date=%s",
+            "[fund_flow.collect] 开始采集: pipeline=%s concurrency=%d stocks=%d collect_date=%s",
             pipeline_name, concurrency, len(stock_codes), collect_date or "按水位",
         )
 
@@ -391,5 +391,5 @@ class FundFlowCollectTask(BaseTask):
             order_by=Security.symbol.asc(),
         )
         codes = [row.symbol for row in rows]
-        logger.debug("全市场标的数: %d", len(codes))
+        logger.debug("[fund_flow.collect] 全市场标的数: %d", len(codes))
         return codes

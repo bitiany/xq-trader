@@ -63,7 +63,7 @@ class FactorCalcStage(Stage):
         factors = await resolve_factor_list(factor_ids if factor_ids else None)
 
         if not factors:
-            logger.warning("[calc] %s no factors resolved", symbol)
+            logger.warning("[factor.compute] %s no factors resolved", symbol)
             ctx.set("skip_persist", True)
             return StageResult.ok(data={"symbol": symbol, "factors": 0})
 
@@ -72,12 +72,12 @@ class FactorCalcStage(Stage):
         for factor in factors:
             passed, reason = _check_data_gate(df, factor)
             if not passed:
-                logger.info("[calc] %s gated: %s - %s", symbol, factor.factor_id, reason)
+                logger.info("[factor.compute] %s gated: %s - %s", symbol, factor.factor_id, reason)
                 continue
             valid_factors.append(factor)
 
         if not valid_factors:
-            logger.warning("[calc] %s all factors gated out", symbol)
+            logger.warning("[factor.compute] %s all factors gated out", symbol)
             ctx.set("skip_persist", True)
             return StageResult.ok(data={"symbol": symbol, "factors": 0})
 
@@ -107,7 +107,7 @@ class FactorCalcStage(Stage):
         factor_count = len(result_parts)
 
         logger.info(
-            "[calc] %s factors=%d/%d rows=%d (stateful=%d stateless=%d)",
+            "[factor.compute] %s factors=%d/%d rows=%d (stateful=%d stateless=%d)",
             symbol, factor_count, len(factors), len(result_df),
             stateful_count, factor_count - stateful_count,
         )
@@ -135,5 +135,5 @@ class FactorCalcStage(Stage):
                 result_parts[col_name] = aligned
         except Exception as e:
             logger.warning(
-                "[calc] %s failed: %s - %s", symbol, factor.factor_id, e, exc_info=True,
+                "[factor.compute] %s failed: %s - %s", symbol, factor.factor_id, e, exc_info=True,
             )

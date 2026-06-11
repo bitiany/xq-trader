@@ -161,5 +161,5 @@ class FactorComputeTask(BaseTask):
             order_by=Security.symbol.asc(),
         )
         codes = [row.symbol for row in rows]
-        logger.debug("全市场标的数: %d", len(codes))
+        logger.debug("[factor.compute] 全市场标的数: %d", len(codes))
         return codes

@@ -1,0 +1,44 @@
+name: factor_evaluate
+celery_task_name: factor.evaluate_weekly
+version: "1.0.0"
+task_name: 周频因子评估
+task_name_en: Weekly Factor Evaluate
+description: 按样本池计算因子IC/ICIR/分层回测/换手率/衰减半衰期等统计指标，评定因子等级A/B/C/D
+description_en: Evaluate factors per sample pool with IC/ICIR/layered backtest/turnover/decay, grade A/B/C/D
+category: compute
+task_type: on_demand
+queue: celery
+timeout: 7200
+retry_config:
+  max_retries: 2
+  retry_backoff: true
+  retry_backoff_max: 600
+# schedule: "0 8 * * 6"  # 暂禁用定时调度，仅手动触发
+params_schema:
+  type: object
+  properties:
+    pool_ids:
+      type: array
+      items:
+        type: string
+      title: 样本池列表
+      description: 为空时评估默认样本池(all, idx_300, idx_1000)
+    factor_ids:
+      type: array
+      items:
+        type: string
+      title: 因子ID列表
+      description: 为空时评估所有活跃因子
+    start_date:
+      type: string
+      format: date
+      title: 评估起始日期
+    end_date:
+      type: string
+      format: date
+      title: 评估结束日期
+    window:
+      type: integer
+      title: 滚动窗口
+      default: 252
+      description: IC滚动计算窗口(交易日)

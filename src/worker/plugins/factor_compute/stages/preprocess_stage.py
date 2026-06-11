@@ -9,10 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from framework.commons.logger import get_logger
 from framework.pipeline import PipelineContext, Stage, StageResult
-
-logger = get_logger("factor.preprocess")
 
 
 class FactorPreprocessStage(Stage):
@@ -33,8 +30,4 @@ class FactorPreprocessStage(Stage):
             return StageResult.ok(data={"symbol": symbol, "processed": 0})
 
         factor_cols = [c for c in df.columns if c not in ("symbol", "trade_date")]
-        logger.info(
-            "[preprocess] %s passed-through %d factors (cross-section prep deferred to CrossSectionReader)",
-            symbol, len(factor_cols),
-        )
         return StageResult.ok(data={"symbol": symbol, "processed": len(factor_cols)})

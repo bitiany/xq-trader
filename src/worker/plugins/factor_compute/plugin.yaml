@@ -6,14 +6,14 @@ task_name_en: Daily Factor Compute
 description: 逐标的计算技术/量价/资金流因子，写入fac_factor_value（不含估值和财务截面因子）
 description_en: Compute per-security factors (tech/volume/money-flow) and persist to fac_factor_value
 category: compute
-task_type: scheduled
+task_type: on_demand
 queue: celery
 timeout: 14400
 retry_config:
   max_retries: 2
   retry_backoff: true
   retry_backoff_max: 600
-schedule: "0 17 * * 1-5"
+# schedule: "0 17 * * 1-5"  # 暂禁用定时调度，仅手动触发
 params_schema:
   type: object
   properties:

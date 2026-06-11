@@ -35,7 +35,7 @@ class FactorLoadStage(Stage):
         # 加载全量K线行情（无日期过滤，保证有状态因子可从首根K线累计）
         df_kline = await self._load_kline(symbol)
         if df_kline.empty:
-            logger.info("[load] %s no kline data", symbol)
+            logger.info("[factor.compute] %s no kline data", symbol)
             ctx.set("skip_persist", True)
             ctx.set("kline_df", df_kline)
             return StageResult.ok(data={"symbol": symbol, "rows": 0})
@@ -58,7 +58,7 @@ class FactorLoadStage(Stage):
             date_range = f"{dates.iloc[0]}~{dates.iloc[-1]}"
 
         logger.info(
-            "[load] %s rows=%d date=%s | flow=%s",
+            "[factor.compute] %s rows=%d date=%s | flow=%s",
             symbol, len(df_merged), date_range,
             "yes" if not df_flow.empty else "no",
         )

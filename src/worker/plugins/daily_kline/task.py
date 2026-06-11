@@ -89,7 +89,7 @@ class DownloadStage(Stage):
             )
             df = result.get(stock_code)
             if df is None or df.empty:
-                logger.debug("无数据: %s range=%s~%s", stock_code, start_date, end_date)
+                logger.debug("[kline.collect] 无数据: %s range=%s~%s", stock_code, start_date, end_date)
                 ctx.set("download_data", None)
                 ctx.set("row_count", 0)
                 ctx.set("skip_persist", True)
@@ -153,7 +153,7 @@ class CleanStage(Stage):
 
             if neg_count > 0 or nan_count > 0:
                 logger.debug(
-                    "清洗: %s masked %d negative / %d all-NaN OHLC rows",
+                    "[kline.collect] 清洗: %s masked %d negative / %d all-NaN OHLC rows",
                     stock_code, neg_count, nan_count,
                 )
 
@@ -201,7 +201,7 @@ class CleanStage(Stage):
             remaining_nan = df[ohlc_cols].isna().any(axis=1).sum()
             if remaining_nan > 0:
                 df = df.dropna(subset=ohlc_cols)
-                logger.warning("清洗: %s dropped %d rows with remaining NaN", stock_code, remaining_nan)
+                logger.warning("[kline.collect] 清洗: %s dropped %d rows with remaining NaN", stock_code, remaining_nan)
 
         df = df.reset_index(drop=True)
         ctx.set("download_data", df)
@@ -209,7 +209,7 @@ class CleanStage(Stage):
 
         cleaned = initial_len - len(df)
         if cleaned > 0:
-            logger.debug("清洗: %s removed %d invalid rows", stock_code, cleaned)
+            logger.debug("[kline.collect] 清洗: %s removed %d invalid rows", stock_code, cleaned)
 
         return StageResult.ok(data={"stock_code": stock_code, "cleaned": len(df)})
 
@@ -264,7 +264,7 @@ class PersistStage(Stage):
             )
 
             ctx.set("persisted_count", count)
-            logger.debug("持久化完成: %s rows=%d", stock_code, count)
+            logger.debug("[kline.collect] 持久化完成: %s rows=%d", stock_code, count)
             return StageResult.ok(data={"stock_code": stock_code, "persisted": count})
         except Exception as e:
             raise PersistError(f"持久化失败 {stock_code}: {e}") from e
@@ -298,13 +298,13 @@ class DailyKlineCollectTask(BaseTask):
         if not stock_codes:
             stock_codes = await self._get_all_stock_codes()
             if not stock_codes:
-                logger.warning("未找到任何标的代码")
+                logger.warning("[kline.collect] 未找到任何标的代码")
                 return {"total": 0, "succeeded": 0, "failed": 0}
 
         # 限制标的数量（用于测试）
         if max_count > 0 and len(stock_codes) > max_count:
             stock_codes = stock_codes[:max_count]
-            logger.debug("限制标的数量: max_count=%d", max_count)
+            logger.debug("[kline.collect] 限制标的数量: max_count=%d", max_count)
 
         # 构建全局上下文
         global_ctx: dict[str, Any] = {}
@@ -312,7 +312,7 @@ class DailyKlineCollectTask(BaseTask):
             global_ctx["collect_date"] = collect_date
 
         logger.info(
-            "开始采集: pipeline=%s concurrency=%d stocks=%d collect_date=%s",
+            "[kline.collect] 开始采集: pipeline=%s concurrency=%d stocks=%d collect_date=%s",
             pipeline_name, concurrency, len(stock_codes), collect_date or "按水位",
         )
 
@@ -341,5 +341,5 @@ class DailyKlineCollectTask(BaseTask):
             order_by=Security.symbol.asc(),
         )
         codes = [row.symbol for row in rows]
-        logger.debug("全市场标的数: %d", len(codes))
+        logger.debug("[kline.collect] 全市场标的数: %d", len(codes))
         return codes

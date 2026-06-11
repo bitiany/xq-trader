@@ -113,5 +113,5 @@ class FactorPersistStage(Stage):
             batch_size=500,
         )
 
-        logger.info("[persist] %s upserted=%d factors=%d cutoff=%s", symbol, count, len(factor_cols), start_date)
+        logger.info("[factor.compute] %s upserted=%d factors=%d cutoff=%s", symbol, count, len(factor_cols), start_date)
         return StageResult.ok(data={"symbol": symbol, "persisted": count})
