@@ -1,0 +1,38 @@
+name: sw_daily
+celery_task_name: market.sw_daily_collect
+version: "1.0.0"
+task_name: 申万行业日线行情采集
+task_name_en: SW Industry Daily Collection
+description: 逐标的采集全市场申万行业日线行情数据，数据源为Tushare sw_daily接口，支持增量采集和水位管理
+category: io
+task_type: on_demand
+queue: market
+timeout: 3600
+retry_config:
+  max_retries: 2
+  retry_backoff: true
+  retry_backoff_max: 600
+params_schema:
+  type: object
+  properties:
+    pipeline_name:
+      type: string
+      title: 管线名称
+      default: "sw_daily"
+    concurrency:
+      type: integer
+      title: 并发数
+      default: 5
+    ts_codes:
+      type: array
+      items:
+        type: string
+      title: 行业代码列表
+      description: 为空时采集全市场申万行业
+    max_count:
+      type: integer
+      title: 最大标的数量
+      default: 0
+    collect_date:
+      type: string
+      title: 采集起始日期

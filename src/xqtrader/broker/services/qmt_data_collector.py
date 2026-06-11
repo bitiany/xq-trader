@@ -17,6 +17,30 @@ from framework.commons.exceptions import DataCollectionError
 logger = logging.getLogger(__name__)
 
 
+def convert_symbol_to_qmt(symbol: str) -> str:
+    """将 Tushare 格式代码转为 QMT 格式。
+
+    Tushare: 000001.SH / 399006.SZ
+    QMT:     SH.000001 / SZ.399006
+    """
+    parts = symbol.split(".")
+    if len(parts) == 2:
+        return f"{parts[1]}.{parts[0]}"
+    return symbol
+
+
+def convert_symbol_from_qmt(qmt_code: str) -> str:
+    """将 QMT 格式代码转为 Tushare 格式。
+
+    QMT:     SH.000001 / SZ.399006
+    Tushare: 000001.SH / 399006.SZ
+    """
+    parts = qmt_code.split(".")
+    if len(parts) == 2:
+        return f"{parts[1]}.{parts[0]}"
+    return qmt_code
+
+
 class QmtDataCollector:
     """QMT 行情数据采集服务。
 
@@ -58,6 +82,44 @@ class QmtDataCollector:
         logger.info("QMT 行情连接已断开")
 
     # ── 日线行情 ──────────────────────────────────────────
+
+    async def fetch_index_kline_daily(
+        self,
+        index_list: list[str],
+        start_time: str = "",
+        end_time: str = "",
+        dividend_type: str = "front",
+    ) -> dict[str, pd.DataFrame]:
+        """获取指数日线行情数据。
+
+        接口与 fetch_kline_daily 相同，但输入/输出使用 Tushare 格式代码，
+        内部自动转换为 QMT 格式调用 xtdata。
+
+        Args:
+            index_list: 指数代码列表（Tushare 格式），如 ["000001.SH", "399006.SZ"]
+            start_time: 起始日期 YYYYMMDD
+            end_time: 结束日期 YYYYMMDD
+            dividend_type: 复权方式 none/front/back/front_ratio/back_ratio
+
+        Returns:
+            {index_code: pd.DataFrame}，key 为 Tushare 格式代码
+        """
+        if not index_list:
+            return {}
+
+        # Tushare 格式 → QMT 格式
+        qmt_list = [convert_symbol_to_qmt(c) for c in index_list]
+        qmt_to_tushare = {convert_symbol_to_qmt(c): c for c in index_list}
+
+        raw = await self.fetch_kline_daily(
+            stock_list=qmt_list,
+            start_time=start_time,
+            end_time=end_time,
+            dividend_type=dividend_type,
+        )
+
+        # QMT 格式 key → Tushare 格式 key
+        return {qmt_to_tushare.get(k, k): v for k, v in raw.items()}
 
     async def fetch_kline_daily(
         self,

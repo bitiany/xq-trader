@@ -1,7 +1,7 @@
-"""日行情、资金流向与每日指标增量采集任务。
+"""日行情、资金流向、每日指标、指数行情与申万行业行情增量采集任务。
 
-按日期增量采集全市场日行情K线、资金流向和每日指标数据，每个数据类型
-独立完成采集→清洗→持久化→更新水位闭环。
+按日期增量采集全市场日行情K线、资金流向、每日指标、指数行情和申万行业行情数据，
+每个数据类型独立完成采集→清洗→持久化→更新水位闭环。
 
 水位策略：
   - 每个数据类型独立检查市场级水位，缺失水位的 Stage 跳过执行
@@ -27,6 +27,12 @@ from worker.plugins.daily_incremental.stages.daily_kline_stage import (
 from worker.plugins.daily_incremental.stages.fund_flow_stage import (
     FundFlowIncrementalStage,
 )
+from worker.plugins.daily_incremental.stages.index_daily_stage import (
+    IndexDailyIncrementalStage,
+)
+from worker.plugins.daily_incremental.stages.sw_daily_stage import (
+    SwDailyIncrementalStage,
+)
 from xqtrader.domain.watermark.models.collect_watermark import CollectWatermark
 from xqtrader.domain.watermark.services.watermark_service import WatermarkService
 
@@ -34,7 +40,7 @@ logger = get_logger(__name__)
 
 
 class DailyIncrementalTask(BaseTask):
-    """日行情、资金流向与每日指标增量采集任务。
+    """日行情、资金流向、每日指标、指数行情与申万行业行情增量采集任务。
 
     入参：
       - start_date: 采集起始日期（格式 YYYY-MM-DD，为空时按各 Stage 市场水位）
@@ -43,9 +49,9 @@ class DailyIncrementalTask(BaseTask):
     """
 
     task_name = "market.daily_incremental_collect"
-    description = "按日期增量采集全市场日行情K线、资金流向和每日指标数据"
-    time_limit = 10800
-    soft_time_limit = 10770
+    description = "按日期增量采集全市场日行情K线、资金流向、每日指标、指数行情和申万行业行情数据"
+    time_limit = 18000
+    soft_time_limit = 17970
 
     async def _run_impl(self, **kwargs: Any) -> dict[str, Any]:
         start_date_str: str | None = kwargs.get("start_date")
@@ -71,14 +77,31 @@ class DailyIncrementalTask(BaseTask):
             DailyIndicatorIncrementalStage.MARKET_WATERMARK_CODE,
             start_date_str,
         )
+        index_start = await self._resolve_stage_start(
+            IndexDailyIncrementalStage.PIPELINE_NAME,
+            IndexDailyIncrementalStage.MARKET_WATERMARK_CODE,
+            start_date_str,
+        )
+        sw_start = await self._resolve_stage_start(
+            SwDailyIncrementalStage.PIPELINE_NAME,
+            SwDailyIncrementalStage.MARKET_WATERMARK_CODE,
+            start_date_str,
+        )
 
         # 所有 Stage 均无水位且未指定 start_date → 报错
-        if kline_start is None and ff_start is None and indicator_start is None:
+        all_no_watermark = (
+            kline_start is None
+            and ff_start is None
+            and indicator_start is None
+            and index_start is None
+            and sw_start is None
+        )
+        if all_no_watermark:
             return {
                 "status": "ERROR",
                 "message": (
                     "无市场水位记录，请先执行全量回补任务"
-                    "（daily_kline_collect / fund_flow_collect / daily_indicator_collect）"
+                    "（daily_kline / fund_flow / daily_indicator / index_daily / sw_daily）"
                 ),
             }
 
@@ -116,6 +139,28 @@ class DailyIncrementalTask(BaseTask):
         else:
             logger.info("[daily.incremental] 每日指标: 无水位或已最新，跳过")
             results["daily_indicator"] = {"status": "SKIPPED"}
+
+        # Stage 4: 指数行情增量
+        if index_start is not None and index_start < end_date:
+            logger.info(
+                "[daily.incremental] 指数行情增量: %s~%s", index_start, end_date,
+            )
+            index_stage = IndexDailyIncrementalStage()
+            results["index_daily"] = await index_stage.execute(index_start, end_date)
+        else:
+            logger.info("[daily.incremental] 指数行情: 无水位或已最新，跳过")
+            results["index_daily"] = {"status": "SKIPPED"}
+
+        # Stage 5: 申万行业行情增量
+        if sw_start is not None and sw_start < end_date:
+            logger.info(
+                "[daily.incremental] 申万行业行情增量: %s~%s", sw_start, end_date,
+            )
+            sw_stage = SwDailyIncrementalStage()
+            results["sw_daily"] = await sw_stage.execute(sw_start, end_date)
+        else:
+            logger.info("[daily.incremental] 申万行业行情: 无水位或已最新，跳过")
+            results["sw_daily"] = {"status": "SKIPPED"}
 
         logger.info("[daily.incremental] 全部完成: %s", results)
         return results

@@ -1,75 +1,253 @@
-# xqtrader 因子系统技术架构
+# xqtrader 因子系统技术架构设计
 
-> **版本**: v2.0 | **更新**: 2026-06-11
-> **依赖**: [factor-catalog.md](./factor-catalog.md) 因子规格目录
+> **版本**: v1.0 | **更新**: 2026-06-07
+> **依赖**: [factor-catalog.md](./factor-catalog.md) 因子分类体系
 > **框架**: Pipeline引擎 + Celery插件 + DAL/ORM
-> **参考**: Barra CNE6 (MSCI) / Qlib (Microsoft) / WorldQuant / 华泰金工
-
----
-
-## 一、系统概述
-
-因子系统是 xqtrader 量化研究基础设施，负责因子的**计算、存储、评估、融合**全生命周期管理。按计算模式拆分为三个独立管线任务，遵循 Pipeline + Celery 插件架构。
-
-### 1.1 三任务架构
-
-```mermaid
-flowchart LR
-    subgraph "Task1: 因子计算 (日频)"
-        FC[FactorComputeTask<br/>逐标的独立计算]
-    end
-    subgraph "Task2: Alpha合成 (周频)"
-        AS[AlphaSynthesizeTask<br/>截面多因子融合]
-    end
-    subgraph "Task3: 因子评估 (周频)"
-        FE[FactorEvaluateTask<br/>截面加载+评估]
-    end
-
-    RAW[原始数据] --> FC
-    FC --> FV[fac_factor_value<br/>逐标的因子值]
-    FV --> CSR[CrossSectionReader<br/>截面因子按需加载]
-    RAW --> CSR
-    CSR --> AS
-    CSR --> FE
-    FV --> FE
-    AS --> FV
-    FE --> FS[fac_factor_stats]
-```
-
-### 1.2 任务职责
-
-| 任务 | 调度 | 粒度 | 核心职责 | 输入 | 输出 |
-|------|------|------|---------|------|------|
-| **Task 1** | 日频 17:00 | 逐标的 | 计算逐标的可独立计算因子 | OHLCV + 资金流 | fac_factor_value |
-| **Task 2** | 周频 周六 | 逐样本池 | 多因子截面融合, Alpha权重计算 | Task1 + CrossSectionReader | fac_factor_value (alpha_*) |
-| **Task 3** | 周频 周六 | 逐样本池 | 因子评估, 等级评定 | Task1 + CrossSectionReader | fac_factor_stats |
-
-> **业界参考**: Qlib 拆为 Handler → DataHandler → Model 三阶段; Barra 拆为原始计算 → 截面标准化两阶段; 本架构三任务拆分与业界主流一致
 
 ***
 
-## 二、Task 1: 因子计算 (FactorComputeTask)
+## 一、系统定位
 
-> **调度**: 日频 (工作日 17:00) | **粒度**: 逐标的 | **计算引擎**: FactorPlugin → PipelineEngine
-> **输入**: `sdc_candlestick_daily` (OHLCV), `sdc_fund_flow_individual` (资金流)
-> **输出**: `fac_factor_value` (pool_id='all', 仅逐标的可独立计算因子)
-> **归属因子**: C类技术(32) + D1 Alpha101(6) + D2 Alpha158(10) + D3资金流逐标的(6) + A类风险逐标的(17) + E1缠论(10) + E2 K线聚合(6)
+因子系统是 xqtrader 平台的量化研究基础设施，负责因子的**计算、存储、评估、融合**全生命周期管理。系统需将示例代码中的研究型脚本（CASE-C/ML/网格）重构为生产级服务，同时遵循项目已有的 Pipeline + Celery 插件架构。
 
-### 2.1 设计原则
+### 1.1 设计目标
 
-因子计算任务只处理**逐标的可独立计算**的因子——每个标的仅依赖自身时序数据，无需全市场截面信息。截面因子（B类基本面、A类风险截面部分）不在本任务中处理，由 CrossSectionReader 在 Task 2/3 中按需加载。
+| 目标      | 说明                            |
+| ------- | ----------------------------- |
+| 生产化     | 将研究脚本转为可调度、可监控、可重试的 Celery 任务 |
+| 可扩展     | 新因子通过注册表+插件机制接入，无需修改核心流程      |
+| 可评估     | 每个因子自动产出 IC/ICIR/分层回测等统计指标    |
+| 可融合     | 多因子经预处理后合成为复合 Alpha 因子        |
+| 截面/信号分离 | 截面因子走因子管线，非截面信号走信号引擎          |
 
-> **业界参考**: Qlib Alpha158 Handler — 所有152个技术因子在 DataHandler 加载前预计算完成; Barra CNE6 — 原始因子计算与截面标准化分离
+### 1.2 与示例代码的映射
 
-### 2.2 数据加载策略
+| 示例代码                         | 核心能力                | 目标架构组件                          |
+| ---------------------------- | ------------------- | ------------------------------- |
+| CASE-C `factor_lib.py`       | 10个技术因子计算           | FactorPlugin 因子计算插件             |
+| CASE-C `preprocessor.py`     | 去极值/Z-score/行业中性化   | PreprocessStage 预处理阶段           |
+| CASE-C `synthesizer.py`      | 等权/IC加权/Lasso合成     | SynthesizeStage 合成阶段            |
+| CASE-C `layered_backtest.py` | 分层回测+IC时序           | EvaluateStage 评估阶段              |
+| CASE-ML `feature_engine.py`  | 50+因子+分类体系          | FactorPlugin + FACTOR\_TAXONOMY |
+| CASE-ML `ml_engine.py`       | XGBoost/LightGBM/集成 | MLSynthesizeStage ML合成阶段        |
+| CASE-网格 `factor_engine.py`   | 因子打分+选股             | ScoreStage 打分阶段                 |
 
-| 因子类型 | 加载策略 | 原因 |
-|---------|---------|------|
-| 有状态因子 (MACD/EMA/SAR) | **全量历史K线**，从第一根bar计算 | 依赖递推状态，截断导致前期值不准确 |
-| 无状态因子 (动量/波动率) | **5年 + 前300条补充** | 固定窗口回溯，300条≈1.2年覆盖所有回溯需求 |
-| 资金流因子 | **5年 + 前300条补充** | 部分需滚动窗口计算 |
+***
 
-### 2.3 管线流程
+## 二、系统架构总览
+
+### 2.1 架构层次
+
+```mermaid
+graph TB
+    subgraph "调度层 Scheduling"
+        BEAT[Celery Beat]
+        SCHEDULE[schedules/daily_pipeline.yml]
+    end
+
+    subgraph "编排层 Orchestration"
+        CANVAS[Canvas 编排器]
+        TRACKER[OrchestrationTracker]
+    end
+
+    subgraph "管线层 Pipeline"
+        direction TB
+        FPIPE[因子计算管线<br/>factor_compute]
+        EPIPE[因子评估管线<br/>factor_evaluate]
+        SPIPE[因子合成管线<br/>factor_synthesize]
+    end
+
+    subgraph "阶段层 Stage"
+        LOAD[LoadStage<br/>数据加载]
+        CALC[CalcStage<br/>因子计算]
+        PREPROC[PreprocessStage<br/>预处理]
+        PERSIST[PersistStage<br/>因子持久化]
+        EVAL[EvaluateStage<br/>因子评估]
+        SCORE[ScoreStage<br/>因子打分]
+        SYNTH[SynthesizeStage<br/>因子合成]
+        MLPRED[MLPredictStage<br/>ML预测]
+    end
+
+    subgraph "存储层 Storage"
+        FV[fac_factor_value<br/>因子值窄表]
+        FR[fac_factor_registry<br/>因子注册表]
+        FS[fac_factor_stats<br/>因子统计表]
+        FSV[fac_signal_value<br/>信号值表]
+        CD[sdc_candlestick_daily<br/>K线数据]
+        DI[sdc_daily_indicator<br/>日指标]
+        FI[sdc_fina_indicator<br/>财务指标]
+    end
+
+    BEAT --> CANVAS
+    SCHEDULE --> CANVAS
+    CANVAS --> FPIPE
+    CANVAS --> EPIPE
+    CANVAS --> SPIPE
+    TRACKER --> CANVAS
+
+    FPIPE --> LOAD --> CALC --> PREPROC --> PERSIST
+    EPIPE --> EVAL
+    SPIPE --> SCORE --> SYNTH
+    SPIPE --> MLPRED
+
+    LOAD --> CD
+    LOAD --> DI
+    LOAD --> FI
+    PERSIST --> FV
+    PERSIST --> FR
+    EVAL --> FS
+    SYNTH --> FV
+```
+
+### 2.2 数据流全景
+
+```mermaid
+flowchart LR
+    subgraph "数据源"
+        KLINE[K线行情]
+        DAILY[日指标<br/>sdc_daily_indicator]
+        FINA[财务指标<br/>sdc_financial_indicator]
+        FLOW[资金流]
+    end
+
+    subgraph "任务1: 因子计算(日频)"
+        PLUGIN[FactorPlugin<br/>talib计算]
+        COMPOSITE[CompositePlugin<br/>组合因子]
+        WINSOR[去极值MAD]
+    end
+
+    subgraph "CrossSectionReader"
+        CSR[截面因子加载<br/>估值+财务+逐标的]
+        ZSCORE[Z-score标准化]
+        NEUTRAL[行业中性化]
+    end
+
+    subgraph "任务3: 因子评估(周频)"
+        IC[IC/ICIR<br/>滚动计算]
+        LAYER[分层回测<br/>5分组]
+        DECAY[衰减分析<br/>半衰期]
+        GRADE[因子等级<br/>A/B/C/D]
+    end
+
+    subgraph "任务2: Alpha合成(周频)"
+        EQ[等权合成]
+        ICW[IC加权]
+        ICIRW[ICIR加权]
+        ML[ML融合<br/>XGBoost/LightGBM]
+        ENS[集成Alpha<br/>Stacking]
+    end
+
+    subgraph "任务4: Alpha信号(日频)"
+        WEIGHT[权重×标准化值]
+    end
+
+    subgraph "输出"
+        FVAL[fac_factor_value<br/>逐标的因子]
+        FFVAL[fac_financial_factor_value<br/>季度财务因子]
+        FSTAT[fac_factor_stats]
+        FSIGNAL[fac_signal_value]
+    end
+
+    KLINE --> PLUGIN --> WINSOR --> FVAL
+    FLOW --> COMPOSITE --> FVAL
+
+    FVAL --> CSR
+    DAILY --> CSR
+    FINA --> FFVAL --> CSR
+    CSR --> ZSCORE --> NEUTRAL
+
+    NEUTRAL --> IC --> FSTAT
+    NEUTRAL --> LAYER --> GRADE --> FSTAT
+    IC --> DECAY --> FSTAT
+
+    NEUTRAL --> EQ --> ENS
+    NEUTRAL --> ICW --> ENS
+    NEUTRAL --> ICIRW --> ENS
+    NEUTRAL --> ML --> ENS
+    ENS --> FVAL
+
+    NEUTRAL --> WEIGHT --> FSIGNAL
+```
+
+***
+
+## 三、四大独立计算任务
+
+因子系统按数据流拆分为四个独立 Celery 任务，各自有独立的调度频率、数据加载策略和持久化逻辑。
+
+```mermaid
+flowchart LR
+    subgraph "任务1: 因子计算(日频)"
+        FC[FactorComputeTask<br/>逐标的计算]
+    end
+    subgraph "任务2: Alpha合成(周频)"
+        AS[AlphaSynthesizeTask<br/>逐样本池计算]
+    end
+    subgraph "任务3: 因子评估(周频)"
+        FE[FactorEvaluateTask<br/>逐样本池计算]
+    end
+    subgraph "任务4: Alpha信号(日频)"
+        SIG[AlphaSignalTask<br/>逐样本池计算]
+    end
+
+    RAW[原始数据<br/>K线/资金流] --> FC
+    FC --> FV[fac_factor_value<br/>逐标的因子]
+    FV --> CSR[CrossSectionReader<br/>截面因子加载]
+    CSR --> AS
+    CSR --> FE
+    AS --> FV
+    FE --> FS[fac_factor_stats]
+    CSR --> SIG --> FSIG[fac_signal_value]
+```
+
+**任务依赖关系**：
+
+- 因子计算 → Alpha信号（信号需逐标的因子 + 截面因子）
+- 因子计算 → 因子评估（评估需逐标的因子 + 截面因子）
+- 因子评估 → Alpha合成（合成需评估结果确定因子等级）
+- Alpha合成 → Alpha信号（信号需合成权重）
+- 因子评估 与 Alpha合成 **串行**（评估先执行，合成使用评估结果）
+
+### 3.1 任务1：因子计算 (FactorComputeTask)
+
+**调度**：日频（工作日 17:00）
+**粒度**：逐标的，批量计算
+**输入**：原始数据（K线、资金流）
+**输出**：fac\_factor\_value（pool\_id='all'，仅逐标的可独立计算的因子）
+
+> **设计原则**：因子计算任务只处理**逐标的可独立计算**的因子（技术因子、量价因子、资金流因子）。截面因子（估值指标、财务指标）不在本任务中处理，而是在评估/合成任务中按需加载并截面标准化。原因：截面标准化需要全市场标的的同日数据，与逐标的计算模式矛盾。
+
+#### 3.1.1 数据加载策略
+
+因子计算的关键在于数据加载范围——既要保证计算精度，又要控制内存和查询开销：
+
+| 因子类型    | 加载策略                   | 原因                    | 示例           |
+| ------- | ---------------------- | --------------------- | ------------ |
+| 有状态技术因子 | **全量历史数据**，从第一根 bar 计算 | 依赖递推状态，截断导致前期值不准确     | MACD、EMA、SAR |
+| 无状态技术因子 | **5年 + 前300条补充**       | 仅需固定窗口回溯，300条保证5年首日可算 | 动量20d、波动率20d |
+| 资金流因子   | **5年 + 前300条补充**       | 部分需滚动窗口               | 主力净额MA5      |
+
+> 估值因子（PE/PB/PS）和财务因子（ROE/ROA等）属于**截面因子**，不在此任务中加载，而是在评估/合成任务中通过 CrossSectionReader 按需加载。
+
+```mermaid
+flowchart TD
+    START[因子计算启动] --> RESOLVE[解析因子列表<br/>按 compute_engine 分组]
+    RESOLVE --> CHECK{因子是否有状态?}
+
+    CHECK -->|有状态<br/>MACD/EMA/SAR| LOAD_ALL[加载全量历史K线<br/>从第一根bar开始]
+    CHECK -->|无状态<br/>动量/波动率| LOAD_5Y_300[加载5年数据<br/>+ 前300条补充]
+    CHECK -->|资金流因子| LOAD_FLOW[加载5年数据<br/>+ 前300条补充]
+
+    LOAD_ALL --> CALC[批量计算<br/>talib / numpy]
+    LOAD_5Y_300 --> CALC
+    LOAD_FLOW --> CALC
+
+    CALC --> TRUNCATE[截断5年数据<br/>upsert到fac_factor_value]
+```
+
+**前向补充300条的意义**：5年首日（如2021-01-04）计算20日动量需要前20个交易日的数据，计算MACD(12,26,9)需要前35个交易日的数据。300条覆盖约1.2年，足以满足所有无状态因子的回溯需求。
+
+#### 3.1.2 计算流程
 
 ```mermaid
 sequenceDiagram
@@ -78,447 +256,297 @@ sequenceDiagram
     participant Engine as PipelineEngine
     participant Load as LoadStage
     participant Calc as CalcStage
+    participant Preproc as PreprocessStage
     participant Persist as PersistStage
     participant DB as fac_factor_value
 
     Beat->>Task: factor.compute_daily
     Task->>Engine: execute(stock_codes)
-    loop 每只标的 (并发)
+
+    loop 每只股票 (并发控制)
         Engine->>Load: process(symbol)
-        Load->>Load: 按因子类型加载对应范围数据
-        Load-->>Engine: ctx: kline_df, flow_df
+        Load->>Load: 按因子类型加载对应范围数据<br/>（K线/资金流，不含估值和财务）
+        Load-->>Engine: ctx.set("kline_data", df)
+
         Engine->>Calc: process(symbol)
-        Calc->>Calc: 批量调用 FactorPlugin.compute()
-        Calc-->>Engine: ctx: {factor_id: value}
+        Calc->>Calc: 批量调用 FactorPlugin.compute()<br/>talib / numpy 向量化
+        Calc-->>Engine: ctx.set("factor_values", dict)
+
+        Engine->>Preproc: process(symbol)
+        Preproc->>Preproc: 去极值（MAD）<br/>注：截面标准化在评估/合成时完成
+        Preproc-->>Engine: ctx.set("processed_values", dict)
+
         Engine->>Persist: process(symbol)
-        Persist->>DB: 截断5年 + upsert
+        Persist->>DB: 截断5年 + upsert fac_factor_value
         Persist-->>Engine: persisted_count
     end
+
     Engine-->>Task: PipelineResult
 ```
 
-**管线阶段**：
+**管线定义**：
 
-| 阶段 | 职责 | 输入 | 输出 |
-|------|------|------|------|
-| LoadStage | 加载K线/资金流（不含估值和财务） | symbol | ctx: kline_df, flow_df |
-| CalcStage | 批量调用 FactorPlugin.compute() | ctx: 行情数据 | ctx: {factor_id: value} |
-| PersistStage | 截断5年 + upsert fac_factor_value | ctx: 因子值 | 持久化行数 |
+| 阶段              | 职责                                                                       | 输入           | 输出                                      |
+| --------------- | ------------------------------------------------------------------------ | ------------ | --------------------------------------- |
+| LoadStage       | 加载K线/资金流数据（不含估值和财务）                                                      | symbol       | ctx: kline\_df, flow\_df |
+| CalcStage       | 批量调用 FactorPlugin.compute()                                              | ctx: 行情数据    | ctx: {factor\_id: value}                |
+| PreprocessStage | 去极值（MAD）；截面标准化在评估/合成时完成                                                  | ctx: 因子值     | ctx: 处理后因子值                            |
+| PersistStage    | 截断5年 + upsert fac\_factor\_value                                         | ctx: 处理后因子值 | 持久化行数                                   |
 
-> 截面标准化（去极值/Z-score/行业中性化）不在 Task 1 执行，而是在 Task 2/3 的 CrossSectionReader 中按需完成。Task 1 输出的是逐标的原始因子值。
+#### 3.1.3 因子分类与存储策略
 
----
+因子按**计算独立性**分为两类，决定其存储位置和计算方式：
 
-## 三、Task 2: Alpha合成 (AlphaSynthesizeTask)
+| 类型 | 特征 | 计算方式 | 存储位置 | 示例 |
+|------|------|---------|---------|------|
+| **逐标的因子** | 仅依赖自身时序数据 | 逐标的独立计算 | fac_factor_value | MACD、动量、波动率、资金流MA |
+| **截面因子** | 依赖全市场截面数据 | 评估/合成时按需加载+标准化 | 源表（不重复存储） | PE/PB/PS、ROE/ROA/毛利率 |
 
-> **调度**: 周频 (周六 10:00, 依赖 Task 3 评估完成) | **粒度**: 逐样本池(pool_id)
-> **输入**: fac_factor_value + CrossSectionReader 截面因子
-> **输出**: fac_factor_value (alpha_* 因子) + fac_factor_registry.params (Alpha权重)
-> **归属因子**: F类复合Alpha(6) + D4交互因子(6)
+**逐标的因子**：在因子计算任务中逐标的计算，写入 `fac_factor_value`。
 
-### 3.1 设计原则
+**截面因子**：不在因子计算任务中处理。估值指标已存在于 `sdc_daily_indicator`，财务因子已存在于 `fac_financial_factor_value`（按 ann_date 存储）。评估/合成时通过 CrossSectionReader 按需加载并截面标准化。
 
-Alpha合成负责**权重优化**与**因子融合**。通过 CrossSectionReader 加载全市场同日因子值，截面标准化后按样本池批量计算。合成结果写回 fac_factor_value 且以 `alpha_` 前缀标识。
+**截面因子不存入 factor_value 的理由**：
 
-> **业界参考**: Barra IC加权正交化合成; Qlib Model层 XGBoost/LightGBM 预测; 华泰金工《多因子合成方法比较》
+| 维度 | 存入 factor_value | 按需加载（当前方案） |
+|------|-----------------|---------------|
+| 截面标准化 | 与逐标的计算矛盾（需全市场数据） | 在截面计算时自然完成 |
+| 存储冗余 | 估值指标重复存储（daily_indicator + factor_value） | 无冗余，源表唯一 |
+| 标准化灵活性 | 标准化结果固定，不同样本池无法差异化 | 按样本池动态标准化 |
+| PIT精确性 | 财务因子需前向填充，冗余且可能不一致 | PIT 实时计算，天然精确 |
+| 查询统一性 | 单表查询 | CrossSectionReader 统一接口 |
 
-### 3.2 合成流程
+#### 3.1.4 CrossSectionReader — 截面因子按需加载
 
-```mermaid
-flowchart TD
-    START[合成触发] --> SELECT[筛选因子: A级+B级]
-    SELECT --> LOAD[CrossSectionReader 加载全因子截面值]
-    LOAD --> PREPROC[截面标准化 → 行业中性化]
-    PREPROC --> EQ[等权合成 → alpha_eq]
-    PREPROC --> IC[IC加权 → alpha_ic]
-    PREPROC --> ICIR[ICIR加权 → alpha_icir]
-    PREPROC --> ML[ML融合 → alpha_xgb / alpha_lgb]
-    EQ --> ENS[Stacking集成 → alpha_ensemble]
-    IC --> ENS
-    ICIR --> ENS
-    ML --> ENS
-    ENS --> EVAL[复合Alpha评估: ICIR>1.5 / 多空年化>15%]
-    EVAL --> PERSIST[持久化权重 + Alpha因子值]
-```
-
-### 3.3 ML Walk-Forward 规范
-
-| 参数 | 值 | 说明 |
-|------|-----|------|
-| 训练窗口 | 120 交易日 | ~6个月 |
-| 重训间隔 | 20 交易日 | 每月重训 |
-| Gap | 5 交易日 | 防信息泄露 |
-| 标签 | 二分类 (涨/跌) | 基于次日收益 |
-
-> 参考 Qlib rolling training 规范
-
----
-
-## 四、Task 3: 因子评估 (FactorEvaluateTask)
-
-> **调度**: 周频 (周六 08:00, 在 Task 2 之前) | **粒度**: 逐样本池(pool_id)
-> **输入**: fac_factor_value + CrossSectionReader 截面因子
-> **输出**: fac_factor_stats + fac_factor_registry.factor_grade
-> **说明**: 不产生新因子值，对所有因子进行统计评估
-
-### 4.1 评估流程
-
-```mermaid
-flowchart TD
-    START[评估触发] --> LOAD[CrossSectionReader 加载全因子 + 下期收益]
-    LOAD --> IC[IC: Spearman(factor_t, return_{t+1}), 滚动252日]
-    IC --> ICIR[ICIR: IC_mean / IC_std]
-    ICIR --> LAYER[分层回测: 5分组多空]
-    LAYER --> DECAY[衰减分析: IC半衰期 h=1..20]
-    DECAY --> TURNOVER[换手率: 持仓变动]
-    TURNOVER --> GRADE[等级评定: A/B/C/D]
-    GRADE --> PERSIST[持久化 fac_factor_stats]
-```
-
-### 4.2 评估指标
-
-| 指标 | 计算方式 | 阈值 |
-|------|---------|------|
-| IC | Spearman(factor_t, return_{t+1}) | \|IC\| > 0.03 |
-| ICIR | IC_mean / IC_std | > 0.5 可用, > 1.0 优良 |
-| 多空年化 | (Q5-Q1) 年化 | > 5% |
-| 换手率 | Σ\|w_t - w_{t-1}\| / 2 | < 70% |
-| 衰减半衰期 | IC(h=1..20) 拟合 | > 3日 |
-
-### 4.3 因子等级
-
-| 等级 | 标准 | 用途 |
-|------|------|------|
-| A | ICIR > 1.0, 多空年化 > 10%, 换手 < 50% | 核心Alpha, 必入合成池 |
-| B | ICIR > 0.5, 多空年化 > 5%, 换手 < 70% | 辅助Alpha, 可选入合成池 |
-| C | ICIR > 0.3, 多空年化 > 3% | 弱Alpha, 仅作ML特征 |
-| D | ICIR < 0.3 | 无效, 暂停计算 |
-
----
-
-## 五、CrossSectionReader — 截面因子加载器
-
-> **定位**: Task 2 (Alpha合成) 和 Task 3 (因子评估) 共用的截面因子统一加载服务
-> **解决的问题**: B类基本面因子(40个)和A类风险截面因子(6个)需要全市场同日数据，无法在 Task 1 逐标的模式中计算
-
-### 5.1 架构
+估值因子和财务因子都是截面因子，在评估/合成/信号任务中通过 **CrossSectionReader** 统一加载：
 
 ```mermaid
 flowchart TD
     subgraph "存储层"
-        FV[fac_factor_value<br/>逐标的因子]
-        DI[sdc_daily_indicator<br/>估值指标 PE/PB/PS/市值]
-        FFV[fac_financial_factor_value<br/>季度财务因子 按ann_date]
+        FV[fac_factor_value<br/>逐标的因子<br/>技术/量价/资金流]
+        DI[sdc_daily_indicator<br/>估值指标<br/>PE/PB/PS]
+        FFV[fac_financial_factor_value<br/>季度财务因子<br/>按ann_date存储]
     end
-    subgraph "CrossSectionReader"
-        LOAD_TS[加载逐标的因子]
-        LOAD_VAL[加载估值指标 → Z-score]
-        LOAD_FIN[PIT加载财务因子 → 前向填充 → Z-score]
-        NEUT[合并 → 行业+市值中性化]
+
+    subgraph "计算层（应用内存）"
+        CSR[CrossSectionReader<br/>1.加载逐标的因子<br/>2.加载估值指标<br/>3.PIT加载财务因子<br/>4.截面标准化<br/>5.行业中性化]
     end
+
     subgraph "消费层"
-        EVAL[Task 3: 因子评估]
-        SYNTH[Task 2: Alpha合成]
+        EVAL[因子评估<br/>IC/ICIR]
+        SYNTH[Alpha合成]
+        SIGNAL[Alpha信号]
     end
-    FV --> LOAD_TS --> NEUT
-    DI --> LOAD_VAL --> NEUT
-    FFV --> LOAD_FIN --> NEUT
-    NEUT --> EVAL
-    NEUT --> SYNTH
+
+    FV --> CSR
+    DI --> CSR
+    FFV --> CSR
+    CSR --> EVAL
+    CSR --> SYNTH
+    CSR --> SIGNAL
 ```
 
-### 5.2 财务因子 PIT 前向填充
+**CrossSectionReader 实现思路**：
 
-财务数据季度发布，但评估/合成需要每日截面。CrossSectionReader 在应用内存中前向填充：
+```python
+class CrossSectionReader:
+    """截面因子统一加载器，评估/合成/信号任务共用"""
 
-```
-截面日=2026-04-10 → ann_date ≤ 2026-04-10 的最新财报 → roe=12.5
-截面日=2026-04-11 → 同一条财报 → roe=12.5 (填充)
-截面日=2026-05-05 → Q1季报 ann_date=2026-04-28 已发布 → roe=13.1 (更新)
-```
+    async def load_cross_section(
+        self, trade_date: date, pool_id: str, factor_ids: list[str]
+    ) -> pd.DataFrame:
+        # 1. 加载逐标的因子（fac_factor_value）
+        ts_factors = await self._load_ts_factors(trade_date, pool_id, factor_ids)
 
-**PIT 策略**: 优先使用 `ann_date`（精确到个股的真实发布日期），缺失时回退 `report_lag_days`（默认120天）。
+        # 2. 加载估值指标（sdc_daily_indicator）→ 截面标准化
+        val_factors = await self._load_valuation(trade_date)
+        val_standardized = self._cross_section_zscore(val_factors)
 
-> **性能**: 5年财务因子仅 385万行, 加载<2秒, 内存向量化填充<1秒。比预填充方案节省 98% 存储。
+        # 3. PIT加载财务因子（fac_financial_factor_value）→ 前向填充 + 截面标准化
+        fina_factors = await self._pit_load_financial(trade_date)
+        fina_standardized = self._cross_section_zscore(fina_factors)
 
-### 5.3 截面预处理流程
-
-```
-原始因子值 → 缺失值填充(行业均值) → 去极值(MAD, n=5) → 行业+市值中性化(回归取残差) → Z-score标准化
-```
-
-> **顺序严格**: 先标准化再去极值会扭曲均值方差; 先中性化再处理异常值会影响回归系数。参考 Barra/华泰共识。
-
----
-
-## 六、Plugin 插件架构
-
-### 6.1 FactorPlugin 策略模式
-
-因子计算采用策略模式，每个因子类继承 `FactorPlugin` 基类，通过 `_FACTOR_VARIANTS` 注册表管理变体：
-
-```mermaid
-classDiagram
-    class FactorPlugin {
-        <<abstract>>
-        +factor_id: str
-        +category: str
-        +compute(df, ctx) dict
-        +min_periods: int
-        +dependencies: list
-    }
-    class MABiasFactor {
-        +factor_id = "ma_bias"
-        +_FACTOR_VARIANTS = {"ma_bias_5": 5, "ma_bias_10": 10, ...}
-        +compute(df, ctx)
-    }
-    class RSIDeltaFactor {
-        +factor_id = "rsi_delta"
-        +_FACTOR_VARIANTS = {"rsi_delta_14": 14}
-        +compute(df, ctx)
-    }
-    class Alpha101Factor {
-        +factor_id = "alpha_1"
-        +compute(df, ctx)
-    }
-    class FactorRegistry {
-        -_plugins: dict
-        +auto_discover()
-        +resolve(factor_ids) list
-    }
-    FactorPlugin <|-- MABiasFactor
-    FactorPlugin <|-- RSIDeltaFactor
-    FactorPlugin <|-- Alpha101Factor
-    FactorRegistry o-- FactorPlugin
+        # 4. 合并所有因子 → 行业中性化
+        merged = pd.concat([ts_factors, val_standardized, fina_standardized], axis=1)
+        return self._industry_neutralize(merged)
 ```
 
-### 6.2 目录结构
+**估值指标加载**：直接从 `sdc_daily_indicator` 读取截面日全市场数据，Z-score 标准化后使用。无需额外存储。
 
-```
-src/worker/plugins/factor_compute/     # Task 1: 因子计算引擎
-├── task.py                            # FactorComputeTask
-├── factors/                           # FactorPlugin 实现
-│   ├── base.py                        # FactorPlugin ABC + 注册表
-│   ├── tech_ma.py                     # C4 均线偏离
-│   ├── tech_trend.py                  # C2 趋势
-│   ├── tech_oscillator.py             # C3 超买超卖
-│   ├── tech_volatility.py             # A3 波动率
-│   ├── momentum.py                    # C1 动量/反转
-│   ├── risk.py                        # A1/A3/A4 风险(逐标的)
-│   ├── alpha101.py                    # D1 Alpha101
-│   ├── alpha158.py                    # D2 Alpha158
-│   └── fund_flow.py                   # D3 资金流(逐标的)
-└── stages/                            # Pipeline 阶段
-    ├── load_stage.py
-    ├── calc_stage.py
-    └── persist_stage.py
+**财务因子 PIT 加载**：从 `fac_financial_factor_value` 读取 `ann_date ≤ 截面日` 的最新记录，前向填充后截面标准化。详见 3.1.5。
 
-src/xqtrader/domain/factor/            # 业务领域层
-├── models/                            # ORM 模型
-│   ├── factor_value.py                # FacFactorValue (TimescaleDB)
-│   ├── factor_registry.py             # FacFactorRegistry
-│   ├── factor_stats.py                # FacFactorStats
-│   └── financial_factor_value.py      # FacFinancialFactorValue
-└── services/
-    ├── cross_section_reader.py        # CrossSectionReader
-    ├── registry.py                    # 因子注册表服务
-    └── pool_init.py                   # 样本池初始化
-```
+#### 3.1.5 财务因子的 PIT 前向填充
 
-> **依赖方向**: `worker/plugins/` → `xqtrader/domain/` (单向, domain 层不引用 worker 层)
+**结论：财务因子独立存储（按 ann_date），评估/合成时通过 CrossSectionReader 在应用层按截面日前向填充。**
 
----
-
-## 七、存储模型
-
-### 7.1 核心表
-
-```mermaid
-erDiagram
-    FAC_FACTOR_REGISTRY ||--o{ FAC_FACTOR_VALUE : "1:N factor_id"
-    FAC_FACTOR_REGISTRY ||--o{ FAC_FACTOR_STATS : "1:N factor_id"
-    FAC_FACTOR_REGISTRY ||--o{ FAC_FINANCIAL_FACTOR_VALUE : "1:N factor_id"
-    FAC_FACTOR_POOL ||--o{ FAC_FACTOR_STATS : "1:N pool_id"
-
-    FAC_FACTOR_REGISTRY {
-        string factor_id PK
-        string display_name
-        string category
-        string direction
-        string compute_engine
-        json params
-        string factor_grade
-        string status
-        string data_origin
-    }
-    FAC_FACTOR_VALUE {
-        string symbol PK
-        date trade_date PK
-        string factor_id PK
-        string pool_id PK
-        float factor_value
-    }
-    FAC_FINANCIAL_FACTOR_VALUE {
-        string symbol PK
-        date end_date PK
-        string factor_id PK
-        date ann_date PK
-        float factor_value
-    }
-    FAC_FACTOR_STATS {
-        string factor_id PK
-        string pool_id PK
-        date calc_date PK
-        float ic_mean
-        float ic_std
-        float icir
-        float turnover
-        string factor_grade
-    }
-    FAC_FACTOR_POOL {
-        string pool_id PK
-        string pool_name
-        json definition
-    }
-```
-
-### 7.2 表职责与存储策略
-
-| 表 | 存储内容 | 因子范围 | 存储策略 |
-|------|---------|---------|---------|
-| `fac_factor_value` | 逐标的因子值 (日频) | Task 1 产出 + Task 2 alpha_* | TimescaleDB 超表, 6月后压缩, 3-5年后归档 |
-| `fac_financial_factor_value` | 财务因子值 (季频, 按ann_date) | B类基本面因子原始值 | 普通表, 数据量极小(385万行/5年), 永久保留 |
-| `fac_factor_registry` | 因子元数据 + 运行时状态 | 全部因子定义 | 普通表, 代码声明 upsert 同步, 永久保留 |
-| `fac_factor_stats` | 因子评估统计指标 | 全因子 × 全样本池 | 普通表, 数据量极小(~1.2万行/年), 永久保留 |
-| `fac_factor_pool` | 样本池定义 | — | 普通表, 初始化后手动维护 |
-
-### 7.3 数据生命周期
-
-```mermaid
-flowchart LR
-    HOT[热层<br/>未压缩 6月] -->|6月后| WARM[温层<br/>TimescaleDB压缩 3-5年]
-    WARM -->|超保留期| COLD[冷层<br/>Parquet归档]
-```
-
-| 因子类别 | 在线保留 | 压缩保留 | 归档保留 |
-|---------|---------|---------|---------|
-| 风险/基本面/Alpha | 6月 | 5年 | 永久 |
-| 技术/量价/另类 | 6月 | 3年 | 5年 |
-
-### 7.4 数据量评估 (5年, 压缩后)
-
-| 数据类型 | 年行数 | 5年压缩大小 |
-|---------|--------|-----------|
-| 日频因子值 (88因子) | ~1.2亿行 | ~5 GB |
-| Alpha因子值 (8池 × 6因子) | ~1200万行 | ~470 MB |
-| 财务因子值 | 77万行 | ~35 MB |
-| 因子统计 | 1.2万行 | < 1 MB |
-| **合计** | | **≈ 5.5 GB** |
-
----
-
-## 八、调度编排
-
-### 8.1 日频流水线
-
-```yaml
-# schedules/daily_factor_pipeline.yml
-cron: "0 17 * * 1-5"  # 工作日 17:00
-steps:
-  - kline_collect → indicator_collect, fund_flow_collect
-  - daily_factor_compute  # Task 1: 因子计算
-```
-
-### 8.2 周频流水线
-
-```yaml
-# schedules/weekly_factor_pipeline.yml
-cron: "0 8 * * 6"  # 周六 08:00
-steps:
-  - factor_evaluate      # Task 3: 因子评估 (先执行)
-  - alpha_synthesize     # Task 2: Alpha合成 (依赖评估结果)
-```
-
-### 8.3 季频流水线
-
-```yaml
-# schedules/quarterly_factor_pipeline.yml
-cron: "0 20 1 1,4,7,10 *"  # 每季度首月 1 号
-steps:
-  - financial_collect
-  - quarterly_factor_compute  # 财务因子计算 → fac_financial_factor_value
-```
-
-### 8.4 任务依赖
+财务数据按季度发布，但因子评估和Alpha合成需要每日截面数据。采用**应用层 PIT 前向填充**而非数据库层前向填充：
 
 ```mermaid
 flowchart TD
-    subgraph "日频 (工作日17:00)"
-        COLLECT[数据采集] --> FC[Task 1: 因子计算]
+    subgraph "存储层"
+        FV[fac_factor_value<br/>逐标的因子<br/>技术/量价/资金流]
+        DI[sdc_daily_indicator<br/>估值指标]
+        FFV[fac_financial_factor_value<br/>季度因子<br/>按ann_date存储<br/>385万行/5年]
     end
-    subgraph "周频 (周六08:00)"
-        FE[Task 3: 因子评估] --> AS[Task 2: Alpha合成]
+
+    subgraph "计算层（应用内存）"
+        CSR[CrossSectionReader<br/>1.加载逐标的因子<br/>2.加载估值指标+标准化<br/>3.PIT加载财务因子+填充+标准化]
     end
-    subgraph "季频"
-        FIN[财务数据采集] --> QFC[季度财务因子计算]
+
+    subgraph "消费层"
+        EVAL[因子评估<br/>IC/ICIR]
+        SYNTH[Alpha合成]
     end
-    FC --> FV[fac_factor_value]
-    QFC --> FFV[fac_financial_factor_value]
-    FV --> FE
-    FFV --> FE
+
+    FV --> CSR
+    DI --> CSR
+    FFV --> CSR
+    CSR --> EVAL
+    CSR --> SYNTH
 ```
 
----
+**PIT 前向填充逻辑**（由 CrossSectionReader 内部执行）：
 
-## 九、关键设计决策
+```
+截面日=2026-04-10 → 查 ann_date ≤ 2026-04-10 的最新财报 → roe=12.5
+截面日=2026-04-11 → 同一条财报 → roe=12.5 (前向填充)
+截面日=2026-05-05 → Q1季报 ann_date=2026-04-28 已发布 → roe=13.1 (更新)
+```
 
-### 9.1 逐标的 vs 截面因子分离
+**填充方式**：不是在数据库中预填充，而是在 CrossSectionReader 中按截面日实时计算。财务源表和 `fac_financial_factor_value` 均保持季度粒度不变。
 
-| 因子类型 | 归属 | 存储 | 标准化时机 |
-|---------|------|------|-----------|
-| 逐标的因子 | Task 1 计算 | fac_factor_value | Task 2/3 截面标准化 |
-| 截面因子 (估值) | CrossSectionReader 加载 | sdc_daily_indicator (不重复存储) | 加载时动态 Z-score |
-| 截面因子 (财务) | CrossSectionReader 加载 | fac_financial_factor_value (季频) | PIT填充后 Z-score |
+**性能分析**：
 
-**理由**: 截面标准化依赖全市场同日数据，与逐标的计算模式矛盾。分离后避免估值/财务数据冗余存储, 支持按样本池差异化标准化。
+- 5年财务因子仅 385万行，加载 < 2秒
+- 内存中向量化前向填充 < 1秒
+- 比 SQL LATERAL JOIN（每截面日×每标的子查询）快几个数量级
+- 比预填充方案节省 98% 存储空间
 
-### 9.2 因子元数据: 代码声明 + DB 注册表双轨
+### 3.2 任务2：Alpha合成 (AlphaSynthesizeTask)
 
-- **代码声明** (FactorPlugin / FactorDefinition): 因子的静态属性 — 唯一真相源
-- **DB 注册表** (fac_factor_registry): 因子的运行时状态 (factor_grade, status) — 由 Task 3 动态更新
-- **同步策略**: Worker 启动时, 代码声明 upsert 到注册表 (静态属性以代码为准, 运行时状态保留 DB 值)
+**调度**：周频（周六 10:00）
+**粒度**：逐样本池(pool_id)，批量计算
+**输入**：fac_factor_value（逐标的因子）+ CrossSectionReader（截面因子）
+**输出**：Alpha权重（更新 fac_factor_registry.params）+ fac_factor_value（alpha_* 因子，含 pool_id）
 
-> **业界参考**: Qlib 使用 YAML 配置 + 代码 Handler 注册; Barra 使用模型定义文件 + 数据库元数据表
+> **设计原则**：Alpha合成任务负责**权重优化**（周频），Alpha信号计算（日频）由独立任务 3.4 负责。合成任务更新权重后，信号任务每日用最新权重生成信号。
 
-### 9.3 样本池多维度评估
+```mermaid
+flowchart TD
+    START[合成触发] --> SELECT[筛选因子<br/>仅A级+B级因子]
+    SELECT --> LOAD_CSR[CrossSectionReader加载<br/>1.逐标的因子(fac_factor_value)<br/>2.估值指标(sdc_daily_indicator)<br/>3.财务因子(fac_financial_factor_value)]
+    LOAD_CSR --> LOAD_STATS[加载统计指标<br/>fac_factor_stats]
+    LOAD_STATS --> PREPROC[预处理<br/>截面标准化→行业中性化]
 
-同一因子在不同股票池中预测力差异巨大 (小盘动量 vs 大盘蓝筹)。因此按 sample_pool 维度分别评估:
+    PREPROC --> BRANCH_EQ[等权合成]
+    PREPROC --> BRANCH_IC[IC加权合成]
+    PREPROC --> BRANCH_ICIR[ICIR加权合成]
+    PREPROC --> BRANCH_ML[ML融合]
 
-- **必选池**: all (全A), idx_300, idx_1000
-- **可选池**: idx_50, idx_500, 行业池, 风格池
-- **等级评定**: 因子全局等级 = max(各池等级), 但合成时按目标池局部等级选因子
+    BRANCH_EQ --> alpha_eq
+    BRANCH_IC --> alpha_ic
+    BRANCH_ICIR --> alpha_icir
+    BRANCH_ML --> alpha_xgb
+    BRANCH_ML --> alpha_lgb
 
-### 9.4 变化优先原则
+    alpha_eq --> ENS[集成合成<br/>Stacking]
+    alpha_ic --> ENS
+    alpha_icir --> ENS
+    alpha_xgb --> ENS
+    alpha_lgb --> ENS
 
-技术因子取变化率/偏离度而非原始值: MA(20) → MA(20)/close-1 → Δ(偏离度)。原始价格值无截面可比性。
+    ENS --> alpha_ensemble
+    alpha_ensemble --> EVAL_ALPHA[评估复合Alpha<br/>ICIR>1.5 / 多空年化>15%]
+    EVAL_ALPHA --> PERSIST_WEIGHT[持久化Alpha权重<br/>更新fac_factor_registry.params]
+    PERSIST_WEIGHT --> COMPUTE_ALPHA[计算Alpha因子值<br/>权重×标准化因子值]
+    COMPUTE_ALPHA --> PERSIST_ALPHA[持久化Alpha因子<br/>fac_factor_value<br/>pool_id=目标样本池]
+    PERSIST_ALPHA --> END[合成完成]
+```
 
-> **业界共识**: Qlib Alpha158 全部价格因子除以 close 归一化; 华泰金工技术因子统一取变化率; Barra CNE6 动量取收益变化率
+**关键设计**：
 
----
+- 通过 CrossSectionReader 统一加载逐标的因子 + 估值指标 + 财务因子
+- 按样本池(pool_id)批量计算，不同样本池的Alpha因子独立
+- 合成结果写回 fac_factor_value，factor_id 以 `alpha_` 前缀标识
+- Alpha权重持久化到 registry，供日频信号任务使用
 
-## 附录: 业界平台对照
+### 3.3 任务3：因子评估 (FactorEvaluateTask)
 
-| 业界平台 | 核心实践 | 本架构对应 |
-|---------|---------|-----------|
-| **Barra CNE6** (MSCI) | 风险/Alpha分离 + 行业市值中性化 + 因子正交化 | A类风险 vs B/C/D类Alpha, PreprocessStage |
-| **WorldQuant** | Alpha101 表达式引擎, BRAIN 自动IC评估 | D1 Alpha101, Task 3 评估管线 |
-| **Qlib** (Microsoft) | Handler预计算 + DataHandler截面 + Model训练 | Task1逐标的 + CrossSectionReader + Task2 ML融合 |
-| **华泰金工** | 因子标准化 + 资金流时段分化 + 交互因子 | 变化优先 + D3 尾盘/开盘 + D4 交互 |
-| **DolphinDB** | 流批一体 + 分区时序存储 | TimescaleDB chunk + 压缩 |
+**调度**：周频（周六 08:00，在Alpha合成前执行）
+**粒度**：逐样本池(pool_id)，批量计算
+**输入**：fac_factor_value（逐标的因子）+ CrossSectionReader（截面因子）
+**输出**：fac_factor_stats + 更新 fac_factor_registry
 
----
+```mermaid
+flowchart TD
+    START[评估触发<br/>周度] --> LOAD_CSR[CrossSectionReader加载<br/>1.逐标的因子(fac_factor_value)<br/>2.估值指标(sdc_daily_indicator)<br/>3.财务因子(fac_financial_factor_value)]
+    LOAD_CSR --> LOAD_RET[加载收益率<br/>下期收益]
+    LOAD_RET --> CALC_IC[计算IC序列<br/>Spearman秩相关]
+    CALC_IC --> CALC_ICIR[计算ICIR<br/>IC_mean/IC_std]
+    CALC_ICIR --> CALC_LAYER[分层回测<br/>5分组多空]
+    CALC_LAYER --> CALC_DECAY[衰减分析<br/>IC半衰期]
+    CALC_DECAY --> CALC_TURNOVER[换手率计算<br/>持仓变动]
+    CALC_TURNOVER --> GRADE[因子等级评定<br/>A/B/C/D]
+    GRADE --> PERSIST_STATS[持久化统计指标<br/>fac_factor_stats]
+    PERSIST_STATS --> UPDATE_REGISTRY[更新注册表<br/>factor_grade/status]
+    UPDATE_REGISTRY --> END[评估完成]
+```
 
-*本文档定义因子系统技术架构。因子规格与任务归属见 [factor-catalog.md](./factor-catalog.md)。*
+**评估指标计算逻辑**：
+
+| 指标    | 计算方式                               | 说明               |
+| ----- | ---------------------------------- | ---------------- |
+| IC    | Spearman(factor\_t, return\_{t+1}) | 滚动252日，每截面日一个IC值 |
+| ICIR  | mean(IC) / std(IC)                 | IC序列的夏普比率        |
+| IC胜率  | count(IC>0) / T                    | IC为正的比例          |
+| 多空年化  | (Q5-Q1) 年化收益                       | 5分组最高组-最低组       |
+| 多空夏普  | (Q5-Q1) 年化 / 年化波动                  | 多空组合风险调整收益       |
+| 换手率   | sum(\|w\_t - w\_{t-1}\|) / 2       | 因子持仓稳定性          |
+| 衰减半衰期 | IC(h=1..20) 拟合指数衰减                 | 因子预测持续性          |
+
+**关键设计**：
+
+- 通过 CrossSectionReader 统一加载逐标的因子 + 估值指标 + 财务因子
+- 按样本池(pool_id)批量计算，同一因子在不同样本池下有独立的统计指标
+- 评估结果更新 fac_factor_stats 和 fac_factor_registry 的 factor_grade
+
+### 3.4 任务4：Alpha信号计算 (AlphaSignalTask)
+
+**调度**：日频（工作日 18:00，在因子计算后执行）
+**粒度**：逐样本池(pool_id)，批量计算
+**输入**：fac_factor_value（逐标的因子）+ CrossSectionReader（截面因子）+ Alpha权重（registry.params）
+**输出**：fac_signal_value（每日Alpha信号）
+
+> **设计原则**：Alpha合成（周频）负责权重优化，Alpha信号（日频）负责用最新权重生成每日交易信号。两者解耦，避免为了日频信号而日频运行昂贵的权重优化。
+
+```mermaid
+flowchart TD
+    START[信号触发<br/>日频] --> LOAD_CSR[CrossSectionReader加载<br/>1.逐标的因子(fac_factor_value)<br/>2.估值指标(sdc_daily_indicator)<br/>3.财务因子(fac_financial_factor_value)]
+    LOAD_CSR --> LOAD_WEIGHT[加载Alpha权重<br/>fac_factor_registry.params]
+    LOAD_WEIGHT --> STANDARDIZE[截面标准化<br/>Z-score + 行业中性化]
+    STANDARDIZE --> COMPUTE[计算Alpha信号<br/>权重 × 标准化因子值]
+    COMPUTE --> PERSIST[持久化信号<br/>fac_signal_value]
+    PERSIST --> END[信号计算完成]
+```
+
+**关键设计**：
+
+- 通过 CrossSectionReader 统一加载所有因子（逐标的 + 估值 + 财务），与评估/合成任务使用相同的数据加载逻辑
+- Alpha权重从 fac_factor_registry.params 读取（由周频合成任务更新）
+- 信号计算是轻量级操作（权重×标准化值），适合日频运行
+- 输出写入 fac_signal_value，供交易系统消费
+
+## 四、插件体系设计
+
+### 4.1 因子计算插件架构
+
+每个因子类别对应一个 Celery 插件，插件内部使用 Pipeline 引擎并发计算。
+
+```mermaid
+classDiagram
+    class BaseTask {
+        +task_name: str
+        +_run_impl(kwargs)
     }
 
     class FactorComputeTask {
