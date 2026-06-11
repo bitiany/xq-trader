@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import importlib
+import pkgutil
 from typing import Any
 
 from framework.commons.logger import get_logger
@@ -97,8 +98,6 @@ def auto_discover_factors() -> int:
     if _DISCOVERED:
         return len(_REGISTRY)
     _DISCOVERED = True
-
-    import pkgutil
 
     import worker.plugins.factor_compute.factors as factors_pkg
 
@@ -256,33 +255,42 @@ async def sync_to_registry() -> int:
 # ── 参数化变体定义 ──
 # 格式：(模块路径:类名, 构造参数)
 _FACTOR_VARIANTS: list[tuple[str, dict[str, Any]]] = [
-    # 技术均线
-    ("worker.plugins.factor_compute.factors.tech_ma:MAFactor", {"period": 5}),
-    ("worker.plugins.factor_compute.factors.tech_ma:MAFactor", {"period": 10}),
-    ("worker.plugins.factor_compute.factors.tech_ma:MAFactor", {"period": 20}),
-    ("worker.plugins.factor_compute.factors.tech_ma:MAFactor", {"period": 30}),
-    ("worker.plugins.factor_compute.factors.tech_ma:MAFactor", {"period": 60}),
-    ("worker.plugins.factor_compute.factors.tech_ma:MAFactor", {"period": 120}),
-    ("worker.plugins.factor_compute.factors.tech_ma:MAFactor", {"period": 250}),
-    ("worker.plugins.factor_compute.factors.tech_ma:EMAFactor", {"period": 12}),
-    ("worker.plugins.factor_compute.factors.tech_ma:EMAFactor", {"period": 26}),
-    # 振荡器
+    # A1 规模因子
+    ("worker.plugins.factor_compute.factors.risk:CsLogMvFactor", {}),
+    # A3 波动率因子（Barra 风险因子）
+    ("worker.plugins.factor_compute.factors.risk:DastdFactor", {}),
+    ("worker.plugins.factor_compute.factors.risk:CmraFactor", {}),
+    # A4 流动性因子
+    ("worker.plugins.factor_compute.factors.risk:CsTurnoverFactor", {}),
+    ("worker.plugins.factor_compute.factors.risk:CsLogAmountFactor", {}),
+    ("worker.plugins.factor_compute.factors.risk:CsVolumeRatioFactor", {}),
+    # C4 均线偏离（替代原始均线值，偏离度截面可比）
+    ("worker.plugins.factor_compute.factors.tech_ma:MABiasFactor", {"period": 5}),
+    ("worker.plugins.factor_compute.factors.tech_ma:MABiasFactor", {"period": 10}),
+    ("worker.plugins.factor_compute.factors.tech_ma:MABiasFactor", {"period": 20}),
+    ("worker.plugins.factor_compute.factors.tech_ma:MABiasFactor", {"period": 60}),
+    ("worker.plugins.factor_compute.factors.tech_ma:MABiasDeltaFactor", {"period": 20}),
+    # C3 超买超卖
     ("worker.plugins.factor_compute.factors.tech_oscillator:RSIFactor", {"period": 6}),
     ("worker.plugins.factor_compute.factors.tech_oscillator:RSIFactor", {"period": 14}),
     ("worker.plugins.factor_compute.factors.tech_oscillator:RSIFactor", {"period": 24}),
+    ("worker.plugins.factor_compute.factors.tech_oscillator:RSIDeltaFactor", {"period": 14}),
     ("worker.plugins.factor_compute.factors.tech_oscillator:KDJFactor", {}),
     ("worker.plugins.factor_compute.factors.tech_oscillator:CCIFactor", {}),
     ("worker.plugins.factor_compute.factors.tech_oscillator:WILLRFactor", {}),
     ("worker.plugins.factor_compute.factors.tech_oscillator:BIASFactor", {"period": 6}),
     ("worker.plugins.factor_compute.factors.tech_oscillator:BIASFactor", {"period": 12}),
     ("worker.plugins.factor_compute.factors.tech_oscillator:BIASFactor", {"period": 24}),
-    # 趋势
-    ("worker.plugins.factor_compute.factors.tech_trend:MACDFactor", {}),
+    # C2 趋势（MACD标准化 + ADX + BOLL位置 + SAR偏离）
+    ("worker.plugins.factor_compute.factors.tech_trend:MACDHistRatioFactor", {}),
+    ("worker.plugins.factor_compute.factors.tech_trend:MACDHistDeltaFactor", {}),
     ("worker.plugins.factor_compute.factors.tech_trend:ADXFactor", {}),
-    ("worker.plugins.factor_compute.factors.tech_trend:BOLLFactor", {}),
-    ("worker.plugins.factor_compute.factors.tech_trend:SARFactor", {}),
-    # 波动率
-    ("worker.plugins.factor_compute.factors.tech_volatility:ATRFactor", {}),
+    ("worker.plugins.factor_compute.factors.tech_trend:ADXDeltaFactor", {}),
+    ("worker.plugins.factor_compute.factors.tech_trend:BOLLPositionFactor", {}),
+    ("worker.plugins.factor_compute.factors.tech_trend:SARDeviationFactor", {}),
+    # A3 波动率（ATR标准化替代原始ATR）
+    ("worker.plugins.factor_compute.factors.tech_volatility:ATRRatioFactor", {}),
+    ("worker.plugins.factor_compute.factors.tech_volatility:ATRRatioDeltaFactor", {}),
     ("worker.plugins.factor_compute.factors.tech_volatility:VolatilityFactor", {"period": 10}),
     ("worker.plugins.factor_compute.factors.tech_volatility:VolatilityFactor", {"period": 20}),
     ("worker.plugins.factor_compute.factors.tech_volatility:VolatilityFactor", {"period": 60}),
@@ -291,25 +299,37 @@ _FACTOR_VARIANTS: list[tuple[str, dict[str, Any]]] = [
     ("worker.plugins.factor_compute.factors.tech_volatility:AmihudFactor", {}),
     ("worker.plugins.factor_compute.factors.tech_volatility:VolOscFactor", {}),
     ("worker.plugins.factor_compute.factors.tech_volatility:ADVFactor", {"period": 20}),
-    # 动量
+    # C1 动量/反转（删除ReversalFactor，与Momentum完全共线）
     ("worker.plugins.factor_compute.factors.momentum:CsPctChgFactor", {}),
     ("worker.plugins.factor_compute.factors.momentum:MomentumFactor", {"period": 5}),
     ("worker.plugins.factor_compute.factors.momentum:MomentumFactor", {"period": 20}),
     ("worker.plugins.factor_compute.factors.momentum:MomentumFactor", {"period": 60}),
-    ("worker.plugins.factor_compute.factors.momentum:ReversalFactor", {"period": 5}),
-    ("worker.plugins.factor_compute.factors.momentum:ReversalFactor", {"period": 20}),
     ("worker.plugins.factor_compute.factors.momentum:BarraMomentumFactor", {}),
     ("worker.plugins.factor_compute.factors.momentum:BarraShortTermReversalFactor", {}),
     ("worker.plugins.factor_compute.factors.momentum:RocFactor", {"period": 10}),
-    # 资金流
+    # D3 资金流（占比形式替代绝对金额，截面可比）
     ("worker.plugins.factor_compute.factors.fund_flow:CsMainNetPctFactor", {}),
-    ("worker.plugins.factor_compute.factors.fund_flow:HugeNetAmtFactor", {}),
-    ("worker.plugins.factor_compute.factors.fund_flow:BigNetAmtFactor", {}),
-    ("worker.plugins.factor_compute.factors.fund_flow:CsNetMfAmtFactor", {}),
-    ("worker.plugins.factor_compute.factors.fund_flow:MainNetAmtFactor", {}),
-    ("worker.plugins.factor_compute.factors.fund_flow:MainNetAmtMAFactor", {"period": 5}),
-    ("worker.plugins.factor_compute.factors.fund_flow:MainNetAmtMAFactor", {"period": 10}),
-    ("worker.plugins.factor_compute.factors.fund_flow:MainNetAmtMAFactor", {"period": 20}),
+    ("worker.plugins.factor_compute.factors.fund_flow:CsNetMfPctFactor", {}),
+    ("worker.plugins.factor_compute.factors.fund_flow:HugeNetPctFactor", {}),
+    ("worker.plugins.factor_compute.factors.fund_flow:BigNetPctFactor", {}),
+    # D类 Alpha101 量价因子
+    ("worker.plugins.factor_compute.factors.alpha101:Alpha12Factor", {}),
+    ("worker.plugins.factor_compute.factors.alpha101:Alpha101Factor", {}),
+    ("worker.plugins.factor_compute.factors.alpha101:Alpha55Factor", {}),
+    ("worker.plugins.factor_compute.factors.alpha101:Alpha1Factor", {}),
+    ("worker.plugins.factor_compute.factors.alpha101:Alpha33Factor", {}),
+    ("worker.plugins.factor_compute.factors.alpha101:Alpha41Factor", {}),
+    # D类 Alpha158 量价因子
+    ("worker.plugins.factor_compute.factors.alpha158:Kmid5Factor", {}),
+    ("worker.plugins.factor_compute.factors.alpha158:Klen5Factor", {}),
+    ("worker.plugins.factor_compute.factors.alpha158:Kup25Factor", {}),
+    ("worker.plugins.factor_compute.factors.alpha158:Klow25Factor", {}),
+    ("worker.plugins.factor_compute.factors.alpha158:Rsv9Factor", {}),
+    ("worker.plugins.factor_compute.factors.alpha158:Cntp20Factor", {}),
+    ("worker.plugins.factor_compute.factors.alpha158:Imax20Factor", {}),
+    ("worker.plugins.factor_compute.factors.alpha158:Roc5CloseFactor", {}),
+    ("worker.plugins.factor_compute.factors.alpha158:Std20CloseFactor", {}),
+    ("worker.plugins.factor_compute.factors.alpha158:CorrPv10Factor", {}),
     # 前向收益率（评估标签）
     ("worker.plugins.factor_compute.factors.return_factor:ReturnFactor", {"period": 1}),
     ("worker.plugins.factor_compute.factors.return_factor:ReturnFactor", {"period": 5}),

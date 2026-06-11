@@ -44,11 +44,12 @@ xq-trader/
 
 ```powershell
 conda activate .\.conda
+$env:ENV=".env"
 ```
 
 ### 2. 配置环境变量
 
-复制并编辑 `.env` 文件，配置数据库连接信息：
+复制并编辑 `.env` 文件，配置数据库和 Redis 连接信息：
 
 ```
 DATABASES_DEFAULT_HOST=localhost
@@ -56,28 +57,35 @@ DATABASES_DEFAULT_PORT=5432
 DATABASES_DEFAULT_USER=postgres
 DATABASES_DEFAULT_PASSWORD=your_password
 DATABASES_DEFAULT_DB=xqtrader
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_PASSWORD=your_redis_password
 ...
 ```
 
-### 3. 启动服务
+### 3. 启动 API 服务
 
 ```powershell
+conda activate .\.conda
+$env:ENV=".env"
 uvicorn xqtrader.main:create_app --factory --host 0.0.0.0 --port 8096
 ```
 
 ### 4. 启动 Worker（异步任务调度）
 
 ```powershell
-# 启动 Celery Worker（支持 4 个并发任务）
-celery -A worker.celery_entry worker --loglevel=info -c 4
-
-# 启动 Celery Beat（定时任务）
-celery -A worker.celery_entry beat --loglevel=info
+conda activate .\.conda
+$env:ENV=".env"
+celery -A worker.celery_entry worker -c 2 -P threads -Q celery,factor,market --loglevel=info
 ```
 
 **参数说明**：
-- `-c 4`：启动 4 个并发工作进程，支持并行处理任务
+- `-c 2`：2 个并发工作线程（线程池模式，连接池有限时不宜过大）
+- `-P threads`：使用线程池（Windows 推荐，避免多进程问题）
+- `-Q celery,factor,market`：监听三个队列，确保所有任务都能被接收
 - `--loglevel=info`：日志级别为 info
+
+> **注意**：当前验证阶段不启动 Celery Beat，所有任务通过 CLI 手动触发。
 
 ### 5. Worker CLI 工具
 
@@ -86,6 +94,7 @@ celery -A worker.celery_entry beat --loglevel=info
 ```powershell
 # 设置环境
 conda activate .\.conda
+$env:ENV=".env"
 $env:PYTHONPATH="src"
 ```
 
@@ -107,14 +116,17 @@ python -m worker.cli run factor.compute_daily --mode incremental
 # 因子计算 — 指定日期范围
 python -m worker.cli run factor.compute_daily --start-date 2024-01-01 --end-date 2024-12-31
 
+# 因子计算 — 指定并发数
+python -m worker.cli run factor.compute_daily --kwargs max_workers=5
+
+# 因子评估 — 指定样本池
+python -m worker.cli run factor.evaluate_weekly --kwargs pool_ids=idx_300
+
 # 资金流采集
 python -m worker.cli run market.fund_flow_collect --symbols 000001.SZ
 
 # 日线行情采集
 python -m worker.cli run market.daily_kline_collect
-
-# 传递额外参数
-python -m worker.cli run factor.compute_daily --kwargs max_workers=5 warmup_bars=500
 ```
 
 **管理分布式锁**：
@@ -128,6 +140,12 @@ python -m worker.cli lock-release factor.compute_daily
 
 # 释放所有任务锁
 python -m worker.cli lock-release-all
+```
+
+**清空任务队列**（慎用，会丢弃所有待执行任务）：
+
+```powershell
+celery -A worker.celery_entry purge -f
 ```
 
 ### 6. 访问文档

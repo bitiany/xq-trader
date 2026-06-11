@@ -21,8 +21,8 @@ datasource:
     user: ${DATABASES_STOCK_USER}
     password: ${ENC:gAAAAABp7KMY-wUj7QLs8vItk3IHmQc3dZA1Q0i-Xi06EL-OPyGEa7THP-_pGy6AKJlPibDzZbZoB5zuPhyWO9vwRDVOnfYT3Q==}
     schema: ${DATABASES_STOCK_SCHEMA:-stock}
-    pool_size: 10
-    max_overflow: 15
+    pool_size: 20
+    max_overflow: 30
     echo: false
 
   research:
@@ -33,8 +33,8 @@ datasource:
     user: ${DATABASES_RESEARCH_USER}
     password: ${ENC:gAAAAABp7KMY-wUj7QLs8vItk3IHmQc3dZA1Q0i-Xi06EL-OPyGEa7THP-_pGy6AKJlPibDzZbZoB5zuPhyWO9vwRDVOnfYT3Q==}
     schema: ${DATABASES_RESEARCH_SCHEMA:-research}
-    pool_size: 10
-    max_overflow: 15
+    pool_size: 15
+    max_overflow: 25
     echo: false
 
   trading:
