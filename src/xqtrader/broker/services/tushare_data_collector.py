@@ -167,3 +167,56 @@ class TushareDataCollector:
             raise DataCollectionError(
                 f"moneyflow 采集失败 ts_code={ts_code} trade_date={trade_date}: {e}"
             ) from e
+
+    async def fetch_daily_basic(
+        self,
+        ts_code: str = "",
+        trade_date: str = "",
+        start_date: str = "",
+        end_date: str = "",
+    ) -> pd.DataFrame:
+        """获取每日指标数据（估值/换手率/市值等）。
+
+        接口：daily_basic
+        限制：单次最大 6000 条，需 2000 积分
+
+        Args:
+            ts_code: 股票代码，如 "000001.SZ"
+            trade_date: 交易日期 YYYYMMDD
+            start_date: 开始日期 YYYYMMDD
+            end_date: 结束日期 YYYYMMDD
+
+        Returns:
+            DataFrame，包含 ts_code/trade_date/close/turnover_rate/pe/pb/total_mv 等字段
+        """
+        if not ts_code and not trade_date:
+            raise DataCollectionError("ts_code 和 trade_date 至少输入一个")
+
+        try:
+            await self._limiter.acquire()
+            loop = asyncio.get_running_loop()
+            func = partial(
+                self._pro.daily_basic,
+                ts_code=ts_code,
+                trade_date=trade_date,
+                start_date=start_date,
+                end_date=end_date,
+            )
+            result = await loop.run_in_executor(self._get_executor(), func)
+            df = pd.DataFrame() if result is None else pd.DataFrame(result)
+            if df.empty:
+                logger.debug(
+                    "daily_basic 无数据: ts_code=%s trade_date=%s range=%s~%s",
+                    ts_code, trade_date, start_date, end_date,
+                )
+                return pd.DataFrame()
+
+            logger.debug(
+                "daily_basic 获取完成: ts_code=%s rows=%d",
+                ts_code, len(df),
+            )
+            return df
+        except Exception as e:
+            raise DataCollectionError(
+                f"daily_basic 采集失败 ts_code={ts_code} trade_date={trade_date}: {e}"
+            ) from e

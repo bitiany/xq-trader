@@ -174,15 +174,18 @@ class DailyKlineIncrementalStage:
         succeeded = 0
         failed = 0
         total_persisted = 0
+        actual_max_date: date | None = None  # 跟踪实际数据的最新日期
 
         # 标的分片
         shards = [stock_codes[i:i + self._batch_size] for i in range(0, len(stock_codes), self._batch_size)]
 
         for idx, shard in enumerate(shards, 1):
             try:
-                persisted = await self._process_shard(shard, sd, ed, watermark_map)
+                persisted, shard_max = await self._process_shard(shard, sd, ed, watermark_map)
                 succeeded += 1
                 total_persisted += persisted
+                if shard_max is not None:
+                    actual_max_date = max(actual_max_date, shard_max) if actual_max_date else shard_max
             except Exception as e:
                 failed += 1
                 logger.error(
@@ -197,9 +200,9 @@ class DailyKlineIncrementalStage:
                     idx, len(shards), succeeded, failed, total_persisted,
                 )
 
-        # 更新市场级水位（仅在有成功分片时）
-        if succeeded > 0:
-            await self._update_market_watermark(end_date)
+        # 更新市场级水位（按实际数据的最新日期）
+        if actual_max_date is not None:
+            await self._update_market_watermark(actual_max_date)
 
         logger.info(
             "[kline.incremental] 完成: range=%s~%s shards=%d succeeded=%d failed=%d persisted=%d",
@@ -213,8 +216,12 @@ class DailyKlineIncrementalStage:
         sd: str,
         ed: str,
         watermark_map: dict[str, date],
-    ) -> int:
-        """处理单个分片：采集→清洗→持久化→更新标的水位。"""
+    ) -> tuple[int, date | None]:
+        """处理单个分片：采集→清洗→持久化→更新标的水位。
+
+        Returns:
+            (persisted_count, max_date) - 持久化行数和数据的最新日期
+        """
         # 采集
         raw = await _collector.fetch_kline_daily(
             stock_list=shard,
@@ -258,7 +265,8 @@ class DailyKlineIncrementalStage:
         if updated_codes:
             await self._batch_update_item_watermarks(updated_codes, max_dates)
 
-        return total_persisted
+        shard_max_date = max(max_dates) if max_dates else None
+        return total_persisted, shard_max_date
 
     @staticmethod
     async def _get_all_stock_codes() -> list[str]:

@@ -1,0 +1,37 @@
+name: daily_indicator
+celery_task_name: market.daily_indicator_collect
+version: "1.0.0"
+task_name: 每日指标采集
+task_name_en: Daily Indicator Collection
+description: 逐标的回补全市场每日指标数据（估值/换手率/市值等），数据源为Tushare daily_basic接口
+category: io
+task_type: on_demand
+queue: market
+timeout: 14400
+retry_config:
+  max_retries: 2
+  retry_backoff: true
+  retry_backoff_max: 600
+params_schema:
+  type: object
+  properties:
+    pipeline_name:
+      type: string
+      title: 管线名称
+      default: "daily_indicator"
+    concurrency:
+      type: integer
+      title: 并发数
+      default: 50
+    stock_codes:
+      type: array
+      items:
+        type: string
+      title: 股票代码列表
+    max_count:
+      type: integer
+      title: 最大标的数量
+      default: 0
+    collect_date:
+      type: string
+      title: 采集起始日期

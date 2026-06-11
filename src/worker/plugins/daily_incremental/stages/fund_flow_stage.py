@@ -221,12 +221,15 @@ class FundFlowIncrementalStage:
         succeeded = 0
         failed = 0
         total_persisted = 0
+        actual_max_date: date | None = None  # 跟踪实际数据的最新日期
 
         for idx, td in enumerate(trade_dates, 1):
             try:
                 persisted = await self._process_trade_date(td, watermark_map)
                 succeeded += 1
                 total_persisted += persisted
+                if persisted > 0:
+                    actual_max_date = td
             except Exception as e:
                 failed += 1
                 logger.error(
@@ -240,9 +243,9 @@ class FundFlowIncrementalStage:
                     idx, total, succeeded, failed, total_persisted,
                 )
 
-        # 更新市场级水位（仅在有成功日期时）
-        if succeeded > 0:
-            await self._update_market_watermark(end_date)
+        # 更新市场级水位（按实际数据的最新日期）
+        if actual_max_date is not None:
+            await self._update_market_watermark(actual_max_date)
 
         logger.info(
             "[fund_flow.incremental] 完成: range=%s~%s days=%d succeeded=%d failed=%d persisted=%d",

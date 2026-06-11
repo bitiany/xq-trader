@@ -22,6 +22,7 @@
 
 from __future__ import annotations
 
+from datetime import date as date_type
 from typing import Any
 
 from framework.commons.logger import get_logger
@@ -156,6 +157,13 @@ class PersistStage(Stage):
             count = await persist_kline_data(df)
 
             ctx.set("persisted_count", count)
+            # 记录数据的最新日期，供水位更新使用
+            if count > 0 and "trade_date" in df.columns:
+                max_td = df["trade_date"].map(
+                    lambda v: date_type.fromisoformat(str(v))
+                ).max()
+                ctx.set("max_trade_date", max_td)
+
             logger.debug("[kline.collect] 持久化完成: %s rows=%d", stock_code, count)
             return StageResult.ok(data={"stock_code": stock_code, "persisted": count})
         except Exception as e:
