@@ -69,7 +69,7 @@ class WatermarkService:
             )
             return None
 
-        logger.info(
+        logger.debug(
             "水位落后，需增量采集: pipeline=%s code=%s watermark=%s trade_date=%s",
             pipeline_name, watermark_code, watermark_date, latest_trade_date,
         )

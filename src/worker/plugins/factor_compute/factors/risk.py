@@ -1,8 +1,9 @@
-"""A 类风险因子 — 对数总市值 / 换手率 / 对数成交额 / 量比 / DASTD / CMRA。
+"""A 类风险因子 — 对数总市值 / 换手率 / 流通换手率 / 对数成交额 / 量比 / DASTD / CMRA。
 
-参照 factor-catalog v5.0：
+参照 factor-catalog v6.0：
   - cs_log_mv: 对数总市值，log(1+total_mv)，截面可比
   - cs_turnover: 换手率，直接取 turnover_rate，截面可比
+  - turnover_f: 流通换手率，直接取 turnover_rate_f，截面可比
   - cs_log_amount: 对数成交额，log(1+amount)，截面可比
   - cs_volume_ratio: 量比，当日成交量 / 5日均量
   - dastd: Barra 日收益加权标准差，ewm(halflife=42).std() × √252
@@ -11,6 +12,7 @@
 因子ID：
   - cs_log_mv: 对数总市值
   - cs_turnover: 换手率
+  - turnover_f: 流通换手率
   - cs_log_amount: 对数成交额
   - cs_volume_ratio: 量比
   - dastd: 日收益加权标准差
@@ -66,6 +68,26 @@ class CsTurnoverFactor(FactorPlugin):
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         values = df["turnover_rate"].astype(float)
+        return pd.DataFrame({self.factor_id: values.values}, index=df.index)
+
+
+class TurnoverFFactor(FactorPlugin):
+    """流通换手率因子 — 直接取 turnover_rate_f，截面可比。"""
+
+    factor_id: str = "turnover_f"
+    display_name: str = "流通换手率"
+    category: str = "risk"
+    group_id: str = "turnover_f"
+    direction: str = "DESC"
+    scope: str = "both"
+    signal_type: str = "continuous"
+    dependencies: list[str] = ["turnover_rate_f"]
+    min_periods: int = 1
+    requires_full_history: bool = False
+    data_origin: str = "market"
+
+    def compute(self, df: pd.DataFrame) -> pd.DataFrame:
+        values = df["turnover_rate_f"].astype(float)
         return pd.DataFrame({self.factor_id: values.values}, index=df.index)
 
 

@@ -77,6 +77,12 @@ class FactorPersistStage(Stage):
             td_series = pd.to_datetime(df["trade_date"])
             mask = td_series.dt.date >= cutoff_date
             df_filtered = df.loc[mask]
+            logger.info(
+                "[factor.compute] %s cutoff=%s total=%d filtered=%d td_type=%s td_sample=%s",
+                symbol, cutoff_date, len(df), len(df_filtered),
+                type(df["trade_date"].iloc[0]).__name__ if len(df) > 0 else "empty",
+                df["trade_date"].iloc[0] if len(df) > 0 else "N/A",
+            )
         else:
             df_filtered = df
 
@@ -104,7 +110,10 @@ class FactorPersistStage(Stage):
             if max_td is not None:
                 ctx.set("max_trade_date", max_td)
 
-        logger.info("[factor.compute] %s upserted=%d factors=%d cutoff=%s", symbol, count, len(factor_cols), start_date)
+        logger.info(
+            "[factor.compute] %s upserted=%d rows_built=%d factors=%d cutoff=%s",
+            symbol, count, len(rows), len(factor_cols), actual_cutoff,
+        )
         return StageResult.ok(data={"symbol": symbol, "persisted": count})
 
     @staticmethod

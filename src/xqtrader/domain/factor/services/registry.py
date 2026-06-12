@@ -262,6 +262,7 @@ _FACTOR_VARIANTS: list[tuple[str, dict[str, Any]]] = [
     ("worker.plugins.factor_compute.factors.risk:CmraFactor", {}),
     # A4 流动性因子
     ("worker.plugins.factor_compute.factors.risk:CsTurnoverFactor", {}),
+    ("worker.plugins.factor_compute.factors.risk:TurnoverFFactor", {}),
     ("worker.plugins.factor_compute.factors.risk:CsLogAmountFactor", {}),
     ("worker.plugins.factor_compute.factors.risk:CsVolumeRatioFactor", {}),
     # C4 均线偏离（替代原始均线值，偏离度截面可比）
@@ -334,4 +335,11 @@ _FACTOR_VARIANTS: list[tuple[str, dict[str, Any]]] = [
     ("worker.plugins.factor_compute.factors.return_factor:ReturnFactor", {"period": 1}),
     ("worker.plugins.factor_compute.factors.return_factor:ReturnFactor", {"period": 5}),
     ("worker.plugins.factor_compute.factors.return_factor:ReturnFactor", {"period": 20}),
+    # E2 K线形态聚合因子
+    ("worker.plugins.factor_compute.factors.candle_pattern:CdlBullFreqFactor", {}),
+    ("worker.plugins.factor_compute.factors.candle_pattern:CdlBearFreqFactor", {}),
+    ("worker.plugins.factor_compute.factors.candle_pattern:CdlNetScoreFactor", {}),
+    ("worker.plugins.factor_compute.factors.candle_pattern:CdlUpperShadowRatioFactor", {}),
+    ("worker.plugins.factor_compute.factors.candle_pattern:CdlLowerShadowRatioFactor", {}),
+    ("worker.plugins.factor_compute.factors.candle_pattern:CdlBodyRatioFactor", {}),
 ]
