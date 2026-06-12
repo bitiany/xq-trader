@@ -4,6 +4,7 @@ import {
   Database,
   LayoutDashboard,
   LineChart,
+  Radio,
   Settings,
 } from 'lucide-react'
 
@@ -18,6 +19,7 @@ export interface NavItem {
 export const NAV_ITEMS: NavItem[] = [
   { id: 'dashboard', labelKey: 'nav.dashboard', path: '/', icon: LayoutDashboard },
   { id: 'backtest', labelKey: 'nav.backtest', path: '/backtest', icon: LineChart },
+  { id: 'trading', labelKey: 'nav.trading', path: '/trading', icon: Radio },
   { id: 'data', labelKey: 'nav.data', path: '/data', icon: Database },
   { id: 'monitor', labelKey: 'nav.monitor', path: '/monitor', icon: Activity },
   { id: 'settings', labelKey: 'nav.settings', path: '/settings', icon: Settings },

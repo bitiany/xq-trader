@@ -14,7 +14,8 @@ import { SettingsLayout } from '@/pages/settings/SettingsLayout'
 import { SettingsOverviewPage } from '@/pages/settings/SettingsOverviewPage'
 import { AuthGuard } from '@/router/AuthGuard'
 import { RouteErrorBoundary } from '@/router/RouteErrorBoundary'
-import { Activity } from 'lucide-react'
+import { Activity, Radio } from 'lucide-react'
+import { LiveCockpitPage } from '@/pages/trading/LiveCockpitPage'
 
 export const router = createBrowserRouter([
   {
@@ -35,6 +36,7 @@ export const router = createBrowserRouter([
         { index: true, element: <DataOverviewPage /> },
         { path: 'tasks', element: <DataTasksPage /> },
       ] },
+      { path: 'trading', element: <LiveCockpitPage /> },
       { path: 'monitor', element: <RoutePlaceholder pageKey="monitor" icon={Activity} /> },
       {
         path: 'settings',

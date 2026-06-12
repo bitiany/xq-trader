@@ -10,10 +10,10 @@
     "data": "Data",
     "monitor": "Monitor",
     "settings": "Settings",
+    "trading": "Live Trading",
     "orders": "Orders"
   },
   "topbar": {
-    "expandNav": "Expand navigation",
     "collapseNav": "Collapse navigation",
     "searchPlaceholder": "Search symbol or company name...",
     "globalSearch": "Global search",
