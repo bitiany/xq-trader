@@ -25,7 +25,10 @@ logger = get_logger("factor.load")
 
 
 class FactorLoadStage(Stage):
-    """加载阶段 — 加载全量K线行情和资金流数据。"""
+    """加载阶段 — 加载全量K线行情和资金流数据。
+
+    增量跳过由 WatermarkAspect 前切控制（is_up_to_date 标记）。
+    """
 
     @property
     def name(self) -> str:
@@ -33,6 +36,10 @@ class FactorLoadStage(Stage):
 
     async def process(self, item: Any, ctx: PipelineContext) -> StageResult:
         symbol: str = item
+
+        # 水位最新时由 WatermarkAspect 标记跳过
+        if ctx.get("is_up_to_date"):
+            return StageResult.ok(data={"symbol": symbol, "rows": 0, "skipped": True})
 
         # 加载全量K线行情（无日期过滤，保证有状态因子可从首根K线累计）
         df_kline = await self._load_kline(symbol)

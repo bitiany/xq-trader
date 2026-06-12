@@ -1,7 +1,11 @@
 """日频因子计算任务 — 逐标的计算技术/量价/资金流因子。
 
 管线流程（每个标的串行执行）：
-  FactorLoadStage → FactorCalcStage → FactorPreprocessStage → FactorPersistStage
+  WatermarkAspect(前切) → LoadStage → CalcStage → PreprocessStage → PersistStage → WatermarkAspect(后切)
+
+水位管理（WatermarkAspect）：
+  - 前切：查询水位日期，水位最新时标记 is_up_to_date 跳过管线
+  - 后切：持久化成功后更新水位日期为数据最新日期
 
 数据加载与计算策略：
   - LoadStage: 始终加载全量历史数据（无日期过滤）
@@ -12,20 +16,20 @@
 
 from __future__ import annotations
 
-import json
 import warnings
-from datetime import date, timedelta
 from typing import Any
 
 from framework.commons.logger import get_logger
 from framework.pipeline import Pipeline, PipelineEngine
 from framework.scheduler.base_task import BaseTask
+from worker.plugins.aspects import WatermarkAspect
 from worker.plugins.factor_compute.stages import (
     FactorCalcStage,
     FactorLoadStage,
     FactorPersistStage,
     FactorPreprocessStage,
 )
+from worker.plugins.utils import parse_list_param
 from xqtrader.domain.factor.services.registry import (
     auto_discover_factors,
     register_factor_variants,
@@ -38,25 +42,8 @@ logger = get_logger("factor.compute")
 
 _COMPUTE_MODE_INCREMENTAL = "incremental"
 _COMPUTE_MODE_FULL = "full"
-_RETENTION_YEARS = 5
 _DEFAULT_WARMUP_BARS = 300
-
-
-def _parse_list_param(value: Any) -> list[str] | None:
-    """解析可能为JSON字符串的列表参数。"""
-    if value is None:
-        return None
-    if isinstance(value, list):
-        return value
-    if isinstance(value, str):
-        try:
-            parsed = json.loads(value)
-            if isinstance(parsed, list):
-                return parsed
-            return [value]
-        except (json.JSONDecodeError, TypeError):
-            return [v.strip() for v in value.split(",") if v.strip()]
-    return None
+_WATERMARK_PIPELINE = "factor_compute"
 
 
 class FactorComputeTask(BaseTask):
@@ -78,9 +65,10 @@ class FactorComputeTask(BaseTask):
     prevent_concurrent = True
 
     async def _run_impl(self, **kwargs: Any) -> dict[str, Any]:
-        symbols = _parse_list_param(kwargs.get("symbols"))
-        start_date = str(kwargs.get("start_date", ""))
-        factor_ids = _parse_list_param(kwargs.get("factor_ids"))
+        symbols = parse_list_param(kwargs.get("symbols"))
+        user_start_date = kwargs.get("start_date")
+        start_date = str(user_start_date or "")
+        factor_ids = parse_list_param(kwargs.get("factor_ids"))
         max_workers = int(kwargs.get("max_workers", 10))
         mode = str(kwargs.get("mode", _COMPUTE_MODE_INCREMENTAL))
         warmup_bars = int(kwargs.get("warmup_bars", _DEFAULT_WARMUP_BARS))
@@ -104,8 +92,9 @@ class FactorComputeTask(BaseTask):
             return {"status": "FAILED", "message": "No factors resolved"}
 
         # 计算增量持久化起始日期（仅用于 PersistStage 截断）
+        persist_start_date = self._calc_persist_start_date()
         if not start_date:
-            start_date = self._calc_persist_start_date(mode)
+            start_date = persist_start_date
 
         # 获取标的列表
         if not symbols:
@@ -118,21 +107,27 @@ class FactorComputeTask(BaseTask):
             len(symbols), mode, len(factors), start_date,
         )
 
-        # 构建管线
+        # 构建管线：WatermarkAspect 前切判断水位，后切更新水位
         pipeline = Pipeline(
-            name="factor_compute",
+            name=_WATERMARK_PIPELINE,
             stages=[
                 FactorLoadStage(),
                 FactorCalcStage(),
                 FactorPreprocessStage(),
                 FactorPersistStage(),
             ],
+            aspects=[WatermarkAspect(pipeline_name=_WATERMARK_PIPELINE)],
         )
 
         # 全局上下文
+        # 当用户显式指定 start_date 时，作为 collect_date 传入，绕过水位检查
+        # persist_start_date 为持久化截断下限，PersistStage 使用 max(start_date, persist_start_date)
         global_ctx: dict[str, Any] = {
             "start_date": start_date,
+            "persist_start_date": persist_start_date,
             "factor_ids": [f.factor_id for f in factors],
+            "factor_plugins": factors,
+            "collect_date": start_date if user_start_date else None,
             "warmup_bars": warmup_bars,
         }
 
@@ -147,11 +142,13 @@ class FactorComputeTask(BaseTask):
         return result.to_dict()
 
     @staticmethod
-    def _calc_persist_start_date(mode: str) -> str:
-        """计算增量持久化起始日期。"""
-        # 统一从5年前开始持久化（预热期数据仅参与计算不持久化）
-        start = date.today() - timedelta(days=_RETENTION_YEARS * 365)
-        return start.strftime("%Y-%m-%d")
+    def _calc_persist_start_date() -> str:
+        """计算增量持久化起始日期。
+
+        保留5年数据，按自然年计算，即从2021-01-01开始持久化。
+        预热期数据仅参与计算不持久化。
+        """
+        return "2021-01-01"
 
     @staticmethod
     async def _get_security_list() -> list[str]:

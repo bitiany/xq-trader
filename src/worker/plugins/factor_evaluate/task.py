@@ -14,7 +14,6 @@
 
 from __future__ import annotations
 
-import json
 from datetime import date, timedelta
 from typing import Any
 
@@ -22,6 +21,7 @@ import numpy as np
 
 from framework.commons.logger import get_logger
 from framework.scheduler.base_task import BaseTask
+from worker.plugins.utils import parse_list_param
 from xqtrader.domain.factor.models.factor_pool import FacFactorPool
 from xqtrader.domain.factor.models.factor_registry import FacFactorRegistry
 from xqtrader.domain.factor.models.factor_stats import FacFactorStats
@@ -37,23 +37,6 @@ _RETENTION_YEARS = 5
 _DEFAULT_WINDOW = 252
 
 
-def _parse_list_param(value: Any) -> list[str] | None:
-    """解析可能为 JSON 字符串的列表参数。"""
-    if value is None:
-        return None
-    if isinstance(value, list):
-        return value
-    if isinstance(value, str):
-        try:
-            parsed = json.loads(value)
-            if isinstance(parsed, list):
-                return parsed
-            return [value]
-        except (json.JSONDecodeError, TypeError):
-            return [v.strip() for v in value.split(",") if v.strip()]
-    return None
-
-
 class FactorEvaluateTask(BaseTask):
     """周频因子评估任务。"""
 
@@ -64,8 +47,8 @@ class FactorEvaluateTask(BaseTask):
     prevent_concurrent = True
 
     async def _run_impl(self, **kwargs: Any) -> dict[str, Any]:
-        pool_ids = _parse_list_param(kwargs.get("pool_ids"))
-        factor_ids = _parse_list_param(kwargs.get("factor_ids"))
+        pool_ids = parse_list_param(kwargs.get("pool_ids"))
+        factor_ids = parse_list_param(kwargs.get("factor_ids"))
         start_date = str(kwargs.get("start_date", ""))
         end_date = str(kwargs.get("end_date", ""))
         window = int(kwargs.get("window", _DEFAULT_WINDOW))

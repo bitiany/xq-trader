@@ -39,16 +39,17 @@ class WatermarkAspect(Aspect):
 
         优先使用上下文中的 collect_date（外部指定采集日期），
         否则查询水位日期作为增量起始时间。
+        水位最新时标记 is_up_to_date 跳过后续 Stage。
         """
         stock_code: str = item
 
-        # 优先使用外部指定的采集日期
+        # 优先使用外部指定的采集日期（绕过水位检查）
         collect_date = ctx.get("collect_date")
         if collect_date:
             ctx.set("start_date", str(collect_date))
             ctx.set("is_up_to_date", False)
             ctx.set("end_date", "")
-            logger.debug("指定采集日期: %s start=%s", stock_code, collect_date)
+            logger.debug("[watermark] 指定采集日期: %s start=%s", stock_code, collect_date)
             return
 
         # 查询水位日期
@@ -59,7 +60,7 @@ class WatermarkAspect(Aspect):
         if start_date is None:
             ctx.set("start_date", "")
             ctx.set("is_up_to_date", True)
-            logger.debug("水位最新，跳过: %s", stock_code)
+            logger.debug("[watermark] 水位最新，跳过: %s", stock_code)
         else:
             ctx.set("start_date", str(start_date))
             ctx.set("is_up_to_date", False)
@@ -95,7 +96,7 @@ class WatermarkAspect(Aspect):
             await CollectWatermark.bulk_create_or_update(
                 [instance],
                 on_conflict=["pipeline_name", "watermark_code"],
-                update_fields=["watermark_date"],
+                update_fields=["watermark_date", "record_count"],
             )
             logger.debug("水位更新: %s → %s", stock_code, max_trade_date)
         except Exception as e:

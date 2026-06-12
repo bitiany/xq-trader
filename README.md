@@ -107,17 +107,17 @@ python -m worker.cli list
 **发送任务**：
 
 ```powershell
-# 因子计算 — 全量模式，指定标的
-python -m worker.cli run factor.compute_daily --symbols 000001.SZ,600519.SH --mode full
-
-# 因子计算 — 增量模式，全市场
-python -m worker.cli run factor.compute_daily --mode incremental
-
-# 因子计算 — 指定日期范围
-python -m worker.cli run factor.compute_daily --start-date 2024-01-01 --end-date 2024-12-31
-
-# 因子计算 — 指定并发数
+# 因子计算 — 全市场全因子，5并发
 python -m worker.cli run factor.compute_daily --kwargs max_workers=5
+
+# 因子计算 — 指定因子增量回补（遵循水位控制，只算新增天数）
+python -m worker.cli run factor.compute_daily --kwargs factor_ids='["ma_bias_5","ma_bias_20"]'
+
+# 因子计算 — 指定因子全量回补（绕过水位，从2021-01-01开始）
+python -m worker.cli run factor.compute_daily --kwargs factor_ids='["ma_bias_5"]' start_date=2021-01-01
+
+# 因子计算 — 指定标的，全量模式
+python -m worker.cli run factor.compute_daily --symbols 000001.SZ,600519.SH --mode full
 
 # 因子评估 — 指定样本池
 python -m worker.cli run factor.evaluate_weekly --kwargs pool_ids=idx_300
@@ -128,6 +128,17 @@ python -m worker.cli run market.fund_flow_collect --symbols 000001.SZ
 # 日线行情采集
 python -m worker.cli run market.daily_kline_collect
 ```
+
+**factor.compute_daily 参数说明**：
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `symbols` | list | 全市场 | 股票代码列表 |
+| `factor_ids` | list | 全部活跃因子 | 指定计算的因子ID列表 |
+| `start_date` | str | 2021-01-01 | 持久化起始日期；显式指定时绕过水位检查 |
+| `max_workers` | int | 10 | 最大并发数 |
+| `mode` | str | incremental | 计算模式：incremental/full |
+| `warmup_bars` | int | 300 | 预热K线数 |
 
 **管理分布式锁**：
 

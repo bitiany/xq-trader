@@ -4,6 +4,7 @@
   - 根据 start_date 只持久化增量部分数据（预热期和更早数据仅参与计算不持久化）
   - 窄表格式：每行一个因子值
   - pool_id 默认 "all"
+  - 向量化构建行列表，避免逐行 Python 循环
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from framework.commons.logger import get_logger
@@ -19,24 +21,7 @@ from xqtrader.domain.factor.models.factor_value import FacFactorValue
 
 logger = get_logger("factor.persist")
 
-
-def _normalize_trade_date(value: Any) -> date | None:
-    """将各种格式的交易日期转换为 date 对象。"""
-    # pd.Timestamp 是 datetime 的子类，datetime 是 date 的子类
-    # 必须先检查 Timestamp/datetime，再检查 date
-    if hasattr(value, "date") and callable(value.date):
-        return value.date()  # type: ignore[no-any-return]
-    if isinstance(value, date):
-        return value
-    if isinstance(value, str):
-        for fmt in ("%Y-%m-%d", "%Y%m%d"):
-            try:
-                if fmt == "%Y-%m-%d":
-                    return date.fromisoformat(value)
-                return date(int(value[:4]), int(value[4:6]), int(value[6:8]))
-            except (ValueError, IndexError):
-                continue
-    return None
+_BATCH_SIZE = 2000
 
 
 def _parse_cutoff(start_date: str) -> date | None:
@@ -75,33 +60,32 @@ class FactorPersistStage(Stage):
             return StageResult.ok(data={"symbol": symbol, "persisted": 0})
 
         # 根据 start_date 截断：只持久化增量部分，预热期数据仅参与计算
+        # persist_start_date 为持久化截断下限，防止水位返回早期日期时持久化超出5年范围
         start_date = str(ctx.get("start_date", ""))
-        cutoff_date = _parse_cutoff(start_date)
+        persist_start_date = str(ctx.get("persist_start_date", ""))
+        # 取水位日期与持久化下限的较晚者作为实际截断日期
+        if persist_start_date and start_date:
+            actual_cutoff = max(start_date, persist_start_date)
+        elif persist_start_date:
+            actual_cutoff = persist_start_date
+        else:
+            actual_cutoff = start_date
+        cutoff_date = _parse_cutoff(actual_cutoff)
 
-        # 转换为窄表
-        long_df = df.melt(
-            id_vars=["trade_date"],
-            value_vars=factor_cols,
-            var_name="factor_id",
-            value_name="factor_value",
-        )
-        long_df = long_df.dropna(subset=["factor_value"])
+        # 向量化过滤：截断日期
+        if cutoff_date is not None:
+            td_series = pd.to_datetime(df["trade_date"])
+            mask = td_series.dt.date >= cutoff_date
+            df_filtered = df.loc[mask]
+        else:
+            df_filtered = df
 
-        rows: list[FacFactorValue] = []
-        for record in long_df.itertuples(index=False):
-            trade_date = _normalize_trade_date(record.trade_date)
-            if trade_date is None:
-                continue
-            # 只持久化 start_date 之后的数据
-            if cutoff_date and trade_date < cutoff_date:
-                continue
-            rows.append(FacFactorValue(
-                symbol=symbol,
-                trade_date=trade_date,
-                factor_id=record.factor_id,
-                pool_id="all",
-                factor_value=float(record.factor_value),  # type: ignore[arg-type]
-            ))
+        if df_filtered.empty:
+            return StageResult.ok(data={"symbol": symbol, "persisted": 0})
+
+        # 向量化构建窄表行
+        trade_dates = pd.to_datetime(df_filtered["trade_date"]).dt.date.values
+        rows = self._build_rows_vectorized(symbol, trade_dates, df_filtered[factor_cols])
 
         if not rows:
             return StageResult.ok(data={"symbol": symbol, "persisted": 0})
@@ -110,8 +94,45 @@ class FactorPersistStage(Stage):
             rows,  # type: ignore[arg-type]
             on_conflict=["symbol", "trade_date", "factor_id", "pool_id"],
             update_fields=["factor_value"],
-            batch_size=500,
+            batch_size=_BATCH_SIZE,
         )
+
+        # 设置 persisted_count 和 max_trade_date，供水位 Aspect 后切更新水位
+        ctx.set("persisted_count", count)
+        if count > 0:
+            max_td = trade_dates.max()
+            if max_td is not None:
+                ctx.set("max_trade_date", max_td)
 
         logger.info("[factor.compute] %s upserted=%d factors=%d cutoff=%s", symbol, count, len(factor_cols), start_date)
         return StageResult.ok(data={"symbol": symbol, "persisted": count})
+
+    @staticmethod
+    def _build_rows_vectorized(
+        symbol: str,
+        trade_dates: np.ndarray,
+        factor_df: pd.DataFrame,
+    ) -> list[FacFactorValue]:
+        """向量化构建 FacFactorValue 行列表，避免逐行 Python 循环。"""
+        rows: list[FacFactorValue] = []
+        n_dates = len(trade_dates)
+        n_factors = len(factor_df.columns)
+        factor_ids = factor_df.columns.tolist()
+        values = factor_df.values  # shape: (n_dates, n_factors)
+
+        for i in range(n_dates):
+            td = trade_dates[i]
+            if td is None:
+                continue
+            for j in range(n_factors):
+                val = values[i, j]
+                if np.isnan(val):
+                    continue
+                rows.append(FacFactorValue(
+                    symbol=symbol,
+                    trade_date=td,
+                    factor_id=factor_ids[j],
+                    pool_id="all",
+                    factor_value=float(val),
+                ))
+        return rows

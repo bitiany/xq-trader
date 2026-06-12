@@ -115,9 +115,9 @@ class KDJFactor(FactorPlugin):
             high, low, close,
             fastk_period=self.fastk,
             slowk_period=self.slowk,
-            slowk_matype=0,
+            slowk_matype=talib.MA_Type(0),
             slowd_period=self.slowd,
-            slowd_matype=0,
+            slowd_matype=talib.MA_Type(0),
         )
         j = 3 * k - 2 * d
         return pd.DataFrame({"kdj_k": k, "kdj_d": d, "kdj_j": j}, index=df.index)

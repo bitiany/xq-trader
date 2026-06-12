@@ -2,7 +2,7 @@
 
 核心逻辑：
   1. 从上下文获取已加载的全量行情数据
-  2. 解析因子列表（通过注册表）
+  2. 优先使用上下文中的 factor_plugins（由任务层解析），避免重复 DB 查询
   3. 对每个因子执行数据门控检查
   4. 批量计算因子值（统一使用全量数据，确保 index 对齐）
   5. 对齐结果到完整日期范围
@@ -55,12 +55,16 @@ class FactorCalcStage(Stage):
         if df is None or df.empty:
             return StageResult.ok(data={"symbol": symbol, "factors": 0})
 
-        # 解析因子列表
-        factor_ids = ctx.get("factor_ids") or []
-        if isinstance(factor_ids, str):
-            factor_ids = [f.strip() for f in factor_ids.split(",") if f.strip()]
-
-        factors = await resolve_factor_list(factor_ids if factor_ids else None)
+        # 解析因子列表：优先使用任务层传入的 factor_plugins，避免重复 DB 查询
+        factor_plugins: list[FactorPlugin] | None = ctx.get("factor_plugins")
+        if factor_plugins:
+            factors = factor_plugins
+        else:
+            # 回退：从 factor_ids 重新解析（兼容独立调用场景）
+            factor_ids = ctx.get("factor_ids") or []
+            if isinstance(factor_ids, str):
+                factor_ids = [f.strip() for f in factor_ids.split(",") if f.strip()]
+            factors = await resolve_factor_list(factor_ids if factor_ids else None)
 
         if not factors:
             logger.warning("[factor.compute] %s no factors resolved", symbol)
