@@ -1,6 +1,10 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { Tabs, Select, Space, Table, Tag, Modal } from 'antd';
 import { Star, Briefcase, ListOrdered, GitBranch } from 'lucide-react';
+import { usePageWebSocket } from '@/ws/usePageWebSocket';
+import { TOPIC_TRADING_PNL, type TradingPnlData } from '@/ws/protocol';
+import { brokerApi } from '@/api/broker';
+import { useTradingStore } from '@/stores/tradingStore';
 import { ACCOUNTS, SIGNAL_HISTORY } from './data/mock-trading';
 import { SIGNAL_SIDE_LABEL, SIGNAL_SIDE_COLOR } from './utils/trading';
 import { CockpitDashboard } from './components/CockpitDashboard';
@@ -24,6 +28,43 @@ const historyColumns = [
 export function LiveCockpitPage() {
   const [selectedAccount, setSelectedAccount] = useState('live-001');
   const [historyOpen, setHistoryOpen] = useState(false);
+
+  const initFromAsset = useTradingStore((s) => s.initFromAsset);
+  const updateFromPnl = useTradingStore((s) => s.updateFromPnl);
+  const reset = useTradingStore((s) => s.reset);
+
+  // 初始加载 REST API 资产数据
+  useEffect(() => {
+    let cancelled = false;
+    brokerApi.getAsset().then((asset) => {
+      if (!cancelled && asset) {
+        initFromAsset(asset);
+      }
+    }).catch(() => {
+      // REST 不可用时静默处理，WS 会补上
+    });
+    return () => { cancelled = true; };
+  }, [initFromAsset]);
+
+  // WebSocket 订阅交易 PnL
+  const handlePnlUpdate = useCallback((_channel: string, data: TradingPnlData) => {
+    if (data && typeof data === 'object') {
+      updateFromPnl(data);
+    }
+  }, [updateFromPnl]);
+
+  const { status: wsStatus } = usePageWebSocket<TradingPnlData>({
+    topics: [TOPIC_TRADING_PNL],
+    onSnapshot: handlePnlUpdate,
+    onUpdate: handlePnlUpdate,
+  });
+
+  // WS 断开时重置数据
+  useEffect(() => {
+    if (wsStatus !== 'open') {
+      reset();
+    }
+  }, [wsStatus, reset]);
 
   const secondaryItems = useMemo(() => [
     { key: 'watchlist', label: <Space size={4}><Star size={13} />自选&策略</Space>, children: <WatchlistStrategyTab /> },

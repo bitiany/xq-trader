@@ -14,6 +14,8 @@ export interface TradingPnlData {
   frozen_cash: number
   market_value: number
   total_asset: number
+  today_pnl: number
+  today_pnl_pct: number
   reason?: string
   timestamp: number
 }

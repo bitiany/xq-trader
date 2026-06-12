@@ -1,5 +1,5 @@
 import type {
-  Account, KpiData, PreOrder, RiskStatus, StrategyInstance,
+  Account, PreOrder, RiskStatus, StrategyInstance,
   StockItem, WatchlistItem, Position, Order, WorkflowStep,
   RiskRule, SignalHistoryItem,
 } from '../types';
@@ -8,17 +8,6 @@ export const ACCOUNTS: Account[] = [
   { value: 'live-001', label: '实盘-001 (QMT)', broker: 'QMT' },
   { value: 'live-002', label: '实盘-002 (QMT)', broker: 'QMT' },
 ];
-
-export const KPI_DATA: KpiData = {
-  totalAsset: 1234567.89,
-  availableCash: 456789.12,
-  marketValue: 778778.77,
-  todayPnl: 14823.45,
-  todayPnlPct: 0.0120,
-  cumulativePnl: 83456.78,
-  cumulativePnlPct: 0.083,
-  maxDrawdownPct: -0.021,
-};
 
 export const PRE_ORDERS: PreOrder[] = [
   { id: 'po-001', symbol: '600519.SH', name: '贵州茅台', side: 'open', suggestedQty: 100, suggestedPrice: 1680, priceType: 'limit', targetWeight: 12, currentWeight: 0, sizingStrategy: 'ATR风险(14)', availableCash: 500000, reason: 'Alpha信号 Top1', signalDate: '2026-06-09', executionDate: '2026-06-10' },

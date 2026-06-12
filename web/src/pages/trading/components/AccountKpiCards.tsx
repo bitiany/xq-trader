@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
-import { Briefcase, BarChart3, TrendingUp, ArrowUpRight } from 'lucide-react';
+import { Briefcase, BarChart3, TrendingUp, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { KPI_DATA } from '../data/mock-trading';
+import { useTradingStore } from '@/stores/tradingStore';
 import { formatMoney } from '../utils/trading';
 
 interface KpiCard {
@@ -13,12 +13,23 @@ interface KpiCard {
 }
 
 export function AccountKpiCards() {
-  const kpiCards = useMemo<KpiCard[]>(() => [
-    { label: '总资产', value: formatMoney(KPI_DATA.totalAsset), delta: null, deltaType: null, icon: Briefcase },
-    { label: '可用资金', value: formatMoney(KPI_DATA.availableCash), delta: null, deltaType: null, icon: BarChart3 },
-    { label: '持仓市值', value: formatMoney(KPI_DATA.marketValue), delta: null, deltaType: null, icon: TrendingUp },
-    { label: '当日收益', value: `+${formatMoney(KPI_DATA.todayPnl)}`, delta: `+${(KPI_DATA.todayPnlPct * 100).toFixed(2)}%`, deltaType: 'rise', icon: ArrowUpRight },
-  ], []);
+  const kpi = useTradingStore((s) => s.kpi);
+
+  const kpiCards = useMemo<KpiCard[]>(() => {
+    const todayPnlPositive = kpi.todayPnl >= 0;
+    return [
+      { label: '总资产', value: formatMoney(kpi.totalAsset), delta: null, deltaType: null, icon: Briefcase },
+      { label: '可用资金', value: formatMoney(kpi.availableCash), delta: null, deltaType: null, icon: BarChart3 },
+      { label: '持仓市值', value: formatMoney(kpi.marketValue), delta: null, deltaType: null, icon: TrendingUp },
+      {
+        label: '当日收益',
+        value: `${todayPnlPositive ? '+' : ''}${formatMoney(kpi.todayPnl)}`,
+        delta: kpi.todayPnl !== 0 ? `${todayPnlPositive ? '+' : ''}${(kpi.todayPnlPct * 100).toFixed(2)}%` : null,
+        deltaType: kpi.todayPnl > 0 ? 'rise' : kpi.todayPnl < 0 ? 'fall' : null,
+        icon: todayPnlPositive ? ArrowUpRight : ArrowDownRight,
+      },
+    ];
+  }, [kpi]);
 
   return (
     <div className="trading-kpi-grid" data-component="KPI Cards">
