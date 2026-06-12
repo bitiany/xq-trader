@@ -3,8 +3,9 @@
 执行流程：
   1. 确定日期范围 [start_date, end_date]
   2. 全市场标的列表 + 标的级水位
-  3. 标的分片，逐片执行：采集 → 清洗 → 持久化 → 更新标的水位
-  4. 更新市场级水位
+  3. 标的分片采集 + 清洗 + 水位过滤，结果累积到内存（不在分片内持久化）
+  4. 全部分片采集完成后聚合 → 一次性批量 upsert 持久化
+  5. 一次性批量更新所有标的水位 + 市场级水位
 """
 
 from __future__ import annotations
@@ -131,7 +132,7 @@ async def persist_kline_data(df: pd.DataFrame) -> int:
         instances,
         on_conflict=["symbol", "trade_date"],
         update_fields=_PERSIST_UPDATE_FIELDS,
-        batch_size=100,
+        batch_size=1000,
     )
 
 
@@ -141,7 +142,7 @@ class DailyKlineIncrementalStage:
     PIPELINE_NAME = _PIPELINE_NAME
     MARKET_WATERMARK_CODE = _MARKET_WATERMARK_CODE
 
-    def __init__(self, batch_size: int = 50) -> None:
+    def __init__(self, batch_size: int = 500) -> None:
         self._batch_size = batch_size
 
     async def execute(self, start_date: date, end_date: date) -> dict[str, Any]:
@@ -170,35 +171,53 @@ class DailyKlineIncrementalStage:
             sd, ed, len(stock_codes), self._batch_size,
         )
 
-        total = 0
-        succeeded = 0
-        failed = 0
-        total_persisted = 0
-        actual_max_date: date | None = None  # 跟踪实际数据的最新日期
-
-        # 标的分片
+        # 标的分片：仅采集+清洗+水位过滤，结果累积
         shards = [stock_codes[i:i + self._batch_size] for i in range(0, len(stock_codes), self._batch_size)]
+        total_shards = len(shards)
+        succeeded_shards = 0
+        failed_shards = 0
+        collected_frames: list[pd.DataFrame] = []
 
         for idx, shard in enumerate(shards, 1):
             try:
-                persisted, shard_max = await self._process_shard(shard, sd, ed, watermark_map)
-                succeeded += 1
-                total_persisted += persisted
-                if shard_max is not None:
-                    actual_max_date = max(actual_max_date, shard_max) if actual_max_date else shard_max
+                df_shard = await self._collect_shard(shard, sd, ed, watermark_map)
+                if df_shard is not None and not df_shard.empty:
+                    collected_frames.append(df_shard)
+                succeeded_shards += 1
             except Exception as e:
-                failed += 1
+                failed_shards += 1
                 logger.error(
-                    "[kline.incremental] 分片 %d/%d 失败: %s",
-                    idx, len(shards), e, exc_info=True,
+                    "[kline.incremental] 采集分片 %d/%d 失败: %s",
+                    idx, total_shards, e, exc_info=True,
                 )
-            total += 1
 
-            if idx % 10 == 0 or idx == len(shards):
+            if idx % 10 == 0 or idx == total_shards:
+                rows_so_far = sum(len(d) for d in collected_frames)
                 logger.info(
-                    "[kline.incremental] 进度: %d/%d shards succeeded=%d failed=%d persisted=%d",
-                    idx, len(shards), succeeded, failed, total_persisted,
+                    "[kline.incremental] 采集进度: %d/%d shards succeeded=%d failed=%d collected_rows=%d",
+                    idx, total_shards, succeeded_shards, failed_shards, rows_so_far,
                 )
+
+        # 聚合：所有分片合并为单个 DataFrame
+        if not collected_frames:
+            logger.info("[kline.incremental] 无新增数据，跳过持久化")
+            return {
+                "total": total_shards, "succeeded": succeeded_shards,
+                "failed": failed_shards, "persisted": 0,
+            }
+
+        df_all = pd.concat(collected_frames, ignore_index=True)
+        logger.info(
+            "[kline.incremental] 聚合完成: rows=%d symbols=%d，开始批量持久化",
+            len(df_all), df_all["symbol"].nunique(),
+        )
+
+        # 统一批量持久化
+        total_persisted = await persist_kline_data(df_all)
+        logger.info("[kline.incremental] 批量持久化完成: persisted=%d", total_persisted)
+
+        # 统一批量更新标的水位（按 symbol 分组求 max(trade_date)）
+        actual_max_date = await self._batch_update_watermarks_from_df(df_all)
 
         # 更新市场级水位（按实际数据的最新日期）
         if actual_max_date is not None:
@@ -206,21 +225,24 @@ class DailyKlineIncrementalStage:
 
         logger.info(
             "[kline.incremental] 完成: range=%s~%s shards=%d succeeded=%d failed=%d persisted=%d",
-            sd, ed, total, succeeded, failed, total_persisted,
+            sd, ed, total_shards, succeeded_shards, failed_shards, total_persisted,
         )
-        return {"total": total, "succeeded": succeeded, "failed": failed, "persisted": total_persisted}
+        return {
+            "total": total_shards, "succeeded": succeeded_shards,
+            "failed": failed_shards, "persisted": total_persisted,
+        }
 
-    async def _process_shard(
+    async def _collect_shard(
         self,
         shard: list[str],
         sd: str,
         ed: str,
         watermark_map: dict[str, date],
-    ) -> tuple[int, date | None]:
-        """处理单个分片：采集→清洗→持久化→更新标的水位。
+    ) -> pd.DataFrame | None:
+        """处理单个分片：采集→清洗→水位过滤，返回该分片的合并 DataFrame。
 
         Returns:
-            (persisted_count, max_date) - 持久化行数和数据的最新日期
+            合并后的 DataFrame（包含所有清洗+过滤后的标的数据），无数据返回 None
         """
         # 采集
         raw = await _collector.fetch_kline_daily(
@@ -229,10 +251,7 @@ class DailyKlineIncrementalStage:
             end_time=ed,
         )
 
-        total_persisted = 0
-        updated_codes: list[str] = []
-        max_dates: list[date] = []
-
+        frames: list[pd.DataFrame] = []
         for code, df in raw.items():
             if df is None or df.empty:
                 continue
@@ -242,31 +261,54 @@ class DailyKlineIncrementalStage:
             if df.empty:
                 continue
 
-            # 按标的水位过滤（只持久化水位日期之后的数据）
+            # 按标的水位过滤（只保留水位日期之后的数据）
             wm_date = watermark_map.get(code)
             if wm_date is not None:
-                trade_dates = df["trade_date"].map(lambda v: date.fromisoformat(str(v)))
-                df = df[trade_dates > wm_date]
+                # 一次性转换并复用，避免 lambda 重复解析
+                td_dates = pd.to_datetime(df["trade_date"]).dt.date
+                df = df.loc[td_dates > wm_date]
                 if df.empty:
                     continue
 
-            # 持久化
             df["symbol"] = code
             df["data_source"] = "qmt"
-            count = await persist_kline_data(df)
-            total_persisted += count
+            frames.append(df)
 
-            # 记录需要更新水位的标的
-            if count > 0:
-                updated_codes.append(code)
-                max_dates.append(df["trade_date"].map(lambda v: date.fromisoformat(str(v))).max())
+        if not frames:
+            return None
+        return pd.concat(frames, ignore_index=True)
 
-        # 批量更新标的级水位
-        if updated_codes:
-            await self._batch_update_item_watermarks(updated_codes, max_dates)
+    async def _batch_update_watermarks_from_df(self, df_all: pd.DataFrame) -> date | None:
+        """从聚合后的 DataFrame 一次性批量更新标的级水位。
 
-        shard_max_date = max(max_dates) if max_dates else None
-        return total_persisted, shard_max_date
+        Returns:
+            所有标的中的最新 trade_date（用于后续更新市场级水位），无数据返回 None
+        """
+        if df_all.empty:
+            return None
+
+        # 按 symbol 求 max(trade_date)
+        td_dates = pd.to_datetime(df_all["trade_date"]).dt.date
+        df_with_dates = df_all.assign(_td=td_dates)
+        max_per_symbol = df_with_dates.groupby("symbol")["_td"].max()
+
+        instances = [
+            CollectWatermark(
+                pipeline_name=_ITEM_PIPELINE_NAME,
+                watermark_code=str(symbol),
+                watermark_date=max_date,
+                record_count=0,
+                status="active",
+            )
+            for symbol, max_date in max_per_symbol.items()
+        ]
+        await CollectWatermark.bulk_create_or_update(
+            instances,
+            on_conflict=["pipeline_name", "watermark_code"],
+            update_fields=["watermark_date"],
+        )
+        max_overall = max_per_symbol.max()
+        return max_overall if isinstance(max_overall, date) else None
 
     @staticmethod
     async def _get_all_stock_codes() -> list[str]:
@@ -282,25 +324,6 @@ class DailyKlineIncrementalStage:
         """获取标的级水位映射 {code: watermark_date}。"""
         rows = await CollectWatermark.filter(pipeline_name=_ITEM_PIPELINE_NAME, status="active")
         return {row.watermark_code: row.watermark_date for row in rows if row.watermark_date is not None}
-
-    @staticmethod
-    async def _batch_update_item_watermarks(codes: list[str], max_dates: list[date]) -> None:
-        """批量更新标的级水位（使用 bulk_create_or_update）。"""
-        instances = [
-            CollectWatermark(
-                pipeline_name=_ITEM_PIPELINE_NAME,
-                watermark_code=code,
-                watermark_date=max_date,
-                record_count=0,
-                status="active",
-            )
-            for code, max_date in zip(codes, max_dates)
-        ]
-        await CollectWatermark.bulk_create_or_update(
-            instances,
-            on_conflict=["pipeline_name", "watermark_code"],
-            update_fields=["watermark_date"],
-        )
 
     @staticmethod
     async def _update_market_watermark(end_date: date) -> None:

@@ -56,7 +56,7 @@ class DailyIncrementalTask(BaseTask):
     async def _run_impl(self, **kwargs: Any) -> dict[str, Any]:
         start_date_str: str | None = kwargs.get("start_date")
         end_date_str: str | None = kwargs.get("end_date")
-        kline_batch_size: int = kwargs.get("kline_batch_size", 50)
+        kline_batch_size: int = kwargs.get("kline_batch_size", 500)
 
         # 确定 end_date
         end_date = await self._resolve_end_date(end_date_str)
