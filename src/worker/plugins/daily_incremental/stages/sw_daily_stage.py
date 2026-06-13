@@ -196,11 +196,11 @@ class SwDailyIncrementalStage:
         if df.empty:
             return 0
 
-        # 按标的水位过滤
+        # 按标的水位过滤（排除已更新标的）
         if "ts_code" in df.columns and watermark_map:
-            codes_to_update = [c for c, wm in watermark_map.items() if td > wm]
-            if codes_to_update:
-                df = df[df["ts_code"].isin(codes_to_update)]
+            skip_codes = {c for c, wm in watermark_map.items() if wm >= td}
+            if skip_codes:
+                df = df[~df["ts_code"].isin(skip_codes)]
             if df.empty:
                 return 0
 

@@ -124,7 +124,7 @@ class TushareDataCollector:
         """获取 tushare 原生个股资金流向数据。
 
         接口：moneyflow
-        限制：单次最大 5000 条
+        限制：单次最大 6000 条
         字段：买卖量/金额（手/万元），无占比字段
 
         Args:

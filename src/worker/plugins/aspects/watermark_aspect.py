@@ -97,7 +97,7 @@ class WatermarkAspect(Aspect):
             await CollectWatermark.bulk_create_or_update(
                 [instance],
                 on_conflict=["data_type", "watermark_code"],
-                update_fields=["watermark_date"],
+                update_fields=["watermark_date", "status"],
             )
             logger.debug("水位更新: %s → %s", stock_code, max_trade_date)
         except Exception as e:

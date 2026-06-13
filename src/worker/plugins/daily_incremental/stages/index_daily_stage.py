@@ -240,7 +240,7 @@ class IndexDailyIncrementalStage:
             # 按标的水位过滤
             wm_date = watermark_map.get(code)
             if wm_date is not None:
-                trade_dates = df["trade_date"].map(lambda v: date.fromisoformat(str(v)))
+                trade_dates = pd.to_datetime(df["trade_date"]).dt.date
                 df = df[trade_dates > wm_date]
                 if df.empty:
                     continue
@@ -254,7 +254,7 @@ class IndexDailyIncrementalStage:
             # 记录需要更新水位的标的
             if count > 0:
                 updated_codes.append(code)
-                max_dates.append(df["trade_date"].map(lambda v: date.fromisoformat(str(v))).max())
+                max_dates.append(pd.to_datetime(df["trade_date"]).dt.date.max())
 
         # 批量更新标的级水位
         if updated_codes:

@@ -5,7 +5,7 @@
   2. 获取交易日列表
   3. 逐日执行：采集 → 清洗 → 持久化 → 更新标的水位
 
-数据源：Tushare moneyflow 接口（单次上限 5000 条）。
+数据源：Tushare moneyflow 接口（单次上限 6000 条）。
 逐日采集时传入 trade_date 获取全市场当日数据，若返回达到上限则按标的补采。
 """
 
@@ -73,8 +73,8 @@ _PERSIST_CUSTOM_TRANSFORMS = {
     "trade_date": lambda v: date.fromisoformat(str(v)) if v and str(v) != "nan" else None,
 }
 
-# moneyflow 单次上限
-_MONEYFLOW_ROW_LIMIT = 5000
+# moneyflow 单次上限（Tushare 官方文档：单次最大提取6000行记录）
+_MONEYFLOW_ROW_LIMIT = 6000
 
 
 def _get_collector() -> TushareDataCollector:

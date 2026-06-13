@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
-import time
 from collections.abc import Callable
 from typing import Any
 
@@ -52,7 +51,7 @@ class QmtDataCollector:
     """
 
     _LOCK_TIMEOUT = 60
-    _DOWNLOAD_WAIT_SECONDS = 5
+    _DOWNLOAD_TIMEOUT = 60
     _xtdata_lock = threading.Lock()
 
     @classmethod
@@ -196,7 +195,7 @@ class QmtDataCollector:
             df["change"] = (df["close"] - df["pre_close"]).round(4)
 
         if "close" in df.columns:
-            df["pct_chg"] = df["close"].pct_change().round(4) * 100
+            df["pct_chg"] = df["close"].pct_change(fill_method=None).round(4) * 100
             df.loc[df.index[0], "pct_chg"] = 0.0
 
         keep_cols = [
@@ -213,21 +212,38 @@ class QmtDataCollector:
         end_time: str,
         dividend_type: str = "front",
     ) -> dict[str, Any]:
-        """同步方法：先下载补缓存，再获取K线数据。全程加锁。"""
+        """同步方法：先下载补缓存，再获取K线数据。全程加锁。
+
+        download_history_data2 是异步下载，通过 callback 通知完成，
+        使用 threading.Event 等待回调，避免固定 sleep 盲等。
+        """
         acquired = self._xtdata_lock.acquire(timeout=self._LOCK_TIMEOUT)
         if not acquired:
             raise TimeoutError(
                 f"QMT lock acquire timed out after {self._LOCK_TIMEOUT}s for batch {start_time}~{end_time}"
             )
         try:
+            download_done = threading.Event()
+
+            def _on_download_done(data: Any) -> None:
+                """download_history_data2 完成回调。"""
+                download_done.set()
+
             try:
-                xtdata.download_history_data2(stock_list, "1d", start_time, end_time)
+                xtdata.download_history_data2(
+                    stock_list, "1d", start_time, end_time,
+                    callback=_on_download_done,
+                )
             except Exception as e:
                 raise DataCollectionError(
                     f"下载历史数据失败 range={start_time}~{end_time} count={len(stock_list)}: {e}"
                 ) from e
 
-            time.sleep(self._DOWNLOAD_WAIT_SECONDS)
+            if not download_done.wait(timeout=self._DOWNLOAD_TIMEOUT):
+                raise TimeoutError(
+                    f"QMT 下载超时 {self._DOWNLOAD_TIMEOUT}s: "
+                    f"range={start_time}~{end_time} count={len(stock_list)}"
+                )
 
             raw = xtdata.get_market_data_ex(
                 field_list=[],
