@@ -1,6 +1,6 @@
 # xqtrader 因子规格目录
 
-> **版本**: v6.0 | **更新**: 2026-06-11
+> **版本**: v7.0 | **更新**: 2026-06-13
 > **定位**: 因子库顶层规格，按三任务管线分层组织，每个因子标注数据血缘与计算方法
 > **参考**: Barra CNE6 (MSCI) / WorldQuant Alpha101 / Qlib Alpha158 (Microsoft) / 华泰金工
 
@@ -45,19 +45,19 @@ flowchart LR
 
 | 分类 | 因子数 | 归属任务 | 说明 |
 |------|--------|---------|------|
-| C. 技术因子 | 32 | Task 1 | 逐标的，talib/numpy 计算 |
+| C. 技术因子 | 34 | Task 1 | 逐标的，talib/numpy 计算 |
 | D1. Alpha101 | 6 | Task 1 | 逐标的，WorldQuant 公式 |
 | D2. Alpha158 | 10 | Task 1 | 逐标的，Qlib 公式 |
-| D3. 资金流(逐标的) | 6 | Task 1 | 逐标的，占比形式，无截面操作 |
-| A. 风险(逐标的) | 17 | Task 1 | 逐标的可独立计算部分 |
-| E1. 缠论连续值 | 10 | Task 1 | 逐标的，时序计算 |
+| D3. 资金流(逐标的) | 4 | Task 1 | 逐标的，占比形式，无截面操作 |
+| A. 风险(逐标的) | 18 | Task 1 | 逐标的可独立计算部分 |
+| E1. 缠论连续值 | 10 | Task 1 | 逐标的，时序计算（待实现） |
 | E2. K线聚合 | 6 | Task 1 | 逐标的，统计聚合 |
 | F. 复合Alpha | 6 | Task 2 | 截面融合，需全市场因子值 |
 | D4. 交互因子 | 6 | Task 2 | 截面交互，需两个因子截面标准化 |
 | D3. z_main_net_pct | 1 | Task 2 | 截面Z-score，需全市场换手率分布 |
-| A. 风险(需截面) | 5 | CrossSectionReader | nl_size / beta / z_turnover / stom / stoq |
+| A. 风险(需截面) | 6 | CrossSectionReader | nl_size / beta / z_turnover / stom / stoq |
 | B. 基本面因子 | 40 | CrossSectionReader | 估值+财务，从已有表按需加载 |
-| **合计** | **131** | — | 截面因子 + 14 非截面信号 = 145 个输出 |
+| **合计** | | **147** | 含评估标签3个(fwd_ret, 不入因子目录) + 非截面信号30个 |
 
 ---
 
@@ -67,7 +67,7 @@ flowchart LR
 > **设计原则**: 仅处理**逐标的可独立计算**的因子，每个标的仅依赖自身时序数据，无需全市场截面信息。
 > **业界参考**: 等同 Qlib Alpha158 Handler 的逐标的预计算层，或 Barra 的"原始因子计算"阶段。
 
-### 2.1 C 类 — 技术因子 (32个)
+### 2.1 C 类 — 技术因子 (34个)
 
 > **数据血缘**: `sdc_candlestick_daily` → open, high, low, close, volume, amount
 > **计算引擎**: plugin (talib / numpy 向量化) | **标准化原则**: 变化优先 — 原始指标取比率/偏离度/变化率，确保截面可比
@@ -102,11 +102,13 @@ flowchart LR
 | boll_width | 布林带宽度 | DESC | (upper - lower) / middle | close → BOLL(20,2) |
 | sar_deviation | SAR偏离度 | DESC | Δ(SAR / close) | high, low → SAR |
 
-#### C3 超买超卖因子 (10个)
+#### C3 超买超卖因子 (12个)
 
 | factor_id | 展示名 | 方向 | 计算逻辑 | 血缘: 原始字段 |
 |-----------|--------|------|----------|-------------|
+| rsi_6 | RSI(6) | DESC | talib.RSI(close, 6) | close |
 | rsi_14 | RSI(14) | DESC | talib.RSI(close, 14) | close |
+| rsi_24 | RSI(24) | DESC | talib.RSI(close, 24) | close |
 | rsi_delta_14 | RSI(14)变化 | DESC | Δ(RSI(14)) | close |
 | kdj_k | KDJ-K值 | DESC | talib.STOCH(high, low, close, 9, 3) | high, low, close |
 | kdj_d | KDJ-D值 | DESC | MA(K, 3) | 同上 |
@@ -129,7 +131,7 @@ flowchart LR
 
 ---
 
-### 2.2 D 类 — 量价因子 (22个, Task 1)
+### 2.2 D 类 — 量价因子 (20个, Task 1)
 
 #### D1 Alpha101 因子 (6个)
 
@@ -163,7 +165,7 @@ flowchart LR
 | std20_close | 20日收盘波动率 | ASC | STD(20, C)/C | close |
 | corr_pv_10 | 10日价量相关 | ASC | corr(close, log(vol+1), 10) | close, volume |
 
-#### D3 资金流因子 — 逐标的部分 (6个)
+#### D3 资金流因子 — 逐标的部分 (4个)
 
 > **数据血缘**: `sdc_fund_flow_individual` → main_net_amt, huge_net_amt, big_net_amt, net_mf_amt
 > **数据血缘**: `sdc_candlestick_daily` → amount (成交额)
@@ -176,12 +178,13 @@ flowchart LR
 | cs_net_mf_pct | 全部净流入占比 | DESC | net_mf_amt / amount | fund_flow.net_mf_amt + kline.amount |
 | huge_net_pct | 超大单净流入占比 | DESC | huge_net_amt / amount | fund_flow.huge_net_amt + kline.amount |
 | big_net_pct | 大单净流入占比 | DESC | big_net_amt / amount | fund_flow.big_net_amt + kline.amount |
-| main_net_pct_close | 尾盘主力净流入占比 | DESC | 尾盘主力净流入 / 尾盘成交额 | fund_flow (时段细分) |
-| main_net_pct_open | 开盘主力净流入占比 | DESC | 开盘主力净流入 / 开盘成交额 | fund_flow (时段细分) |
+
+> **待实现**: main_net_pct_close (尾盘主力净流入占比) 和 main_net_pct_open (开盘主力净流入占比)
+> 需要时段细分资金流数据源，当前 Tushare moneyflow 接口不提供时段细分，待数据源就绪后实现。
 
 ---
 
-### 2.3 A 类 — 风险因子 逐标的部分 (17个)
+### 2.3 A 类 — 风险因子 逐标的部分 (18个)
 
 > **数据血缘**: `sdc_candlestick_daily` → close, volume, amount
 > **数据血缘**: `sdc_daily_indicator` → total_mv, turnover_rate, turnover_rate_f
@@ -193,10 +196,11 @@ flowchart LR
 |-----------|--------|------|----------|------|
 | cs_log_mv | 对数总市值 | DESC | log(1 + total_mv) | daily_indicator.total_mv |
 
-#### A3 波动率因子 (8个, Task 1)
+#### A3 波动率因子 (10个, Task 1)
 
 | factor_id | 展示名 | 方向 | 计算逻辑 | 血缘 |
 |-----------|--------|------|----------|------|
+| hist_vol_10 | 10日历史波动率 | ASC | STD(10, daily_ret) × √252 | close → pct_change() |
 | hist_vol_20 | 20日历史波动率 | ASC | STD(20, daily_ret) × √252 | close → pct_change() |
 | hist_vol_60 | 60日历史波动率 | ASC | STD(60, daily_ret) × √252 | close → pct_change() |
 | downside_vol | 下行波动率 | ASC | STD(负收益日 daily_ret) × √252 | close → pct_change() |
@@ -204,9 +208,11 @@ flowchart LR
 | cmra | 累计收益范围 | ASC | log(1+max_cum) - log(1+min_cum), 12月 | close → pct_change() |
 | atr_ratio | ATR/价格 | ASC | ATR(14) / close | high, low, close → ATR(14) |
 | atr_ratio_delta | ATR/价格变化 | ASC | Δ(ATR(14) / close) | 同上 |
-| boll_width | 布林带宽度 | DESC | (upper - lower) / middle | close → BOLL(20, 2) |
+| natr_14 | 归一化ATR | ASC | NATR(14) | high, low, close |
 
-#### A4 流动性因子 (8个, Task 1)
+> **注意**: boll_width (布林带宽度) 归属 C2 趋势因子（BOLL 组合子因子），不在此处重复列出。
+
+#### A4 流动性因子 (7个, Task 1)
 
 | factor_id | 展示名 | 方向 | 计算逻辑 | 血缘 |
 |-----------|--------|------|----------|------|
@@ -222,12 +228,13 @@ flowchart LR
 
 ### 2.4 E 类 — 另类因子 (16个)
 
-#### E1 缠论连续值因子 (10个)
+#### E1 缠论连续值因子 (10个) — 待实现
 
 > **数据血缘**: `sdc_candlestick_daily` → open, high, low, close
 > **计算引擎**: plugin (chanpy / 自研缠论库)
 > **标准化**: 价格相关值均除以 close，确保截面可比。离散买卖点信号归信号引擎。
 > **业界参考**: 缠论 (缠中说禅, 2006-2008) — 本土化技术分析体系
+> **实现状态**: ⏳ 待实现 — 需引入 Python 缠论计算引擎，前端已有缠论可视化框架
 
 | factor_id | 展示名 | group_id | 方向 | 计算逻辑 | 血缘 |
 |-----------|--------|----------|------|----------|------|
@@ -256,6 +263,8 @@ flowchart LR
 | cdl_upper_shadow_ratio | 上影线占比均值 | cdl_agg | ASC | MA(20, (H-max(O,C))/(H-L)) | open, high, low, close |
 | cdl_lower_shadow_ratio | 下影线占比均值 | cdl_agg | DESC | MA(20, (min(O,C)-L)/(H-L)) | open, high, low, close |
 | cdl_body_ratio | 实体占比均值 | cdl_agg | DESC | MA(20, abs(C-O)/(H-L+0.001)) | open, high, low, close |
+
+> **评估标签**: fwd_ret_1d / fwd_ret_5d / fwd_ret_20d (前向收益率) 作为因子评估的因变量存储于 fac_factor_value，但不入因子目录，不参与因子预处理和融合。
 
 ---
 
@@ -448,7 +457,7 @@ flowchart LR
 
 | 原始数据表 | 更新频率 | 提供字段 | 产出因子 (数量) |
 |-----------|---------|---------|--------------|
-| `sdc_candlestick_daily` | 日频 | OHLCV + amount | C类技术(32) + D1(6) + D2(10) + A3波动率(8) + A4部分(5) + E1缠论(10) + E2形态(6) |
+| `sdc_candlestick_daily` | 日频 | OHLCV + amount | C类技术(34) + D1(6) + D2(10) + A3波动率(10) + A4部分(5) + E1缠论(10) + E2形态(6) |
 | `sdc_daily_indicator` | 日频 | total_mv, turnover_rate, pe_ttm, pb, ps_ttm, dv_ttm | A1规模(1) + A4部分(3) + A截面(4) + B1价值(8) |
 | `sdc_fina_indicator` | 季频 | roe, roa, roic, 毛利率, 净利率, 同比增长率等 | B2盈利(8) + B3成长(10) + B4质量(8) + B5杠杆(6) |
 | `sdc_fund_flow_individual` | 日频 | main_net_amt, huge_net_amt, big_net_amt, net_mf_amt | D3资金流(6) |
@@ -459,11 +468,11 @@ flowchart LR
 
 | 归属 | 分类 | 数量 |
 |------|------|------|
-| Task 1 | C 技术因子 | 32 |
+| Task 1 | C 技术因子 | 34 |
 | Task 1 | D1 Alpha101 | 6 |
 | Task 1 | D2 Alpha158 | 10 |
-| Task 1 | D3 资金流(逐标的) | 6 |
-| Task 1 | A 风险(逐标的) | 17 |
+| Task 1 | D3 资金流(逐标的) | 4 |
+| Task 1 | A 风险(逐标的) | 18 |
 | Task 1 | E1 缠论连续值 | 10 |
 | Task 1 | E2 K线聚合 | 6 |
 | Task 2 | F 复合Alpha | 6 |
@@ -471,7 +480,7 @@ flowchart LR
 | CrossSectionReader | B 基本面 | 40 |
 | CrossSectionReader | A 风险(截面) | 6 |
 | CrossSectionReader | D3 z_main_net_pct | 1 |
-| **合计** | | **146** |
+| **合计** | | **147** |
 
 ---
 
@@ -731,8 +740,8 @@ IC胜率  = count(IC > 0) / T
 |------|------|--------|------|
 | A. 风险因子 | A1 规模 | 2 | Size + 非线性规模 |
 | | A2 Beta | 2 | Beta + 下行Beta |
-| | A3 波动率 | 8 | 历史波动/Barra波动/ATR比率/布林 |
-| | A4 流动性 | 10 | 换手率/Amihud/量比/Barra流动性 |
+| | A3 波动率 | 10 | 历史波动/Barra波动/ATR比率/NATR |
+| | A4 流动性 | 7 | 换手率/Amihud/量比/Barra流动性 |
 | B. 基本面因子 | B1 价值 | 8 | EP/BP/SP/CFP/DV + PE/PB/PS |
 | | B2 盈利 | 8 | ROE/ROA/ROIC/毛利率/净利率/GP |
 | | B3 成长 | 10 | 同比/环比增长 |
@@ -740,16 +749,16 @@ IC胜率  = count(IC > 0) / T
 | | B5 杠杆 | 6 | 资产负债率/流动比率/MLEV/FMLEV |
 | C. 技术因子 | C1 动量/反转 | 7 | 动量/Barra动量/反转 |
 | | C2 趋势 | 10 | MACD标准化/ADX/BOLL位置/SAR偏离 |
-| | C3 超买超卖 | 10 | RSI+变化/KDJ/BIAS/CCI/WR |
+| | C3 超买超卖 | 12 | RSI(6/14/24)+变化/KDJ/BIAS/CCI/WR |
 | | C4 均线偏离 | 5 | MA偏离度+偏离度变化 |
 | D. 量价因子 | D1 Alpha101 | 6 | WQ代表子集 |
 | | D2 Alpha158 | 10 | Qlib代表子集 |
-| | D3 资金流 | 7 | 占比形式+时段分化 |
+| | D3 资金流 | 5 | 占比形式(4已实现+2待实现) |
 | | D4 交互 | 6 | 因子交叉项 |
-| E. 另类因子 | E1 缠论连续值 | 10 | 笔/中枢/背驰标准化指标 |
+| E. 另类因子 | E1 缠论连续值 | 10 | 笔/中枢/背驰标准化指标（待实现） |
 | | E2 K线聚合 | 6 | 形态频次/影线/实体比 |
 | F. 复合Alpha | — | 6 | 等权/IC/ICIR/ML/集成 |
-| **合计** | | **131** | |
+| **合计** | | **134** | |
 
 ### 7.2 非截面信号统计
 

@@ -41,7 +41,7 @@ _PERSIST_CUSTOM_TRANSFORMS = {
 
 
 def clean_kline_data(df: pd.DataFrame) -> pd.DataFrame:
-    """日行情K线数据清洗（9 步）。
+    """日行情K线数据清洗（10 步）。
 
     1. 删除 trade_date 为空
     2. 数值列强制转 numeric
@@ -52,6 +52,9 @@ def clean_kline_data(df: pd.DataFrame) -> pd.DataFrame:
     7. change 用 close.diff() 重算
     8. 数值列精度 4 位小数（volume 除外）
     9. 删除 OHLC 仍有 NaN 的行
+    10. 删除 volume=0 的行（停牌日虚拟数据，QMT 对停牌日返回
+        open=high=low=close=前收盘价、volume=0 的虚拟K线，
+        不属于有效交易数据，需过滤以保证下游因子计算正确）
     """
     ohlc_cols = ["open", "close", "high", "low"]
     numeric_cols = ["open", "close", "high", "low", "volume", "amount", "change", "pre_close", "pct_chg"]
@@ -112,6 +115,14 @@ def clean_kline_data(df: pd.DataFrame) -> pd.DataFrame:
     # 9. 删除 OHLC 仍有 NaN 的行
     if existing_ohlc:
         df = df.dropna(subset=existing_ohlc)
+
+    # 10. 删除 volume=0 的行（停牌日虚拟数据）
+    if "volume" in df.columns and not df.empty:
+        before = len(df)
+        df = df.loc[df["volume"] > 0]
+        removed = before - len(df)
+        if removed > 0:
+            logger.debug("[kline.clean] 过滤停牌日数据: removed=%d rows", removed)
 
     return df.reset_index(drop=True)
 
