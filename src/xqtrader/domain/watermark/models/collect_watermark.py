@@ -18,7 +18,7 @@ class CollectWatermark(Base):
     record_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="累计采集记录数")
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="active",
-        comment="水位状态: active/suspended/deprecated",
+        comment="水位状态: active-正常, deprecated-废弃",
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False,

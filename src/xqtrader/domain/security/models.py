@@ -18,7 +18,7 @@ class Security(Base):
     cnspell: Mapped[str] = mapped_column(String(50), comment="拼音缩写")
     market: Mapped[str] = mapped_column(String(50), comment="市场类型")
     exchange: Mapped[str] = mapped_column(String(50), comment="交易所")
-    board_type: Mapped[str] = mapped_column(String(20), comment="板块类型")
+    board_type: Mapped[str] = mapped_column(String(20), default="", comment="板块类型")
     curr_type: Mapped[str] = mapped_column(String(20), comment="交易货币类型")
     list_date: Mapped[str] = mapped_column(String(20), comment="上市日期")
     list_status: Mapped[str] = mapped_column(String(10), comment="上市状态")
@@ -26,6 +26,7 @@ class Security(Base):
     is_hs: Mapped[str] = mapped_column(String(10), comment="是否沪深港通标的")
     act_name: Mapped[str | None] = mapped_column(String(100), default=None, comment="实控人名称")
     act_type: Mapped[str | None] = mapped_column(String(10), default=None, comment="实控人类型")
+    suspend_status: Mapped[str] = mapped_column(String(10), default="", comment="停复牌状态: S-停牌, R-复牌/正常交易")
     introduction: Mapped[str | None] = mapped_column(Text, default=None, comment="公司简介")
 
     __table_args__ = ({"comment": "证券基本信息表"},)

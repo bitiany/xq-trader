@@ -3,8 +3,8 @@ celery_task_name: reference.security_info_collect
 version: "1.0.0"
 task_name: 证券标的基本信息采集
 task_name_en: Security Info Collection
-description: 采集全市场证券标的基本信息（Tushare stock_basic），同步到 Security 表
-description_en: Collect market-wide security basic info from Tushare stock_basic and sync to Security table
+description: 采集全市场证券标的基本信息（Tushare stock_basic），同步停复牌状态到 Security 表
+description_en: Collect market-wide security basic info from Tushare stock_basic and sync suspend/resume status to Security table
 category: reference
 task_type: on_demand
 queue: celery
@@ -20,4 +20,9 @@ params_schema:
       type: string
       title: 上市状态
       description: "L(上市) D(退市) P(暂停上市)，为空则采集全部"
+      default: ""
+    trade_date:
+      type: string
+      title: 停复牌查询日期
+      description: "YYYYMMDD格式，为空则取最新交易日"
       default: ""

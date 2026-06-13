@@ -276,6 +276,66 @@ class TushareDataCollector:
                 f"stock_basic 采集失败 ts_code={ts_code} list_status={list_status}: {e}"
             ) from e
 
+    async def fetch_suspend_d(
+        self,
+        ts_code: str = "",
+        trade_date: str = "",
+        start_date: str = "",
+        end_date: str = "",
+        suspend_type: str = "",
+    ) -> pd.DataFrame:
+        """获取每日停复牌信息。
+
+        接口：suspend_d
+        限制：需 2000 积分
+
+        Args:
+            ts_code: 股票代码，如 "000001.SZ"（可输入多值，逗号分隔）
+            trade_date: 交易日期 YYYYMMDD
+            start_date: 查询开始日期 YYYYMMDD
+            end_date: 查询结束日期 YYYYMMDD
+            suspend_type: 停复牌类型 S-停牌 R-复牌
+
+        Returns:
+            DataFrame，包含 ts_code/trade_date/suspend_timing/suspend_type 字段
+        """
+        if not ts_code and not trade_date and not start_date:
+            raise DataCollectionError("ts_code、trade_date、start_date 至少输入一个")
+
+        try:
+            await self._limiter.acquire()
+            loop = asyncio.get_running_loop()
+            kwargs: dict[str, str] = {}
+            if ts_code:
+                kwargs["ts_code"] = ts_code
+            if trade_date:
+                kwargs["trade_date"] = trade_date
+            if start_date:
+                kwargs["start_date"] = start_date
+            if end_date:
+                kwargs["end_date"] = end_date
+            if suspend_type:
+                kwargs["suspend_type"] = suspend_type
+            func = partial(self._pro.suspend_d, **kwargs)
+            result = await loop.run_in_executor(self._get_executor(), func)
+            df = pd.DataFrame() if result is None else pd.DataFrame(result)
+            if df.empty:
+                logger.debug(
+                    "suspend_d 无数据: ts_code=%s trade_date=%s range=%s~%s type=%s",
+                    ts_code, trade_date, start_date, end_date, suspend_type,
+                )
+                return pd.DataFrame()
+
+            logger.debug(
+                "suspend_d 获取完成: ts_code=%s rows=%d",
+                ts_code, len(df),
+            )
+            return df
+        except Exception as e:
+            raise DataCollectionError(
+                f"suspend_d 采集失败 ts_code={ts_code} trade_date={trade_date}: {e}"
+            ) from e
+
     async def fetch_sw_daily(
         self,
         ts_code: str = "",
