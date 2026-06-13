@@ -56,7 +56,7 @@ export function WatermarkRangeChart({ items, referenceTradeDate }: WatermarkRang
   const chartModel = useMemo(() => {
     const datedItems = items
       .filter((item) => item.min_date && item.max_date)
-      .sort((a, b) => a.pipeline_name.localeCompare(b.pipeline_name))
+      .sort((a, b) => a.data_type.localeCompare(b.data_type))
 
     if (datedItems.length === 0) {
       return null
@@ -90,7 +90,7 @@ export function WatermarkRangeChart({ items, referenceTradeDate }: WatermarkRang
           : 0
 
       return {
-        key: item.pipeline_name,
+        key: item.data_type,
         label: isZh ? item.display_name : item.display_name_en,
         rangeText: `${item.min_date} ~ ${item.max_date}`,
         codeCount: item.code_count,

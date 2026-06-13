@@ -27,10 +27,7 @@ logger = get_logger(__name__)
 
 _collector = QmtDataCollector()
 
-# 市场级水位标识
-_MARKET_WATERMARK_CODE = "MARKET"
-_PIPELINE_NAME = "daily_kline_incremental"
-_ITEM_PIPELINE_NAME = "daily_kline"
+_DATA_TYPE = "daily_kline"
 
 # 持久化配置
 _PERSIST_UPDATE_FIELDS = [
@@ -139,8 +136,7 @@ async def persist_kline_data(df: pd.DataFrame) -> int:
 class DailyKlineIncrementalStage:
     """日行情增量采集 Stage — 按日期批量采集全市场日行情K线数据。"""
 
-    PIPELINE_NAME = _PIPELINE_NAME
-    MARKET_WATERMARK_CODE = _MARKET_WATERMARK_CODE
+    DATA_TYPE = _DATA_TYPE
 
     def __init__(self, batch_size: int = 500) -> None:
         self._batch_size = batch_size
@@ -217,11 +213,7 @@ class DailyKlineIncrementalStage:
         logger.info("[kline.incremental] 批量持久化完成: persisted=%d", total_persisted)
 
         # 统一批量更新标的水位（按 symbol 分组求 max(trade_date)）
-        actual_max_date = await self._batch_update_watermarks_from_df(df_all)
-
-        # 更新市场级水位（按实际数据的最新日期）
-        if actual_max_date is not None:
-            await self._update_market_watermark(actual_max_date)
+        await self._batch_update_watermarks_from_df(df_all)
 
         logger.info(
             "[kline.incremental] 完成: range=%s~%s shards=%d succeeded=%d failed=%d persisted=%d",
@@ -278,14 +270,10 @@ class DailyKlineIncrementalStage:
             return None
         return pd.concat(frames, ignore_index=True)
 
-    async def _batch_update_watermarks_from_df(self, df_all: pd.DataFrame) -> date | None:
-        """从聚合后的 DataFrame 一次性批量更新标的级水位。
-
-        Returns:
-            所有标的中的最新 trade_date（用于后续更新市场级水位），无数据返回 None
-        """
+    async def _batch_update_watermarks_from_df(self, df_all: pd.DataFrame) -> None:
+        """从聚合后的 DataFrame 一次性批量更新标的级水位。"""
         if df_all.empty:
-            return None
+            return
 
         # 按 symbol 求 max(trade_date)
         td_dates = pd.to_datetime(df_all["trade_date"]).dt.date
@@ -294,7 +282,7 @@ class DailyKlineIncrementalStage:
 
         instances = [
             CollectWatermark(
-                pipeline_name=_ITEM_PIPELINE_NAME,
+                data_type=_DATA_TYPE,
                 watermark_code=str(symbol),
                 watermark_date=max_date,
                 record_count=0,
@@ -304,11 +292,9 @@ class DailyKlineIncrementalStage:
         ]
         await CollectWatermark.bulk_create_or_update(
             instances,
-            on_conflict=["pipeline_name", "watermark_code"],
+            on_conflict=["data_type", "watermark_code"],
             update_fields=["watermark_date"],
         )
-        max_overall = max_per_symbol.max()
-        return max_overall if isinstance(max_overall, date) else None
 
     @staticmethod
     async def _get_all_stock_codes() -> list[str]:
@@ -322,21 +308,5 @@ class DailyKlineIncrementalStage:
     @staticmethod
     async def _get_watermark_map() -> dict[str, date]:
         """获取标的级水位映射 {code: watermark_date}。"""
-        rows = await CollectWatermark.filter(pipeline_name=_ITEM_PIPELINE_NAME, status="active")
+        rows = await CollectWatermark.filter(data_type=_DATA_TYPE, status="active")
         return {row.watermark_code: row.watermark_date for row in rows if row.watermark_date is not None}
-
-    @staticmethod
-    async def _update_market_watermark(end_date: date) -> None:
-        """更新市场级水位（使用 bulk_create_or_update）。"""
-        instance = CollectWatermark(
-            pipeline_name=_PIPELINE_NAME,
-            watermark_code=_MARKET_WATERMARK_CODE,
-            watermark_date=end_date,
-            record_count=0,
-            status="active",
-        )
-        await CollectWatermark.bulk_create_or_update(
-            [instance],
-            on_conflict=["pipeline_name", "watermark_code"],
-            update_fields=["watermark_date"],
-        )

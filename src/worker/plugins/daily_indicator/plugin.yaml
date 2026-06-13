@@ -4,6 +4,7 @@ version: "1.0.0"
 task_name: 每日指标采集
 task_name_en: Daily Indicator Collection
 description: 逐标的回补全市场每日指标数据（估值/换手率/市值等），数据源为Tushare daily_basic接口
+description_en: Per-security backfill of daily indicators (valuation/turnover/market cap etc.) from Tushare daily_basic API
 category: io
 task_type: on_demand
 queue: market

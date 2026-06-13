@@ -1,6 +1,6 @@
 """水位切面 — 前切获取水位日期作为增量起始时间，后切更新水位。
 
-所有需要增量采集的插件均可复用此切面，通过 pipeline_name 区分不同管线的水位。
+所有需要增量采集的插件均可复用此切面，通过 data_type 区分不同数据类型的水位。
 
 前切逻辑：
   1. 若上下文中已有 collect_date（外部指定采集日期），则使用该日期作为起始时间
@@ -26,8 +26,8 @@ logger = get_logger(__name__)
 class WatermarkAspect(Aspect):
     """水位切面 — 前切获取水位日期作为增量起始时间，后切更新水位。"""
 
-    def __init__(self, pipeline_name: str = "daily_kline") -> None:
-        self._pipeline_name = pipeline_name
+    def __init__(self, data_type: str = "daily_kline") -> None:
+        self._data_type = data_type
         self._watermark_service = WatermarkService()
 
     @property
@@ -46,15 +46,16 @@ class WatermarkAspect(Aspect):
         # 优先使用外部指定的采集日期（绕过水位检查）
         collect_date = ctx.get("collect_date")
         if collect_date:
-            ctx.set("start_date", str(collect_date))
+            start_str = self._normalize_date_str(str(collect_date))
+            ctx.set("start_date", start_str)
             ctx.set("is_up_to_date", False)
             ctx.set("end_date", "")
-            logger.debug("[watermark] 指定采集日期: %s start=%s", stock_code, collect_date)
+            logger.debug("[watermark] 指定采集日期: %s start=%s", stock_code, start_str)
             return
 
         # 查询水位日期
         start_date = await self._watermark_service.get_incremental_start_date(
-            pipeline_name=self._pipeline_name,
+            data_type=self._data_type,
             watermark_code=stock_code,
         )
         if start_date is None:
@@ -62,7 +63,7 @@ class WatermarkAspect(Aspect):
             ctx.set("is_up_to_date", True)
             logger.debug("[watermark] 水位最新，跳过: %s", stock_code)
         else:
-            ctx.set("start_date", str(start_date))
+            ctx.set("start_date", str(start_date).replace("-", ""))
             ctx.set("is_up_to_date", False)
             ctx.set("end_date", "")
 
@@ -87,16 +88,16 @@ class WatermarkAspect(Aspect):
                 return
 
             instance = CollectWatermark(
-                pipeline_name=self._pipeline_name,
+                data_type=self._data_type,
                 watermark_code=stock_code,
                 watermark_date=max_trade_date,
-                record_count=persisted,
+                record_count=0,
                 status="active",
             )
             await CollectWatermark.bulk_create_or_update(
                 [instance],
-                on_conflict=["pipeline_name", "watermark_code"],
-                update_fields=["watermark_date", "record_count"],
+                on_conflict=["data_type", "watermark_code"],
+                update_fields=["watermark_date"],
             )
             logger.debug("水位更新: %s → %s", stock_code, max_trade_date)
         except Exception as e:
@@ -105,3 +106,11 @@ class WatermarkAspect(Aspect):
     async def on_error(self, item: Any, ctx: PipelineContext, error: Exception) -> None:
         """错误钩子：记录失败日志。"""
         logger.warning("采集失败: %s, error=%s", item, error)
+
+    @staticmethod
+    def _normalize_date_str(date_str: str) -> str:
+        """将日期字符串统一转换为 YYYYMMDD 格式（去除连字符）。
+
+        支持输入格式：YYYY-MM-DD、YYYYMMDD、date 对象的 str 表示。
+        """
+        return date_str.replace("-", "")

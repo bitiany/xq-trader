@@ -182,7 +182,7 @@ class DailyIndicatorCollectTask(BaseTask):
     """A股每日指标采集任务（Tushare daily_basic 数据源）。
 
     入参：
-      - pipeline_name: 管线名称（默认 daily_indicator）
+      - data_type: 数据类型（默认 daily_indicator）
       - concurrency: 并发数（默认 50）
       - stock_codes: 股票代码列表（为空时采集全市场）
       - max_count: 最大标的数量（用于测试，0 表示不限）
@@ -195,7 +195,7 @@ class DailyIndicatorCollectTask(BaseTask):
     soft_time_limit = 14370
 
     async def _run_impl(self, **kwargs: Any) -> dict[str, Any]:
-        pipeline_name = kwargs.get("pipeline_name", "daily_indicator")
+        data_type = kwargs.get("data_type", "daily_indicator")
         concurrency = kwargs.get("concurrency", 50)
         stock_codes: list[str] | None = kwargs.get("stock_codes")
         max_count: int = kwargs.get("max_count", 0)
@@ -220,14 +220,14 @@ class DailyIndicatorCollectTask(BaseTask):
 
         logger.info(
             "[daily_indicator.collect] 开始采集: pipeline=%s concurrency=%d stocks=%d collect_date=%s",
-            pipeline_name, concurrency, len(stock_codes), collect_date or "按水位",
+            data_type, concurrency, len(stock_codes), collect_date or "按水位",
         )
 
         # 组装管线: download → clean → persist
         pipeline = Pipeline(
-            name=pipeline_name,
+            name=data_type,
             stages=[DownloadStage(), CleanStage(), PersistStage()],
-            aspects=[WatermarkAspect(pipeline_name=pipeline_name)],
+            aspects=[WatermarkAspect(data_type=data_type)],
         )
 
         # 执行管道引擎

@@ -13,7 +13,7 @@ class TestIncrementalStartDateAPI:
         """水位落后于最新交易日 → 返回水位日期作为增量起始"""
         response = await api_client.get(
             f"{API_PREFIX}/watermarks/incremental-start",
-            params={"pipeline_name": "balance_sheet", "watermark_code": "000001.SZ"},
+            params={"data_type": "balance_sheet", "watermark_code": "000001.SZ"},
         )
         assert response.status_code == 200
         data = response.json()
@@ -25,7 +25,7 @@ class TestIncrementalStartDateAPI:
         """水位已最新 → 返回 start_date 为 null"""
         response = await api_client.get(
             f"{API_PREFIX}/watermarks/incremental-start",
-            params={"pipeline_name": "daily_kline", "watermark_code": "000001.SZ"},
+            params={"data_type": "daily_kline", "watermark_code": "000001.SZ"},
         )
         assert response.status_code == 200
         data = response.json()
@@ -36,7 +36,7 @@ class TestIncrementalStartDateAPI:
         """水位记录不存在 → 视为从未采集，返回最新交易日"""
         response = await api_client.get(
             f"{API_PREFIX}/watermarks/incremental-start",
-            params={"pipeline_name": "nonexistent_pipeline", "watermark_code": "999999.SZ"},
+            params={"data_type": "nonexistent_data_type", "watermark_code": "999999.SZ"},
         )
         assert response.status_code == 200
         data = response.json()
@@ -54,23 +54,23 @@ class TestIncrementalStartDateBatchAPI:
     """GET /api/v1/watermarks/incremental-start/batch"""
 
     @pytest.mark.asyncio(loop_scope="session")
-    async def test_batch_with_existing_pipeline(self, api_client):
-        """批量查询已有 Pipeline 的水位"""
+    async def test_batch_with_existing_data_type(self, api_client):
+        """批量查询已有数据类型的水位"""
         response = await api_client.get(
             f"{API_PREFIX}/watermarks/incremental-start/batch",
-            params={"pipeline_name": "balance_sheet"},
+            params={"data_type": "balance_sheet"},
         )
         assert response.status_code == 200
         data = response.json()
-        assert data["data"]["pipeline_name"] == "balance_sheet"
+        assert data["data"]["data_type"] == "balance_sheet"
         assert isinstance(data["data"]["items"], dict)
 
     @pytest.mark.asyncio(loop_scope="session")
-    async def test_batch_with_nonexistent_pipeline(self, api_client):
-        """批量查询不存在的 Pipeline → 返回空 items"""
+    async def test_batch_with_nonexistent_data_type(self, api_client):
+        """批量查询不存在的数据类型 → 返回空 items"""
         response = await api_client.get(
             f"{API_PREFIX}/watermarks/incremental-start/batch",
-            params={"pipeline_name": "nonexistent_pipeline"},
+            params={"data_type": "nonexistent_data_type"},
         )
         assert response.status_code == 200
         data = response.json()

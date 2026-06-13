@@ -4,6 +4,7 @@ version: "1.0.0"
 task_name: 日行情与资金流向增量采集
 task_name_en: Daily Incremental Collection
 description: 按日期增量采集全市场日行情K线和资金流向数据，每个数据类型独立完成采集→清洗→持久化→更新水位闭环
+description_en: Incrementally collect daily kline and fund flow data by date, each data type independently completes collect→clean→persist→update watermark cycle
 category: io
 task_type: on_demand
 queue: market

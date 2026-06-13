@@ -24,6 +24,7 @@ class PluginManifest:
     task_name: str = ""
     task_name_en: str = ""
     description: str = ""
+    description_en: str = ""
     category: str = "compute"
     task_type: str = "on_demand"
     queue: str = "celery"
@@ -112,6 +113,7 @@ def _parse_manifest(yaml_path: Path) -> PluginManifest:
         task_name=data.get("task_name", ""),
         task_name_en=data.get("task_name_en", ""),
         description=data.get("description", ""),
+        description_en=data.get("description_en", ""),
         category=data.get("category", "compute"),
         task_type=data.get("task_type", "on_demand"),
         queue=data.get("queue", "celery"),

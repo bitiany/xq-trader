@@ -107,19 +107,16 @@ class QmtDataCollector:
         if not index_list:
             return {}
 
-        # Tushare 格式 → QMT 格式
-        qmt_list = [convert_symbol_to_qmt(c) for c in index_list]
-        qmt_to_tushare = {convert_symbol_to_qmt(c): c for c in index_list}
-
+        # xtdata 对指数代码使用 Tushare 格式（000001.SH）而非 QMT 格式（SH.000001），
+        # 直接传入即可，无需转换。
         raw = await self.fetch_kline_daily(
-            stock_list=qmt_list,
+            stock_list=index_list,
             start_time=start_time,
             end_time=end_time,
             dividend_type=dividend_type,
         )
 
-        # QMT 格式 key → Tushare 格式 key
-        return {qmt_to_tushare.get(k, k): v for k, v in raw.items()}
+        return raw
 
     async def fetch_kline_daily(
         self,

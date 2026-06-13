@@ -558,7 +558,7 @@
       "tasks": "Tasks"
     },
     "overview": {
-      "pipelineCount": "Pipelines",
+      "pipelineCount": "Data Types",
       "totalCodes": "Symbols Covered",
       "totalRecords": "Total Records",
       "stockStorage": "Stock Storage",

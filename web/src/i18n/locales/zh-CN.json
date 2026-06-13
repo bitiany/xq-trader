@@ -559,7 +559,7 @@
       "tasks": "任务管理"
     },
     "overview": {
-      "pipelineCount": "采集 Pipeline",
+      "pipelineCount": "数据类型",
       "totalCodes": "覆盖标的",
       "totalRecords": "累计记录",
       "stockStorage": "Stock 存储",

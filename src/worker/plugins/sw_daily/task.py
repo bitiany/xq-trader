@@ -160,7 +160,7 @@ class SwDailyCollectTask(BaseTask):
     """申万行业日线行情采集任务。
 
     入参：
-      - pipeline_name: 管线名称（默认 sw_daily）
+      - data_type: 数据类型（默认 sw_daily）
       - concurrency: 并发数（默认 5）
       - ts_codes: 行业代码列表（为空时采集全市场申万行业）
       - max_count: 最大标的数量（用于测试，0 表示不限）
@@ -173,7 +173,7 @@ class SwDailyCollectTask(BaseTask):
     soft_time_limit = 3570
 
     async def _run_impl(self, **kwargs: Any) -> dict[str, Any]:
-        pipeline_name = kwargs.get("pipeline_name", "sw_daily")
+        data_type = kwargs.get("data_type", "sw_daily")
         concurrency = kwargs.get("concurrency", 5)
         ts_codes: list[str] | None = kwargs.get("ts_codes")
         max_count: int = kwargs.get("max_count", 0)
@@ -198,14 +198,14 @@ class SwDailyCollectTask(BaseTask):
 
         logger.info(
             "[sw_daily.collect] 开始采集: pipeline=%s concurrency=%d codes=%d collect_date=%s",
-            pipeline_name, concurrency, len(ts_codes), collect_date or "按水位",
+            data_type, concurrency, len(ts_codes), collect_date or "按水位",
         )
 
         # 组装管线: download → clean → persist
         pipeline = Pipeline(
-            name=pipeline_name,
+            name=data_type,
             stages=[DownloadStage(), CleanStage(), PersistStage()],
-            aspects=[WatermarkAspect(pipeline_name=pipeline_name)],
+            aspects=[WatermarkAspect(data_type=data_type)],
         )
 
         # 执行管道引擎

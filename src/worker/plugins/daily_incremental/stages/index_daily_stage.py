@@ -4,7 +4,6 @@
   1. 确定日期范围 [start_date, end_date]
   2. 全市场指数代码列表 + 标的级水位
   3. 指数分片，逐片执行：采集 → 清洗 → 持久化 → 更新标的水位
-  4. 更新市场级水位
 """
 
 from __future__ import annotations
@@ -26,10 +25,7 @@ logger = get_logger(__name__)
 
 _collector = QmtDataCollector()
 
-# 市场级水位标识
-_MARKET_WATERMARK_CODE = "MARKET"
-_PIPELINE_NAME = "index_daily_incremental"
-_ITEM_PIPELINE_NAME = "index_daily"
+_DATA_TYPE = "index_daily"
 
 # 持久化配置
 _PERSIST_UPDATE_FIELDS = [
@@ -145,8 +141,7 @@ async def persist_index_kline_data(df: pd.DataFrame) -> int:
 class IndexDailyIncrementalStage:
     """指数日线行情增量采集 Stage — 按日期批量采集全市场指数日线行情数据。"""
 
-    PIPELINE_NAME = _PIPELINE_NAME
-    MARKET_WATERMARK_CODE = _MARKET_WATERMARK_CODE
+    DATA_TYPE = _DATA_TYPE
 
     def __init__(self, batch_size: int = 50) -> None:
         self._batch_size = batch_size
@@ -181,18 +176,15 @@ class IndexDailyIncrementalStage:
         succeeded = 0
         failed = 0
         total_persisted = 0
-        actual_max_date: date | None = None
 
         # 指数分片
         shards = [index_codes[i:i + self._batch_size] for i in range(0, len(index_codes), self._batch_size)]
 
         for idx, shard in enumerate(shards, 1):
             try:
-                persisted, shard_max = await self._process_shard(shard, sd, ed, watermark_map)
+                persisted = await self._process_shard(shard, sd, ed, watermark_map)
                 succeeded += 1
                 total_persisted += persisted
-                if shard_max is not None:
-                    actual_max_date = max(actual_max_date, shard_max) if actual_max_date else shard_max
             except Exception as e:
                 failed += 1
                 logger.error(
@@ -207,10 +199,6 @@ class IndexDailyIncrementalStage:
                     idx, len(shards), succeeded, failed, total_persisted,
                 )
 
-        # 更新市场级水位（按实际数据的最新日期）
-        if actual_max_date is not None:
-            await self._update_market_watermark(actual_max_date)
-
         logger.info(
             "[index_daily.incremental] 完成: range=%s~%s shards=%d succeeded=%d failed=%d persisted=%d",
             sd, ed, total, succeeded, failed, total_persisted,
@@ -223,11 +211,11 @@ class IndexDailyIncrementalStage:
         sd: str,
         ed: str,
         watermark_map: dict[str, date],
-    ) -> tuple[int, date | None]:
+    ) -> int:
         """处理单个分片：采集→清洗→持久化→更新标的水位。
 
         Returns:
-            (persisted_count, max_date) - 持久化行数和数据的最新日期
+            persisted_count - 持久化行数
         """
         # 采集（fetch_index_kline_daily 自动处理 Tushare ↔ QMT 格式转换）
         raw = await _collector.fetch_index_kline_daily(
@@ -272,8 +260,7 @@ class IndexDailyIncrementalStage:
         if updated_codes:
             await self._batch_update_item_watermarks(updated_codes, max_dates)
 
-        shard_max_date = max(max_dates) if max_dates else None
-        return total_persisted, shard_max_date
+        return total_persisted
 
     @staticmethod
     async def _get_all_index_codes() -> list[str]:
@@ -284,7 +271,7 @@ class IndexDailyIncrementalStage:
     @staticmethod
     async def _get_watermark_map() -> dict[str, date]:
         """获取标的级水位映射 {code: watermark_date}。"""
-        rows = await CollectWatermark.filter(pipeline_name=_ITEM_PIPELINE_NAME, status="active")
+        rows = await CollectWatermark.filter(data_type=_DATA_TYPE, status="active")
         return {row.watermark_code: row.watermark_date for row in rows if row.watermark_date is not None}
 
     @staticmethod
@@ -292,7 +279,7 @@ class IndexDailyIncrementalStage:
         """批量更新标的级水位（使用 bulk_create_or_update）。"""
         instances = [
             CollectWatermark(
-                pipeline_name=_ITEM_PIPELINE_NAME,
+                data_type=_DATA_TYPE,
                 watermark_code=code,
                 watermark_date=max_date,
                 record_count=0,
@@ -302,22 +289,6 @@ class IndexDailyIncrementalStage:
         ]
         await CollectWatermark.bulk_create_or_update(
             instances,
-            on_conflict=["pipeline_name", "watermark_code"],
-            update_fields=["watermark_date"],
-        )
-
-    @staticmethod
-    async def _update_market_watermark(end_date: date) -> None:
-        """更新市场级水位（使用 bulk_create_or_update）。"""
-        instance = CollectWatermark(
-            pipeline_name=_PIPELINE_NAME,
-            watermark_code=_MARKET_WATERMARK_CODE,
-            watermark_date=end_date,
-            record_count=0,
-            status="active",
-        )
-        await CollectWatermark.bulk_create_or_update(
-            [instance],
-            on_conflict=["pipeline_name", "watermark_code"],
+            on_conflict=["data_type", "watermark_code"],
             update_fields=["watermark_date"],
         )

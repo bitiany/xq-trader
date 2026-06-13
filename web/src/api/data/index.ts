@@ -1,7 +1,7 @@
 import { request } from '@/api/client'
 
 export interface WatermarkSummaryItem {
-  pipeline_name: string
+  data_type: string
   display_name: string
   display_name_en: string
   code_count: number
@@ -47,24 +47,12 @@ export interface CollectTaskItem {
 }
 
 export interface DataSummaryResponse {
-  pipeline_count: number
+  data_type_count: number
   total_codes: number
   total_records: number
-  stock_table_count: number
-  stock_total_bytes: number
+  table_count: number
+  total_bytes: number
   worker_available: boolean
-}
-
-export interface DataOverviewResponse {
-  pipeline_count: number
-  total_codes: number
-  total_records: number
-  stock_table_count: number
-  stock_total_bytes: number
-  worker_available: boolean
-  reference_trade_date: string | null
-  watermarks: WatermarkSummaryItem[]
-  tables: StockTableStatItem[]
 }
 
 export interface TriggerTaskResponse {
@@ -93,10 +81,6 @@ export interface NodeItem {
   last_heartbeat: string | null
 }
 
-export async function fetchDataOverview(): Promise<DataOverviewResponse> {
-  return request.get<DataOverviewResponse>('/data/overview')
-}
-
 export async function fetchDataSummary(): Promise<DataSummaryResponse> {
   return request.get<DataSummaryResponse>('/data/summary')
 }
@@ -118,45 +102,6 @@ export async function fetchCollectTasks(): Promise<CollectTaskItem[]> {
   return request.get<CollectTaskItem[]>('/data/tasks')
 }
 
-export async function fetchCollectTask(taskId: string): Promise<CollectTaskItem> {
-  return request.get<CollectTaskItem>(`/data/tasks/${taskId}`)
-}
-
-export async function createCollectTask(data: Record<string, unknown>): Promise<CollectTaskItem> {
-  return request.post<CollectTaskItem>('/data/tasks', data)
-}
-
-export async function updateCollectTask(taskId: string, data: Record<string, unknown>): Promise<CollectTaskItem> {
-  return request.put<CollectTaskItem>(`/data/tasks/${taskId}`, data)
-}
-
-export async function deleteCollectTask(taskId: string): Promise<void> {
-  await request.delete(`/data/tasks/${taskId}`)
-}
-
-export async function enableCollectTask(taskId: string): Promise<CollectTaskItem> {
-  return request.patch<CollectTaskItem>(`/data/tasks/${taskId}/enable`)
-}
-
-export async function disableCollectTask(taskId: string): Promise<CollectTaskItem> {
-  return request.patch<CollectTaskItem>(`/data/tasks/${taskId}/disable`)
-}
-
-export async function updateTaskSchedule(
-  taskId: string,
-  schedule: string,
-  scheduleDisplay?: string,
-  scheduleDisplayEn?: string,
-  reason?: string,
-): Promise<CollectTaskItem> {
-  return request.patch<CollectTaskItem>(`/data/tasks/${taskId}/schedule`, {
-    schedule,
-    schedule_display: scheduleDisplay,
-    schedule_display_en: scheduleDisplayEn,
-    reason,
-  })
-}
-
 export async function triggerCollectTask(taskId: string, params?: Record<string, unknown>): Promise<TriggerTaskResponse> {
   return request.post<TriggerTaskResponse>(`/data/tasks/${taskId}/trigger`, { params })
 }
@@ -170,18 +115,6 @@ export async function fetchTaskLogs(
   const params: Record<string, unknown> = { limit, offset }
   if (level) params.level = level
   return request.get<{ items: TaskLogItem[]; total: number }>(`/data/tasks/${taskId}/logs`, { params })
-}
-
-export async function fetchLogs(
-  taskId?: string,
-  level?: string,
-  limit = 50,
-  offset = 0,
-): Promise<{ items: TaskLogItem[]; total: number }> {
-  const params: Record<string, unknown> = { limit, offset }
-  if (taskId) params.task_id = taskId
-  if (level) params.level = level
-  return request.get<{ items: TaskLogItem[]; total: number }>('/data/logs', { params })
 }
 
 export async function fetchNodes(): Promise<NodeItem[]> {

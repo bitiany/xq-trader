@@ -221,6 +221,61 @@ class TushareDataCollector:
                 f"daily_basic 采集失败 ts_code={ts_code} trade_date={trade_date}: {e}"
             ) from e
 
+    async def fetch_stock_basic(
+        self,
+        ts_code: str = "",
+        list_status: str = "L",
+        exchange: str = "",
+    ) -> pd.DataFrame:
+        """获取股票基本信息。
+
+        接口：stock_basic
+        限制：无单次上限，无需积分
+
+        Args:
+            ts_code: 股票代码，如 "000001.SZ"
+            list_status: 上市状态 L(上市) D(退市) P(暂停上市)
+            exchange: 交易所 SSE/SZSE/BSE
+
+        Returns:
+            DataFrame，包含 ts_code/symbol/name/area/industry/list_date/list_status 等字段
+        """
+        # 必须显式指定 fields，否则 Tushare SDK 默认只返回部分字段
+        # （缺少 list_status/exchange/fullname/enname/curr_type/delist_date/is_hs 等）
+        _fields = (
+            "ts_code,symbol,name,area,industry,fullname,enname,cnspell,"
+            "market,exchange,curr_type,list_status,list_date,delist_date,"
+            "is_hs,act_name,act_ent_type"
+        )
+        try:
+            await self._limiter.acquire()
+            loop = asyncio.get_running_loop()
+            func = partial(
+                self._pro.stock_basic,
+                ts_code=ts_code,
+                list_status=list_status,
+                exchange=exchange,
+                fields=_fields,
+            )
+            result = await loop.run_in_executor(self._get_executor(), func)
+            df = pd.DataFrame() if result is None else pd.DataFrame(result)
+            if df.empty:
+                logger.debug(
+                    "stock_basic 无数据: ts_code=%s list_status=%s exchange=%s",
+                    ts_code, list_status, exchange,
+                )
+                return pd.DataFrame()
+
+            logger.debug(
+                "stock_basic 获取完成: ts_code=%s rows=%d",
+                ts_code, len(df),
+            )
+            return df
+        except Exception as e:
+            raise DataCollectionError(
+                f"stock_basic 采集失败 ts_code={ts_code} list_status={list_status}: {e}"
+            ) from e
+
     async def fetch_sw_daily(
         self,
         ts_code: str = "",

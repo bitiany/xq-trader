@@ -4,10 +4,10 @@
 每个数据类型独立完成采集→清洗→持久化→更新水位闭环。
 
 水位策略：
-  - 每个数据类型独立检查市场级水位，缺失水位的 Stage 跳过执行
+  - 每个数据类型独立检查水位，缺失水位的 Stage 跳过执行
   - 若指定 start_date，则所有 Stage 统一使用该日期
-  - 若未指定 start_date，则各 Stage 按自身市场水位确定起始日期
-  - 所有 Stage 均无市场水位且未指定 start_date → 报错
+  - 若未指定 start_date，则各 Stage 按自身 data_type 的最大水位日期确定起始日期
+  - 所有 Stage 均无水位且未指定 start_date → 报错
   - 标的级水位（与回补任务共享）用于过滤已采集数据，采集后按标的更新
 """
 
@@ -43,7 +43,7 @@ class DailyIncrementalTask(BaseTask):
     """日行情、资金流向、每日指标、指数行情与申万行业行情增量采集任务。
 
     入参：
-      - start_date: 采集起始日期（格式 YYYY-MM-DD，为空时按各 Stage 市场水位）
+      - start_date: 采集起始日期（格式 YYYY-MM-DD，为空时按各 Stage 标的级水位）
       - end_date: 采集结束日期（格式 YYYY-MM-DD，为空时取最新交易日）
       - kline_batch_size: QMT 标的分片大小（默认 50）
     """
@@ -63,28 +63,23 @@ class DailyIncrementalTask(BaseTask):
 
         # 各 Stage 独立确定 start_date
         kline_start = await self._resolve_stage_start(
-            DailyKlineIncrementalStage.PIPELINE_NAME,
-            DailyKlineIncrementalStage.MARKET_WATERMARK_CODE,
+            DailyKlineIncrementalStage.DATA_TYPE,
             start_date_str,
         )
         ff_start = await self._resolve_stage_start(
-            FundFlowIncrementalStage.PIPELINE_NAME,
-            FundFlowIncrementalStage.MARKET_WATERMARK_CODE,
+            FundFlowIncrementalStage.DATA_TYPE,
             start_date_str,
         )
         indicator_start = await self._resolve_stage_start(
-            DailyIndicatorIncrementalStage.PIPELINE_NAME,
-            DailyIndicatorIncrementalStage.MARKET_WATERMARK_CODE,
+            DailyIndicatorIncrementalStage.DATA_TYPE,
             start_date_str,
         )
         index_start = await self._resolve_stage_start(
-            IndexDailyIncrementalStage.PIPELINE_NAME,
-            IndexDailyIncrementalStage.MARKET_WATERMARK_CODE,
+            IndexDailyIncrementalStage.DATA_TYPE,
             start_date_str,
         )
         sw_start = await self._resolve_stage_start(
-            SwDailyIncrementalStage.PIPELINE_NAME,
-            SwDailyIncrementalStage.MARKET_WATERMARK_CODE,
+            SwDailyIncrementalStage.DATA_TYPE,
             start_date_str,
         )
 
@@ -100,7 +95,7 @@ class DailyIncrementalTask(BaseTask):
             return {
                 "status": "ERROR",
                 "message": (
-                    "无市场水位记录，请先执行全量回补任务"
+                    "无水位记录，请先执行全量回补任务"
                     "（daily_kline / fund_flow / daily_indicator / index_daily / sw_daily）"
                 ),
             }
@@ -179,22 +174,19 @@ class DailyIncrementalTask(BaseTask):
 
     @staticmethod
     async def _resolve_stage_start(
-        pipeline_name: str,
-        watermark_code: str,
+        data_type: str,
         start_date_str: str | None,
     ) -> date | None:
         """确定单个 Stage 的起始日期。
 
-        优先使用指定的 start_date；否则查询该 Stage 的市场级水位。
+        优先使用指定的 start_date；否则查询该 data_type 下所有标的的最大水位日期。
         无水位返回 None（该 Stage 将被跳过）。
         """
         if start_date_str:
             return date.fromisoformat(start_date_str)
 
-        wm = await CollectWatermark.get_one_or_none(
-            pipeline_name=pipeline_name,
-            watermark_code=watermark_code,
-        )
-        if wm and wm.watermark_date:
-            return wm.watermark_date
+        rows = await CollectWatermark.filter(data_type=data_type, status="active")
+        dates = [row.watermark_date for row in rows if row.watermark_date is not None]
+        if dates:
+            return min(dates)
         return None

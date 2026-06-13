@@ -4,6 +4,7 @@ version: "1.0.0"
 task_name: 申万行业日线行情采集
 task_name_en: SW Industry Daily Collection
 description: 逐标的采集全市场申万行业日线行情数据，数据源为Tushare sw_daily接口，支持增量采集和水位管理
+description_en: Per-security collection of SW industry daily data from Tushare sw_daily API with incremental collection and watermark management
 category: io
 task_type: on_demand
 queue: market

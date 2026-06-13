@@ -43,7 +43,7 @@ logger = get_logger("factor.compute")
 _COMPUTE_MODE_INCREMENTAL = "incremental"
 _COMPUTE_MODE_FULL = "full"
 _DEFAULT_WARMUP_BARS = 300
-_WATERMARK_PIPELINE = "factor_compute"
+_WATERMARK_DATA_TYPE = "factor_compute"
 
 
 class FactorComputeTask(BaseTask):
@@ -109,14 +109,14 @@ class FactorComputeTask(BaseTask):
 
         # 构建管线：WatermarkAspect 前切判断水位，后切更新水位
         pipeline = Pipeline(
-            name=_WATERMARK_PIPELINE,
+            name=_WATERMARK_DATA_TYPE,
             stages=[
                 FactorLoadStage(),
                 FactorCalcStage(),
                 FactorPreprocessStage(),
                 FactorPersistStage(),
             ],
-            aspects=[WatermarkAspect(pipeline_name=_WATERMARK_PIPELINE)],
+            aspects=[WatermarkAspect(data_type=_WATERMARK_DATA_TYPE)],
         )
 
         # 全局上下文

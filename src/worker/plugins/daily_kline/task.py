@@ -175,7 +175,7 @@ class DailyKlineCollectTask(BaseTask):
     """A股日线K线行情采集任务。
 
     入参：
-      - pipeline_name: 管线名称（默认 daily_kline）
+      - data_type: 数据类型（默认 daily_kline）
       - concurrency: 并发数（默认 5）
       - stock_codes: 股票代码列表（为空时采集全市场）
       - max_count: 最大标的数量（用于测试，0 表示不限）
@@ -188,7 +188,7 @@ class DailyKlineCollectTask(BaseTask):
     soft_time_limit = 1770
 
     async def _run_impl(self, **kwargs: Any) -> dict[str, Any]:
-        pipeline_name = kwargs.get("pipeline_name", "daily_kline")
+        data_type = kwargs.get("data_type", "daily_kline")
         concurrency = kwargs.get("concurrency", 5)
         stock_codes: list[str] | None = kwargs.get("stock_codes")
         max_count: int = kwargs.get("max_count", 0)
@@ -213,14 +213,14 @@ class DailyKlineCollectTask(BaseTask):
 
         logger.info(
             "[kline.collect] 开始采集: pipeline=%s concurrency=%d stocks=%d collect_date=%s",
-            pipeline_name, concurrency, len(stock_codes), collect_date or "按水位",
+            data_type, concurrency, len(stock_codes), collect_date or "按水位",
         )
 
         # 组装管线: download → clean → persist
         pipeline = Pipeline(
-            name=pipeline_name,
+            name=data_type,
             stages=[DownloadStage(), CleanStage(), PersistStage()],
-            aspects=[WatermarkAspect(pipeline_name=pipeline_name)],
+            aspects=[WatermarkAspect(data_type=data_type)],
         )
 
         # 执行管道引擎

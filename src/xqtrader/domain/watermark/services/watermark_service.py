@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import logging
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from framework.commons.logger import get_logger
 from xqtrader.domain.watermark.models.collect_watermark import CollectWatermark
 from xqtrader.domain.watermark.models.trade_calendar import DEFAULT_TRADE_EXCHANGE, TradeCalendar
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class WatermarkService:
@@ -26,13 +26,13 @@ class WatermarkService:
 
     async def get_incremental_start_date(
         self,
-        pipeline_name: str,
+        data_type: str,
         watermark_code: str,
     ) -> date | None:
         """计算增量采集的起始日期。
 
         Args:
-            pipeline_name: Pipeline 名称，如 "daily_kline"
+            data_type: 数据类型，如 "daily_kline"
             watermark_code: 水位标识代码，如 "000001.SZ"
 
         Returns:
@@ -50,36 +50,36 @@ class WatermarkService:
             return None
 
         watermark = await CollectWatermark.get_one_or_none(
-            pipeline_name=pipeline_name,
+            data_type=data_type,
             watermark_code=watermark_code,
         )
         watermark_date = watermark.watermark_date if watermark else None
 
         if watermark_date is None:
             logger.debug(
-                "水位为空，需全量采集: pipeline=%s code=%s",
-                pipeline_name, watermark_code,
+                "水位为空，需全量采集: data_type=%s code=%s",
+                data_type, watermark_code,
             )
             return date(1990, 1, 1)
 
         if watermark_date >= latest_trade_date:
             logger.debug(
-                "水位已是最新: pipeline=%s code=%s watermark=%s trade_date=%s",
-                pipeline_name, watermark_code, watermark_date, latest_trade_date,
+                "水位已是最新: data_type=%s code=%s watermark=%s trade_date=%s",
+                data_type, watermark_code, watermark_date, latest_trade_date,
             )
             return None
 
         logger.debug(
-            "水位落后，需增量采集: pipeline=%s code=%s watermark=%s trade_date=%s",
-            pipeline_name, watermark_code, watermark_date, latest_trade_date,
+            "水位落后，需增量采集: data_type=%s code=%s watermark=%s trade_date=%s",
+            data_type, watermark_code, watermark_date, latest_trade_date,
         )
         return watermark_date
 
     async def get_incremental_start_dates(
         self,
-        pipeline_name: str,
+        data_type: str,
     ) -> dict[str, date | None]:
-        """批量计算某 Pipeline 下所有水位标识的增量起始日期。
+        """批量计算某数据类型下所有水位标识的增量起始日期。
 
         Returns:
             dict[watermark_code, start_date | None]
@@ -95,7 +95,7 @@ class WatermarkService:
             return {}
 
         watermarks = await CollectWatermark.filter(
-            pipeline_name=pipeline_name,
+            data_type=data_type,
             status="active",
         )
 

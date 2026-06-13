@@ -4,7 +4,6 @@
   1. 确定日期范围 [start_date, end_date]
   2. 获取交易日列表
   3. 逐日执行：采集 → 清洗 → 持久化 → 更新标的水位
-  4. 更新市场级水位
 
 数据源：Tushare daily_basic 接口（单次上限 6000 条）。
 逐日采集时传入 trade_date 获取全市场当日数据。
@@ -28,10 +27,7 @@ logger = get_logger(__name__)
 
 _collector: TushareDataCollector | None = None
 
-# 市场级水位标识
-_MARKET_WATERMARK_CODE = "MARKET"
-_PIPELINE_NAME = "daily_indicator_incremental"
-_ITEM_PIPELINE_NAME = "daily_indicator"
+_DATA_TYPE = "daily_indicator"
 
 # daily_basic 接口字段 → DailyIndicator 模型字段
 _COLUMN_MAPPING: dict[str, str] = {
@@ -121,8 +117,7 @@ async def persist_daily_indicator_data(df: pd.DataFrame) -> int:
 class DailyIndicatorIncrementalStage:
     """每日指标增量采集 Stage — 逐日采集全市场每日指标数据。"""
 
-    PIPELINE_NAME = _PIPELINE_NAME
-    MARKET_WATERMARK_CODE = _MARKET_WATERMARK_CODE
+    DATA_TYPE = _DATA_TYPE
 
     async def execute(self, start_date: date, end_date: date) -> dict[str, Any]:
         """执行增量采集。
@@ -152,15 +147,12 @@ class DailyIndicatorIncrementalStage:
         succeeded = 0
         failed = 0
         total_persisted = 0
-        actual_max_date: date | None = None  # 跟踪实际数据的最新日期
 
         for idx, td in enumerate(trade_dates, 1):
             try:
                 persisted = await self._process_trade_date(td, watermark_map)
                 succeeded += 1
                 total_persisted += persisted
-                if persisted > 0:
-                    actual_max_date = td
             except Exception as e:
                 failed += 1
                 logger.error(
@@ -173,10 +165,6 @@ class DailyIndicatorIncrementalStage:
                     "[daily_indicator.incremental] 进度: %d/%d days succeeded=%d failed=%d persisted=%d",
                     idx, total, succeeded, failed, total_persisted,
                 )
-
-        # 更新市场级水位（按实际数据的最新日期）
-        if actual_max_date is not None:
-            await self._update_market_watermark(actual_max_date)
 
         logger.info(
             "[daily_indicator.incremental] 完成: range=%s~%s days=%d succeeded=%d failed=%d persisted=%d",
@@ -242,7 +230,7 @@ class DailyIndicatorIncrementalStage:
     @staticmethod
     async def _get_watermark_map() -> dict[str, date]:
         """获取标的级水位映射 {code: watermark_date}。"""
-        rows = await CollectWatermark.filter(pipeline_name=_ITEM_PIPELINE_NAME, status="active")
+        rows = await CollectWatermark.filter(data_type=_DATA_TYPE, status="active")
         return {row.watermark_code: row.watermark_date for row in rows if row.watermark_date is not None}
 
     @staticmethod
@@ -251,7 +239,7 @@ class DailyIndicatorIncrementalStage:
         codes = df["symbol"].unique().tolist()
         instances = [
             CollectWatermark(
-                pipeline_name=_ITEM_PIPELINE_NAME,
+                data_type=_DATA_TYPE,
                 watermark_code=code,
                 watermark_date=trade_date,
                 record_count=0,
@@ -261,22 +249,6 @@ class DailyIndicatorIncrementalStage:
         ]
         await CollectWatermark.bulk_create_or_update(
             instances,
-            on_conflict=["pipeline_name", "watermark_code"],
-            update_fields=["watermark_date"],
-        )
-
-    @staticmethod
-    async def _update_market_watermark(end_date: date) -> None:
-        """更新市场级水位（使用 bulk_create_or_update）。"""
-        instance = CollectWatermark(
-            pipeline_name=_PIPELINE_NAME,
-            watermark_code=_MARKET_WATERMARK_CODE,
-            watermark_date=end_date,
-            record_count=0,
-            status="active",
-        )
-        await CollectWatermark.bulk_create_or_update(
-            [instance],
-            on_conflict=["pipeline_name", "watermark_code"],
+            on_conflict=["data_type", "watermark_code"],
             update_fields=["watermark_date"],
         )

@@ -50,7 +50,7 @@ function SummaryCards({
           <div className="card__header">
             <h3 className="card__title">{t('data.overview.pipelineCount')}</h3>
           </div>
-          <div className="card__value">{data?.pipeline_count ?? '--'}</div>
+          <div className="card__value">{data?.data_type_count ?? '--'}</div>
         </div>
         <div className="card">
           <div className="card__header">
@@ -68,9 +68,9 @@ function SummaryCards({
           <div className="card__header">
             <h3 className="card__title">{t('data.overview.stockStorage')}</h3>
           </div>
-          <div className="card__value">{data ? formatBytes(data.stock_total_bytes) : '--'}</div>
+          <div className="card__value">{data ? formatBytes(data.total_bytes) : '--'}</div>
           <div className="card__sub">
-            {t('data.overview.tableCount', { count: data?.stock_table_count ?? 0 })}
+            {t('data.overview.tableCount', { count: data?.table_count ?? 0 })}
           </div>
         </div>
       </div>
