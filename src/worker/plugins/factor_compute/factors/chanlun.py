@@ -8,7 +8,7 @@
   - chan_bi_amplitude: 笔振幅（笔内最大回撤 / 笔长度）
   - chan_bi_strength: 笔强度（笔长度 / 笔内K线数）
   - chan_zs_height_ratio: 中枢高度比（(ZG-ZD) / close）
-  - chan_zs_range: 中枢区间（(ZG-ZD) / close）
+  - chan_zs_range: 中枢区间（ZG-ZD 绝对宽度）
   - chan_divergence_ratio: 背驰强度（A_curr / A_prev 面积比）
   - chan_macd_area: MACD面积（笔内|MACD柱|之和 / close）
 
@@ -21,10 +21,15 @@
 
 from __future__ import annotations
 
+import logging
+from uuid import uuid4
+
 import numpy as np
 import pandas as pd
 
 from xqtrader.domain.factor.base import FactorPlugin
+
+logger = logging.getLogger(__name__)
 
 # 所有缠论子因子 ID
 _CHAN_FACTOR_IDS: list[str] = [
@@ -47,11 +52,12 @@ def _compute_chan_elements(df: pd.DataFrame) -> dict[str, np.ndarray]:
     使用 DfApi 数据源将 DataFrame 传入 chanpy，一次性计算所有缠论元素，
     然后将结果映射回每日因子值。
     """
-    import chanpy  # noqa: F401 — 顶级模块导入
-    from chanpy.Chan import CChan
-    from chanpy.ChanConfig import CChanConfig
-    from chanpy.Common.CEnum import AUTYPE, FX_TYPE, KL_TYPE, MACD_ALGO
-    from chanpy.DataAPI.DfApi import _DF_CACHE
+    # chanpy 内部使用裸模块导入，此处也使用裸导入以保持枚举对象一致性
+    import chanpy  # noqa: F401, I001 — 顶级模块导入，触发 __init__.py 将包目录加入 sys.path
+    from Chan import CChan  # type: ignore[import-not-found]  # noqa: I001
+    from ChanConfig import CChanConfig  # type: ignore[import-not-found]  # noqa: I001
+    from Common.CEnum import AUTYPE, FX_TYPE, KL_TYPE, MACD_ALGO  # type: ignore[import-not-found]  # noqa: I001
+    from DataAPI.DfApi import _DF_CACHE  # type: ignore[import-not-found]  # noqa: I001
 
     n = len(df)
     nan_arr = np.full(n, np.nan)
@@ -60,20 +66,37 @@ def _compute_chan_elements(df: pd.DataFrame) -> dict[str, np.ndarray]:
         return {fid: nan_arr.copy() for fid in _CHAN_FACTOR_IDS}
 
     # 准备 DataFrame 给 DfApi
+    # chanpy 严格要求 OHLC 约束：high >= max(O,H,L,C), low <= min(O,H,L,C)
+    # 真实行情数据可能存在微小偏差（如复权价），需预处理确保约束
+    open_arr = df["open"].values.astype(float)
+    high_arr = df["high"].values.astype(float)
+    low_arr = df["low"].values.astype(float)
+    close_arr = df["close"].values.astype(float)
+    ohlc_max = np.maximum.reduce([open_arr, high_arr, low_arr, close_arr])  # type: ignore[arg-type]
+    ohlc_min = np.minimum.reduce([open_arr, high_arr, low_arr, close_arr])  # type: ignore[arg-type]
+    high_arr = np.maximum(high_arr, ohlc_max)  # type: ignore[arg-type]
+    low_arr = np.minimum(low_arr, ohlc_min)  # type: ignore[arg-type]
+
+    # DfApi 用 df.index[i] 取日期，需设为 DatetimeIndex
+    if "trade_date" in df.columns:
+        date_index = pd.DatetimeIndex(pd.to_datetime(df["trade_date"]))
+    else:
+        date_index = pd.DatetimeIndex(pd.to_datetime(df.index))
+
     chan_df = pd.DataFrame(
         {
-            "open": df["open"].values.astype(float),
-            "high": df["high"].values.astype(float),
-            "low": df["low"].values.astype(float),
-            "close": df["close"].values.astype(float),
+            "open": open_arr,
+            "high": high_arr,
+            "low": low_arr,
+            "close": close_arr,
             "volume": df["volume"].values.astype(float)
             if "volume" in df.columns
             else np.zeros(n),
         },
-        index=df.index,
+        index=date_index,
     )
 
-    cache_key = f"_chan_factor_{id(df)}"
+    cache_key = f"_chan_factor_{uuid4().hex}"
     _DF_CACHE[cache_key] = chan_df
 
     try:
@@ -88,16 +111,20 @@ def _compute_chan_elements(df: pd.DataFrame) -> dict[str, np.ndarray]:
                 "kl_data_check": False,
             }
         )
-        chan = CChan(
-            code=cache_key,
-            data_src="custom:DataAPI.DfApi.DfApi",
-            lv_list=[KL_TYPE.K_DAY],
-            autype=AUTYPE.NONE,
-            config=config,
-        )
+        try:
+            chan = CChan(
+                code=cache_key,
+                data_src="custom:DfApi.DfApi",
+                lv_list=[KL_TYPE.K_DAY],
+                autype=AUTYPE.NONE,
+                config=config,
+            )
+        except Exception as e:
+            # chanpy 初始化失败（数据校验等），返回全 NaN
+            logger.warning("[chanlun] CChan init failed: %s", e, exc_info=True)
+            return {fid: nan_arr.copy() for fid in _CHAN_FACTOR_IDS}
 
         kl_list = chan[0]
-        close_arr = df["close"].values.astype(float)
 
         # ── 1. 分型强度 ──
         fractal_strength = nan_arr.copy()
@@ -190,9 +217,9 @@ def _compute_chan_elements(df: pd.DataFrame) -> dict[str, np.ndarray]:
             if ref_price <= 0:
                 continue
 
-            height = (zs.high - zs.low) / ref_price
-            zs_height_ratio[end_idx] = height
-            zs_range[end_idx] = height
+            height_ratio = (zs.high - zs.low) / ref_price
+            zs_height_ratio[end_idx] = height_ratio
+            zs_range[end_idx] = zs.high - zs.low
 
         # ── 9. 背驰强度 ──
         divergence_ratio = nan_arr.copy()

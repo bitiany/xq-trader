@@ -244,7 +244,7 @@ flowchart LR
 | chan_bi_amplitude | 笔振幅 | chan_bi | ASC | 笔内最大回撤 / 笔长度 | high, low, close |
 | chan_bi_strength | 笔强度 | chan_bi | DESC | 笔长度 / 笔内K线数 | high, low, close |
 | chan_zs_height_ratio | 中枢高度比 | chan_zs | DESC | (ZG-ZD) / close | close |
-| chan_zs_range | 中枢区间 | chan_zs | DESC | (ZG-ZD) / close | close |
+| chan_zs_range | 中枢区间 | chan_zs | DESC | ZG-ZD 绝对宽度 | close |
 | chan_divergence_ratio | 背驰强度 | chan_div | DESC | A_curr / A_prev 面积比 | close → MACD |
 | chan_macd_area | MACD面积 | chan_div | DESC | 笔内|MACD柱|之和 / close | close → MACD |
 
