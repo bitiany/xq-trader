@@ -342,4 +342,6 @@ _FACTOR_VARIANTS: list[tuple[str, dict[str, Any]]] = [
     ("worker.plugins.factor_compute.factors.candle_pattern:CdlUpperShadowRatioFactor", {}),
     ("worker.plugins.factor_compute.factors.candle_pattern:CdlLowerShadowRatioFactor", {}),
     ("worker.plugins.factor_compute.factors.candle_pattern:CdlBodyRatioFactor", {}),
+    # E1 缠论连续值因子（组合因子，一次 chanpy 计算输出 10 个子因子）
+    ("worker.plugins.factor_compute.factors.chanlun:ChanlunFactor", {}),
 ]
