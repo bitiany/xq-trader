@@ -1,0 +1,161 @@
+"""B 类基本面因子 — 估值/盈利/成长性。
+
+数据来源：
+  - ep/bp/dp/sp: sdc_daily_indicator（pe_ttm/pb/dv_ttm/ps_ttm）
+  - ev_ebitda: total_mv（sdc_daily_indicator）+ ebitda（sdc_financial_indicator 前向填充）
+
+参照 Barra 风格因子体系与业界成熟框架：
+  - ep: 盈利收益率(EP) = 1/PE_TTM，截面可比，价值因子核心
+  - bp: 账面市值比(BP) = 1/PB，截面可比，价值因子核心
+  - dp: 股息率(DP) = dv_ttm/100，截面可比，价值因子辅助
+  - ev_ebitda: 企业价值倍数倒数 = EBITDA/total_mv，截面可比，价值因子补充
+  - sp: 市销率倒数(SP) = 1/PS_TTM，截面可比，成长-价值复合
+
+因子ID：
+  - ep: 盈利收益率
+  - bp: 账面市值比
+  - dp: 股息率
+  - ev_ebitda: 企业价值倍数
+  - sp: 市销率倒数
+"""
+
+from __future__ import annotations
+
+import numpy as np
+import pandas as pd
+
+from xqtrader.domain.factor.base import FactorPlugin
+
+
+class EarningsYieldFactor(FactorPlugin):
+    """盈利收益率因子(EP) — 1/PE_TTM，截面可比。
+
+    EP 是 Barra 价值因子的核心指标，PE_TTM 为正时取倒数，
+    PE_TTM 为负（亏损）时设为 NaN，避免失真。
+    """
+
+    factor_id: str = "ep"
+    display_name: str = "盈利收益率"
+    category: str = "fundamental"
+    group_id: str = "ep"
+    direction: str = "DESC"
+    scope: str = "both"
+    signal_type: str = "continuous"
+    dependencies: list[str] = ["pe_ttm"]
+    min_periods: int = 1
+    requires_full_history: bool = False
+    data_origin: str = "market"
+
+    def compute(self, df: pd.DataFrame) -> pd.DataFrame:
+        pe_ttm = df["pe_ttm"].astype(float)
+        # PE > 0 时 EP = 1/PE；PE <= 0（亏损）设为 NaN
+        ep = np.where(pe_ttm > 0, 1.0 / pe_ttm, np.nan)
+        return pd.DataFrame({self.factor_id: ep}, index=df.index)
+
+
+class BookToPriceFactor(FactorPlugin):
+    """账面市值比因子(BP) — 1/PB，截面可比。
+
+    BP 是 Fama-French HML 因子的核心，PB > 0 时取倒数，
+    PB <= 0 时设为 NaN。
+    """
+
+    factor_id: str = "bp"
+    display_name: str = "账面市值比"
+    category: str = "fundamental"
+    group_id: str = "bp"
+    direction: str = "DESC"
+    scope: str = "both"
+    signal_type: str = "continuous"
+    dependencies: list[str] = ["pb"]
+    min_periods: int = 1
+    requires_full_history: bool = False
+    data_origin: str = "market"
+
+    def compute(self, df: pd.DataFrame) -> pd.DataFrame:
+        pb = df["pb"].astype(float)
+        bp = np.where(pb > 0, 1.0 / pb, np.nan)
+        return pd.DataFrame({self.factor_id: bp}, index=df.index)
+
+
+class DividendYieldFactor(FactorPlugin):
+    """股息率因子(DP) — dv_ttm/100，截面可比。
+
+    股息率是价值因子的辅助指标，高股息率通常伴随低估值。
+    dv_ttm 单位为%，需除以 100 转为比率。
+    """
+
+    factor_id: str = "dp"
+    display_name: str = "股息率"
+    category: str = "fundamental"
+    group_id: str = "dp"
+    direction: str = "DESC"
+    scope: str = "both"
+    signal_type: str = "continuous"
+    dependencies: list[str] = ["dv_ttm"]
+    min_periods: int = 1
+    requires_full_history: bool = False
+    data_origin: str = "market"
+
+    def compute(self, df: pd.DataFrame) -> pd.DataFrame:
+        dv_ttm = df["dv_ttm"].astype(float)
+        dp = dv_ttm / 100.0
+        return pd.DataFrame({self.factor_id: dp}, index=df.index)
+
+
+class EvEbitdaFactor(FactorPlugin):
+    """企业价值倍数因子 — EBITDA/total_mv，截面可比。
+
+    Tushare daily_basic 不返回 ev_ebitda 字段，因此自行计算：
+    ev_ebitda = EBITDA(万元) / total_mv(万元)
+    注：fina_indicator 的 ebitda 单位为元，需除以 10000 转为万元。
+    方向 ASC：EBITDA/total_mv 越小越"贵"（高估值），排名越靠前。
+    """
+
+    factor_id: str = "ev_ebitda"
+    display_name: str = "企业价值倍数"
+    category: str = "fundamental"
+    group_id: str = "ev_ebitda"
+    direction: str = "ASC"
+    scope: str = "both"
+    signal_type: str = "continuous"
+    dependencies: list[str] = ["total_mv", "ebitda"]
+    min_periods: int = 1
+    requires_full_history: bool = False
+    data_origin: str = "market"
+
+    def compute(self, df: pd.DataFrame) -> pd.DataFrame:
+        total_mv = df["total_mv"].astype(float)  # 万元
+        ebitda = df["ebitda"].astype(float) / 10000.0  # 元 → 万元
+        # EBITDA/total_mv：正值有效，排除零值和负值
+        ratio = np.where(
+            (ebitda > 0) & (total_mv > 0),
+            ebitda / total_mv,
+            np.nan,
+        )
+        return pd.DataFrame({self.factor_id: ratio}, index=df.index)
+
+
+class SalesToPriceFactor(FactorPlugin):
+    """市销率倒数因子(SP) — 1/PS_TTM，截面可比。
+
+    SP 兼具价值和成长属性，PS_TTM > 0 时取倒数。
+    适用于盈利不稳定但营收稳定的公司。
+    """
+
+    factor_id: str = "sp"
+    display_name: str = "市销率倒数"
+    category: str = "fundamental"
+    group_id: str = "sp"
+    direction: str = "DESC"
+    scope: str = "both"
+    signal_type: str = "continuous"
+    dependencies: list[str] = ["ps_ttm"]
+    min_periods: int = 1
+    requires_full_history: bool = False
+    data_origin: str = "market"
+
+    def compute(self, df: pd.DataFrame) -> pd.DataFrame:
+        ps_ttm = df["ps_ttm"].astype(float)
+        sp = np.where(ps_ttm > 0, 1.0 / ps_ttm, np.nan)
+        return pd.DataFrame({self.factor_id: sp}, index=df.index)

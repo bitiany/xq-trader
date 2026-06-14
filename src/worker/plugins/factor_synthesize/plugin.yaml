@@ -1,0 +1,44 @@
+name: factor_synthesize
+celery_task_name: factor.synthesize_weekly
+version: "1.0.0"
+task_name: 周频Alpha合成
+task_name_en: Weekly Alpha Synthesize
+description: 按样本池截面标准化后合成Alpha因子(等权/IC加权/ICIR加权)，写入fac_factor_value
+description_en: Synthesize Alpha factors per sample pool (equal-weight/IC/ICIR), persist to fac_factor_value
+category: compute
+task_type: on_demand
+queue: celery
+timeout: 43200
+retry_config:
+  max_retries: 2
+  retry_backoff: true
+  retry_backoff_max: 600
+# schedule: "0 10 * * 6"  # 暂禁用定时调度，仅手动触发
+params_schema:
+  type: object
+  properties:
+    pool_ids:
+      type: array
+      items:
+        type: string
+      title: 样本池列表
+      description: 为空时合成默认样本池(idx_300, idx_1000)
+    factor_ids:
+      type: array
+      items:
+        type: string
+      title: 输入因子ID列表
+      description: 为空时使用样本池内A级+B级因子
+    start_date:
+      type: string
+      format: date
+      title: 合成起始日期
+    end_date:
+      type: string
+      format: date
+      title: 合成结束日期
+    window:
+      type: integer
+      title: IC滚动窗口
+      default: 252
+      description: IC/ICIR计算滚动窗口(交易日)
