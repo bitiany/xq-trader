@@ -8,7 +8,7 @@ description_en: Incrementally collect daily kline and fund flow data by date, ea
 category: io
 task_type: on_demand
 queue: market
-timeout: 7200
+timeout: 43200
 retry_config:
   max_retries: 2
   retry_backoff: true

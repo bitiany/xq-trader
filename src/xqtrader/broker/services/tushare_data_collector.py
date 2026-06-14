@@ -187,10 +187,21 @@ class TushareDataCollector:
             end_date: 结束日期 YYYYMMDD
 
         Returns:
-            DataFrame，包含 ts_code/trade_date/close/turnover_rate/pe/pb/total_mv 等字段
+            DataFrame，包含 ts_code/trade_date/close/turnover_rate/pe/pb/total_mv 等官方字段
+            注：ev/ebitda/ev_ebitda 不属于 daily_basic 接口，需从 fina_indicator 等其他接口获取
         """
         if not ts_code and not trade_date:
             raise DataCollectionError("ts_code 和 trade_date 至少输入一个")
+
+        # daily_basic 官方字段（doc_id=32），不含 ev/ebitda/ev_ebitda/peg/pcf
+        fields = (
+            "ts_code,trade_date,close,"
+            "turnover_rate,turnover_rate_f,volume_ratio,"
+            "pe,pe_ttm,pb,ps,ps_ttm,"
+            "dv_ratio,dv_ttm,"
+            "total_share,float_share,free_share,"
+            "total_mv,circ_mv"
+        )
 
         try:
             await self._limiter.acquire()
@@ -201,6 +212,7 @@ class TushareDataCollector:
                 trade_date=trade_date,
                 start_date=start_date,
                 end_date=end_date,
+                fields=fields,
             )
             result = await loop.run_in_executor(self._get_executor(), func)
             df = pd.DataFrame() if result is None else pd.DataFrame(result)
@@ -212,8 +224,8 @@ class TushareDataCollector:
                 return pd.DataFrame()
 
             logger.debug(
-                "daily_basic 获取完成: ts_code=%s rows=%d",
-                ts_code, len(df),
+                "daily_basic 获取完成: ts_code=%s rows=%d cols=%s",
+                ts_code, len(df), list(df.columns),
             )
             return df
         except Exception as e:

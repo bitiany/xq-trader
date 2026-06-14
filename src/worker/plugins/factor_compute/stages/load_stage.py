@@ -19,6 +19,7 @@ from framework.commons.logger import get_logger
 from framework.pipeline import PipelineContext, Stage, StageResult
 from xqtrader.domain.market.models.candlestick import CandlestickDaily
 from xqtrader.domain.market.models.daily_indicator import DailyIndicator
+from xqtrader.domain.market.models.financial_indicator import FinancialIndicator
 from xqtrader.domain.market.models.fund_flow import FundFlowIndividual
 
 logger = get_logger("factor.load")
@@ -44,7 +45,7 @@ class FactorLoadStage(Stage):
         # 加载全量K线行情（无日期过滤，保证有状态因子可从首根K线累计）
         df_kline = await self._load_kline(symbol)
         if df_kline.empty:
-            logger.info("[factor.compute] %s no kline data", symbol)
+            logger.warning("[factor.compute] %s no kline data", symbol)
             ctx.set("skip_persist", True)
             ctx.set("kline_df", df_kline)
             return StageResult.ok(data={"symbol": symbol, "rows": 0})
@@ -55,6 +56,9 @@ class FactorLoadStage(Stage):
         # 加载风险因子所需指标（total_mv, turnover_rate 等）
         df_indicator = await self._load_daily_indicator(symbol)
 
+        # 加载基本面因子所需的财务指标（ebitda 等，季度数据前向填充到日频）
+        df_fina = await self._load_financial_indicator(symbol)
+
         # 合并K线和资金流
         if not df_flow.empty:
             df_merged = self._merge_kline_flow(df_kline, df_flow)
@@ -64,6 +68,18 @@ class FactorLoadStage(Stage):
         # 合并指标数据
         if not df_indicator.empty:
             df_merged = self._merge_indicator(df_merged, df_indicator)
+
+        # 合并财务指标数据
+        if not df_fina.empty:
+            df_merged = self._merge_indicator(df_merged, df_fina)
+            # 验证 ebitda 合并结果
+            if "ebitda" in df_merged.columns:
+                ebitda_valid = df_merged["ebitda"].notna().sum()
+                if ebitda_valid > 0:
+                    logger.info(
+                        "[factor.compute] %s fina_merged: ebitda_valid=%d/%d",
+                        symbol, ebitda_valid, len(df_merged),
+                    )
 
         ctx.set("kline_df", df_merged)
         ctx.set("skip_persist", False)
@@ -150,7 +166,12 @@ class FactorLoadStage(Stage):
         return df_merged
 
     async def _load_daily_indicator(self, symbol: str) -> pd.DataFrame:
-        """加载风险因子所需的每日指标数据（total_mv, turnover_rate 等）。"""
+        """加载风险因子和基本面因子所需的每日指标数据。
+
+        注意：ev/ebitda/ev_ebitda/peg/pcf 列虽然在 DailyIndicator 模型中定义，
+        但 Tushare daily_basic 接口不返回这些字段，值全为 NULL。
+        这些字段由 _load_financial_indicator 单独加载，此处排除避免占位。
+        """
         rows = await DailyIndicator.filter(
             symbol=symbol,
             order_by=DailyIndicator.trade_date.asc(),
@@ -159,29 +180,102 @@ class FactorLoadStage(Stage):
             return pd.DataFrame()
 
         df = pd.DataFrame([r.to_dict() for r in rows])
-        indicator_cols = ["total_mv", "turnover_rate", "turnover_rate_f"]
+        indicator_cols = [
+            "total_mv", "turnover_rate", "turnover_rate_f",
+            "pe_ttm", "pb", "dv_ttm", "ps_ttm",
+        ]
         for col in indicator_cols:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
+
+        # 只保留需要的列，排除 ev/ebitda/ev_ebitda/peg/pcf 等空值占位列
+        keep_cols = ["trade_date"] + [c for c in indicator_cols if c in df.columns]
+        df = df[keep_cols].copy()
 
         if "trade_date" in df.columns:
             df = df.drop_duplicates(subset=["trade_date"], keep="last")
         return df
 
+    async def _load_financial_indicator(self, symbol: str) -> pd.DataFrame:
+        """加载基本面因子所需的财务指标数据（季度 → 日频前向填充）。
+
+        从 sdc_financial_indicator 获取 ebitda 等季度财务数据，
+        按 ann_date（公告日）对齐到交易日，前向填充到日频。
+        """
+        rows = await FinancialIndicator.filter(
+            symbol=symbol,
+            update_flag="1",
+            order_by=FinancialIndicator.end_date.asc(),
+        )
+        if not rows:
+            return pd.DataFrame()
+
+        df = pd.DataFrame([r.to_dict() for r in rows])
+        fina_cols = ["ebitda"]
+        for col in fina_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+
+        # 使用 ann_date（公告日）作为数据生效日，确保 point-in-time
+        if "ann_date" not in df.columns or df["ann_date"].isna().all():
+            return pd.DataFrame()
+
+        df = df.dropna(subset=["ann_date"])
+        # 只保留 ebitda 有值的行，避免 NaN 值在 asof merge 中覆盖有效值
+        df = df.dropna(subset=fina_cols, how="all")
+        df = df.sort_values("ann_date").drop_duplicates(subset=["ann_date"], keep="last")
+
+        if df.empty:
+            return pd.DataFrame()
+
+        # 构建日频序列：ann_date → ebitda，后续由 _merge_indicator 合并时自动对齐
+        result = df[["ann_date"] + fina_cols].copy()
+        result = result.rename(columns={"ann_date": "trade_date"})
+        logger.info(
+            "[factor.compute] %s fina_loaded: rows=%d ebitda_valid=%d",
+            symbol, len(result), result["ebitda"].notna().sum(),
+        )
+        return result
+
     @staticmethod
     def _merge_indicator(df_merged: pd.DataFrame, df_indicator: pd.DataFrame) -> pd.DataFrame:
-        """合并指标数据到主 DataFrame。"""
+        """合并指标数据到主 DataFrame — 前向填充（asof merge）。
+
+        日频指标（total_mv 等）和季度指标（ebitda 等）统一使用 asof merge，
+        按交易日前向填充，确保每行使用最近的历史指标值。
+        """
         indicator_cols = [
             c for c in df_indicator.columns
             if c not in ("symbol", "trade_date", "source")
             and c not in df_merged.columns
         ]
         if not indicator_cols:
+            logger.info(
+                "[factor.compute] _merge_indicator: no new cols to merge. "
+                "indicator_cols=%s merged_cols=%s",
+                list(df_indicator.columns), list(df_merged.columns),
+            )
             return df_merged
 
         df_ind = df_indicator[["trade_date"] + indicator_cols].copy()
-        df_merged["trade_date"] = pd.to_datetime(df_merged["trade_date"]).dt.date
-        df_ind["trade_date"] = pd.to_datetime(df_ind["trade_date"]).dt.date
 
-        df_merged = df_merged.merge(df_ind, on="trade_date", how="left")
+        # asof merge 要求 on 列为数值类型，将 date 转为 int64（YYYYMMDD）
+        try:
+            df_merged["_merge_key"] = pd.to_datetime(
+                df_merged["trade_date"]
+            ).dt.strftime("%Y%m%d").astype("int64")
+            df_ind["_merge_key"] = pd.to_datetime(
+                df_ind["trade_date"]
+            ).dt.strftime("%Y%m%d").astype("int64")
+
+            # 移除 df_ind 中的 trade_date，避免 merge 后产生 trade_date_x/y
+            df_ind = df_ind.drop(columns=["trade_date"])
+
+            df_merged = df_merged.sort_values("_merge_key")
+            df_ind = df_ind.sort_values("_merge_key")
+            df_merged = pd.merge_asof(
+                df_merged, df_ind, on="_merge_key", direction="backward",
+            )
+        finally:
+            df_merged = df_merged.drop(columns=["_merge_key"], errors="ignore")
         return df_merged

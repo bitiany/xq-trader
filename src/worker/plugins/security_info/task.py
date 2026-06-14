@@ -169,9 +169,6 @@ class SecurityInfoCollectTask(BaseTask):
 
     task_name = "reference.security_info_collect"
     description = "采集全市场证券标的基本信息（Tushare stock_basic）并同步停复牌状态"
-    time_limit = 600
-    soft_time_limit = 570
-
     async def _run_impl(self, **kwargs: Any) -> dict[str, Any]:
         list_status: str = kwargs.get("list_status", "")
         trade_date_str: str = kwargs.get("trade_date", "")

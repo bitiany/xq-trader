@@ -27,10 +27,19 @@ logger = get_logger("factor.calc")
 
 
 def _check_data_gate(df: pd.DataFrame, factor: FactorPlugin) -> tuple[bool, str]:
-    """数据门控检查 — 验证因子计算所需数据是否充足。"""
+    """数据门控检查 — 验证因子计算所需数据是否充足。
+
+    检查项：
+      1. 依赖列是否存在
+      2. 依赖列中有效值（非 NaN）数量是否 >= min_periods
+      3. 数据行数是否 >= min_periods
+    """
     for dep in factor.dependencies:
         if dep not in df.columns:
             return False, f"column '{dep}' not found"
+        valid_count = df[dep].notna().sum()
+        if valid_count < factor.min_periods:
+            return False, f"'{dep}' valid={valid_count} < min_periods={factor.min_periods}"
 
     if len(df) < factor.min_periods:
         return False, f"rows {len(df)} < min_periods {factor.min_periods}"
@@ -73,12 +82,18 @@ class FactorCalcStage(Stage):
 
         # 数据门控
         valid_factors: list[FactorPlugin] = []
+        gated_factors: list[str] = []
         for factor in factors:
             passed, reason = _check_data_gate(df, factor)
             if not passed:
-                logger.info("[factor.compute] %s gated: %s - %s", symbol, factor.factor_id, reason)
+                gated_factors.append(f"{factor.factor_id}({reason})")
                 continue
             valid_factors.append(factor)
+
+        if gated_factors:
+            logger.warning(
+                "[factor.compute] %s gated: %s", symbol, ", ".join(gated_factors),
+            )
 
         if not valid_factors:
             logger.warning("[factor.compute] %s all factors gated out", symbol)
@@ -95,6 +110,10 @@ class FactorCalcStage(Stage):
             self._compute_factor(symbol, factor, df, result_parts)
 
         if not result_parts:
+            logger.warning(
+                "[factor.compute] %s all factor computations produced empty results",
+                symbol,
+            )
             ctx.set("skip_persist", True)
             return StageResult.ok(data={"symbol": symbol, "factors": 0})
 
@@ -128,6 +147,9 @@ class FactorCalcStage(Stage):
         try:
             result_df = factor.compute(df)
             if result_df.empty:
+                logger.warning(
+                    "[factor.compute] %s empty result: %s", symbol, factor.factor_id,
+                )
                 return
             for col_name in result_df.columns:
                 series = result_df[col_name]
@@ -138,6 +160,6 @@ class FactorCalcStage(Stage):
                 aligned = pd.Series(series.values[:n], index=df.index[:n], name=str(series.name))
                 result_parts[col_name] = aligned
         except Exception as e:
-            logger.warning(
+            logger.error(
                 "[factor.compute] %s failed: %s - %s", symbol, factor.factor_id, e, exc_info=True,
             )

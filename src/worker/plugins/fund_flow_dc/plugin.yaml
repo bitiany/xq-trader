@@ -8,7 +8,7 @@ description_en: Concurrently collect A-share fund flow data (Tushare native sour
 category: io
 task_type: on_demand
 queue: celery
-timeout: 1800
+timeout: 43200
 retry_config:
   max_retries: 2
   retry_backoff: true

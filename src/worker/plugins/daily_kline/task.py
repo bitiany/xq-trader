@@ -184,9 +184,6 @@ class DailyKlineCollectTask(BaseTask):
 
     task_name = "market.daily_kline_collect"
     description = "A股日线K线行情采集（管道引擎并发）"
-    time_limit = 1800
-    soft_time_limit = 1770
-
     async def _run_impl(self, **kwargs: Any) -> dict[str, Any]:
         data_type = kwargs.get("data_type", "daily_kline")
         concurrency = kwargs.get("concurrency", 5)

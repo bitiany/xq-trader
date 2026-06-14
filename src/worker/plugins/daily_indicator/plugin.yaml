@@ -8,7 +8,7 @@ description_en: Per-security backfill of daily indicators (valuation/turnover/ma
 category: io
 task_type: on_demand
 queue: market
-timeout: 14400
+timeout: 43200
 retry_config:
   max_retries: 2
   retry_backoff: true

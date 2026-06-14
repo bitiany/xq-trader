@@ -169,9 +169,6 @@ class SwDailyCollectTask(BaseTask):
 
     task_name = "market.sw_daily_collect"
     description = "申万行业日线行情采集（管道引擎并发）"
-    time_limit = 3600
-    soft_time_limit = 3570
-
     async def _run_impl(self, **kwargs: Any) -> dict[str, Any]:
         data_type = kwargs.get("data_type", "sw_daily")
         concurrency = kwargs.get("concurrency", 5)

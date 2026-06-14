@@ -60,8 +60,6 @@ class FactorComputeTask(BaseTask):
 
     task_name = "factor.compute_daily"
     description = "逐标的计算技术/量价/资金流因子"
-    time_limit = 14400
-    soft_time_limit = 14370
     prevent_concurrent = True
 
     async def _run_impl(self, **kwargs: Any) -> dict[str, Any]:

@@ -88,8 +88,8 @@ class BaseTask(Task):
     description: str = ""
 
     # ── 可覆盖配置（plugin.yaml 可覆盖这些值）──
-    time_limit: int = 300
-    soft_time_limit: int = 270
+    time_limit: int = 43200
+    soft_time_limit: int = 43170
     max_retries: int = 3
     prevent_concurrent: bool = True
     autoretry_for: tuple[type[Exception], ...] = (Exception,)  # 异常自动重试

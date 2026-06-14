@@ -170,9 +170,6 @@ class IndexDailyCollectTask(BaseTask):
 
     task_name = "market.index_daily_collect"
     description = "指数日线行情采集（管道引擎并发）"
-    time_limit = 3600
-    soft_time_limit = 3570
-
     async def _run_impl(self, **kwargs: Any) -> dict[str, Any]:
         data_type = kwargs.get("data_type", "index_daily")
         concurrency = kwargs.get("concurrency", 5)

@@ -42,8 +42,6 @@ class FactorEvaluateTask(BaseTask):
 
     task_name = "factor.evaluate_weekly"
     description = "按样本池计算因子统计指标并评定等级"
-    time_limit = 7200
-    soft_time_limit = 7170
     prevent_concurrent = True
 
     async def _run_impl(self, **kwargs: Any) -> dict[str, Any]:

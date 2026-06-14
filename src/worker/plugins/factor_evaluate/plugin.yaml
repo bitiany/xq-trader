@@ -8,7 +8,7 @@ description_en: Evaluate factors per sample pool with IC/ICIR/layered backtest/t
 category: compute
 task_type: on_demand
 queue: celery
-timeout: 7200
+timeout: 43200
 retry_config:
   max_retries: 2
   retry_backoff: true

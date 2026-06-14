@@ -50,9 +50,6 @@ class DailyIncrementalTask(BaseTask):
 
     task_name = "market.daily_incremental_collect"
     description = "按日期增量采集全市场日行情K线、资金流向、每日指标、指数行情和申万行业行情数据"
-    time_limit = 18000
-    soft_time_limit = 17970
-
     async def _run_impl(self, **kwargs: Any) -> dict[str, Any]:
         start_date_str: str | None = kwargs.get("start_date")
         end_date_str: str | None = kwargs.get("end_date")

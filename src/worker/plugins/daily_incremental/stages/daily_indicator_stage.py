@@ -41,7 +41,6 @@ _NUMERIC_COLS = [
     "dv_ratio", "dv_ttm",
     "total_share", "float_share", "free_share",
     "total_mv", "circ_mv",
-    "ev", "ebitda", "ev_ebitda", "peg", "pcf",
 ]
 
 # 持久化更新字段（与数值列一致）

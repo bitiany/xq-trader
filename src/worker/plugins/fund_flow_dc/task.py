@@ -203,9 +203,6 @@ class FundFlowCollectTask(BaseTask):
 
     task_name = "market.fund_flow_collect"
     description = "A股个股资金流向采集-Tushare原生数据源（管道引擎并发）"
-    time_limit = 14400
-    soft_time_limit = 14370
-
     async def _run_impl(self, **kwargs: Any) -> dict[str, Any]:
         data_type = kwargs.get("data_type", "fund_flow")
         concurrency = kwargs.get("concurrency", 50)

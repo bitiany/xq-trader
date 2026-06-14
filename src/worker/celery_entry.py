@@ -60,7 +60,7 @@ def on_worker_init(**kwargs: object) -> None:
         bind=True,
         name="worker.orchestration.trigger_pipeline",
         max_retries=1,
-        time_limit=3600,
+        time_limit=43200,
     )
     def trigger_pipeline_task(self: Any, pipeline_name: str) -> dict:
         return _trigger_pipeline(pipeline_name)
@@ -70,7 +70,7 @@ def on_worker_init(**kwargs: object) -> None:
         bind=True,
         name="worker.orchestration.recover_pipeline",
         max_retries=1,
-        time_limit=3600,
+        time_limit=43200,
     )
     def recover_pipeline_task(self: Any, orchestration_id: str) -> dict:
         return _recover_pipeline(orchestration_id)

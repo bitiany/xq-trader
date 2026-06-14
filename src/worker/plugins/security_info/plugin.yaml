@@ -8,7 +8,7 @@ description_en: Collect market-wide security basic info from Tushare stock_basic
 category: reference
 task_type: on_demand
 queue: celery
-timeout: 600
+timeout: 43200
 retry_config:
   max_retries: 2
   retry_backoff: true

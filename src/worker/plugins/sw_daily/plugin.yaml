@@ -8,7 +8,7 @@ description_en: Per-security collection of SW industry daily data from Tushare s
 category: io
 task_type: on_demand
 queue: market
-timeout: 3600
+timeout: 43200
 retry_config:
   max_retries: 2
   retry_backoff: true

@@ -83,6 +83,12 @@ celery_app.conf.update(
     task_reject_on_worker_lost=True,
     worker_prefetch_multiplier=1,
 
+    # Redis broker 消息可见性超时（必须远大于最长任务 time_limit）
+    # time_limit 默认 43200s（12h），设 86400s（24h）确保任务完成前不会重新投递
+    broker_transport_options={
+        "visibility_timeout": 86400,
+    },
+
     # 结果
     result_expires=3600,
 

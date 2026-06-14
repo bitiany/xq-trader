@@ -344,4 +344,20 @@ _FACTOR_VARIANTS: list[tuple[str, dict[str, Any]]] = [
     ("worker.plugins.factor_compute.factors.candle_pattern:CdlBodyRatioFactor", {}),
     # E1 缠论连续值因子（组合因子，一次 chanpy 计算输出 10 个子因子）
     ("worker.plugins.factor_compute.factors.chanlun:ChanlunFactor", {}),
+    # B 类基本面因子（数据来源于 sdc_daily_indicator）
+    ("worker.plugins.factor_compute.factors.fundamental:EarningsYieldFactor", {}),
+    ("worker.plugins.factor_compute.factors.fundamental:BookToPriceFactor", {}),
+    ("worker.plugins.factor_compute.factors.fundamental:DividendYieldFactor", {}),
+    ("worker.plugins.factor_compute.factors.fundamental:EvEbitdaFactor", {}),
+    ("worker.plugins.factor_compute.factors.fundamental:SalesToPriceFactor", {}),
+    # F 复合Alpha因子（由 factor_synthesize 任务产出，不参与逐标的计算）
+    # F1 组内合成因子（第一层）
+    ("worker.plugins.factor_synthesize.factors:AlphaValueFactor", {}),
+    ("worker.plugins.factor_synthesize.factors:AlphaMomentumFactor", {}),
+    ("worker.plugins.factor_synthesize.factors:AlphaVolatilityFactor", {}),
+    ("worker.plugins.factor_synthesize.factors:AlphaLiquidityFactor", {}),
+    ("worker.plugins.factor_synthesize.factors:AlphaTechnicalFactor", {}),
+    ("worker.plugins.factor_synthesize.factors:AlphaFundFlowFactor", {}),
+    # F2 跨组合成因子（第二层）
+    ("worker.plugins.factor_synthesize.factors:AlphaFactor", {}),
 ]
