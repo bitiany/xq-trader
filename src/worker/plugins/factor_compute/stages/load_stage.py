@@ -5,8 +5,10 @@
   - CalcStage 根据因子是否有状态，决定传入全量数据还是 5yr+warmup 切片
   - PersistStage 根据 start_date 只持久化增量部分
 
-根据架构设计，估值指标和财务因子属于截面因子，不在因子计算任务中加载。
-但风险因子所需的 total_mv/turnover_rate 属于逐标的计算依赖，在此加载。
+根据架构设计，截面因子（估值指标、财务指标）不在 Task 1 中加载：
+  - B1 价值因子：由 CrossSectionReader 从 sdc_daily_indicator 直接加载
+  - B2-B5 财务因子：由 FactorQuarterlyTask 计算并写入 fac_financial_factor_value
+  - 此处仅加载风险因子所需的 total_mv/turnover_rate 等逐标的计算依赖
 """
 
 from __future__ import annotations
@@ -19,7 +21,6 @@ from framework.commons.logger import get_logger
 from framework.pipeline import PipelineContext, Stage, StageResult
 from xqtrader.domain.market.models.candlestick import CandlestickDaily
 from xqtrader.domain.market.models.daily_indicator import DailyIndicator
-from xqtrader.domain.market.models.financial_indicator import FinancialIndicator
 from xqtrader.domain.market.models.fund_flow import FundFlowIndividual
 
 logger = get_logger("factor.load")
@@ -56,9 +57,6 @@ class FactorLoadStage(Stage):
         # 加载风险因子所需指标（total_mv, turnover_rate 等）
         df_indicator = await self._load_daily_indicator(symbol)
 
-        # 加载基本面因子所需的财务指标（ebitda 等，季度数据前向填充到日频）
-        df_fina = await self._load_financial_indicator(symbol)
-
         # 合并K线和资金流
         if not df_flow.empty:
             df_merged = self._merge_kline_flow(df_kline, df_flow)
@@ -68,10 +66,6 @@ class FactorLoadStage(Stage):
         # 合并指标数据
         if not df_indicator.empty:
             df_merged = self._merge_indicator(df_merged, df_indicator)
-
-        # 合并财务指标数据
-        if not df_fina.empty:
-            df_merged = self._merge_indicator(df_merged, df_fina)
 
         ctx.set("kline_df", df_merged)
         ctx.set("skip_persist", False)
@@ -188,74 +182,11 @@ class FactorLoadStage(Stage):
             df = df.drop_duplicates(subset=["trade_date"], keep="last")
         return df
 
-    async def _load_financial_indicator(self, symbol: str) -> pd.DataFrame:
-        """加载基本面因子所需的财务指标数据（季度 → 日频前向填充）。
-
-        从 sdc_financial_indicator 获取季度财务数据，
-        按 ann_date（公告日）对齐到交易日，前向填充到日频。
-        加载 B1-B5 基本面因子所需的全部字段。
-        """
-        rows = await FinancialIndicator.filter(
-            symbol=symbol,
-            update_flag="1",
-            order_by=FinancialIndicator.end_date.asc(),
-        )
-        if not rows:
-            return pd.DataFrame()
-
-        df = pd.DataFrame([r.to_dict() for r in rows])
-        # B1 价值: ebitda
-        # B2 盈利: roe, roe_waa, roe_dt, roa, roic, grossprofit_margin, netprofit_margin
-        # B3 成长: q_or_yoy, q_netprofit_yoy, q_dtprofit_yoy, q_op_yoy, q_ocf_yoy, q_roe_yoy,
-        #          q_netprofitgrow_qoq, q_orgrow_qoq, q_opgrow_qoq, q_roegrow_qoq
-        # B4 质量: ocf_to_profit, ocf_to_or, salescash_to_or, dtprofit_to_profit,
-        #         assets_turn, inv_turn, ar_turn
-        # B5 杠杆: debt_to_assets, current_ratio, eqt_to_talcapital, ebit_to_interest, ocf_to_debt,
-        #         assets_to_eqt
-        fina_cols = [
-            "ebitda",
-            "roe", "roe_waa", "roe_dt", "roa", "roic",
-            "grossprofit_margin", "netprofit_margin",
-            "q_or_yoy", "q_netprofit_yoy", "q_dtprofit_yoy", "q_op_yoy",
-            "q_ocf_yoy", "q_roe_yoy",
-            "q_netprofitgrow_qoq", "q_orgrow_qoq", "q_opgrow_qoq", "q_roegrow_qoq",
-            "ocf_to_profit", "ocf_to_or", "salescash_to_or", "dtprofit_to_profit",
-            "assets_turn", "inv_turn", "ar_turn",
-            "debt_to_assets", "current_ratio", "eqt_to_talcapital",
-            "ebit_to_interest", "ocf_to_debt", "assets_to_eqt",
-        ]
-        for col in fina_cols:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors="coerce")
-
-        # 使用 ann_date（公告日）作为数据生效日，确保 point-in-time
-        if "ann_date" not in df.columns or df["ann_date"].isna().all():
-            return pd.DataFrame()
-
-        df = df.dropna(subset=["ann_date"])
-        # 只保留至少有一个有效值的行，避免全 NaN 行在 asof merge 中覆盖有效值
-        available_cols = [c for c in fina_cols if c in df.columns]
-        df = df.dropna(subset=available_cols, how="all")
-        df = df.sort_values("ann_date").drop_duplicates(subset=["ann_date"], keep="last")
-
-        if df.empty:
-            return pd.DataFrame()
-
-        # 构建日频序列：ann_date → fina_cols，后续由 _merge_indicator 合并时自动对齐
-        result = df[["ann_date"] + available_cols].copy()
-        result = result.rename(columns={"ann_date": "trade_date"})
-        valid_counts = {c: result[c].notna().sum() for c in available_cols if result[c].notna().sum() > 0}
-        logger.info(
-            "[factor.compute] %s fina_loaded: rows=%d fields=%s",
-            symbol, len(result), valid_counts,
-        )
-        return result
-
     @staticmethod
     def _merge_indicator(df_merged: pd.DataFrame, df_indicator: pd.DataFrame) -> pd.DataFrame:
         """合并指标数据到主 DataFrame — 前向填充（asof merge）。
 
-        日频指标（total_mv 等）和季度指标（ebitda 等）统一使用 asof merge，
+        日频指标（total_mv, turnover_rate 等）使用 asof merge，
         按交易日前向填充，确保每行使用最近的历史指标值。
         """
         indicator_cols = [

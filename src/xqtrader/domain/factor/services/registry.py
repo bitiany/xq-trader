@@ -346,51 +346,10 @@ _FACTOR_VARIANTS: list[tuple[str, dict[str, Any]]] = [
     ("worker.plugins.factor_compute.factors.candle_pattern:CdlBodyRatioFactor", {}),
     # E1 缠论连续值因子（组合因子，一次 chanpy 计算输出 10 个子因子）
     ("worker.plugins.factor_compute.factors.chanlun:ChanlunFactor", {}),
-    # B 类基本面因子（数据来源于 sdc_daily_indicator）
-    ("worker.plugins.factor_compute.factors.fundamental:EarningsYieldFactor", {}),
-    ("worker.plugins.factor_compute.factors.fundamental:BookToPriceFactor", {}),
-    ("worker.plugins.factor_compute.factors.fundamental:DividendYieldFactor", {}),
-    ("worker.plugins.factor_compute.factors.fundamental:EvEbitdaFactor", {}),
-    ("worker.plugins.factor_compute.factors.fundamental:SalesToPriceFactor", {}),
-    ("worker.plugins.factor_compute.factors.fundamental:PeTtmFactor", {}),
-    ("worker.plugins.factor_compute.factors.fundamental:PsTtmFactor", {}),
-    ("worker.plugins.factor_compute.factors.fundamental:CashFlowPriceFactor", {}),
-    # B2 盈利因子（数据来源于 sdc_financial_indicator）
-    ("worker.plugins.factor_compute.factors.fundamental_profitability:RoeFactor", {}),
-    ("worker.plugins.factor_compute.factors.fundamental_profitability:RoeWaaFactor", {}),
-    ("worker.plugins.factor_compute.factors.fundamental_profitability:RoeDtFactor", {}),
-    ("worker.plugins.factor_compute.factors.fundamental_profitability:RoaFactor", {}),
-    ("worker.plugins.factor_compute.factors.fundamental_profitability:RoicFactor", {}),
-    ("worker.plugins.factor_compute.factors.fundamental_profitability:GrossprofitMarginFactor", {}),
-    ("worker.plugins.factor_compute.factors.fundamental_profitability:NetprofitMarginFactor", {}),
-    ("worker.plugins.factor_compute.factors.fundamental_profitability:GpToAssetsFactor", {}),
-    # B3 成长因子（数据来源于 sdc_financial_indicator）
-    ("worker.plugins.factor_compute.factors.fundamental_growth:QOrYoyFactor", {}),
-    ("worker.plugins.factor_compute.factors.fundamental_growth:QNetprofitYoyFactor", {}),
-    ("worker.plugins.factor_compute.factors.fundamental_growth:QDtprofitYoyFactor", {}),
-    ("worker.plugins.factor_compute.factors.fundamental_growth:QOpYoyFactor", {}),
-    ("worker.plugins.factor_compute.factors.fundamental_growth:QOcfYoyFactor", {}),
-    ("worker.plugins.factor_compute.factors.fundamental_growth:QRoeYoyFactor", {}),
-    ("worker.plugins.factor_compute.factors.fundamental_growth:QNetprofitgrowQoqFactor", {}),
-    ("worker.plugins.factor_compute.factors.fundamental_growth:QOrgrowQoqFactor", {}),
-    ("worker.plugins.factor_compute.factors.fundamental_growth:QOpgrowQoqFactor", {}),
-    ("worker.plugins.factor_compute.factors.fundamental_growth:QRoegrowQoqFactor", {}),
-    # B4 质量因子（数据来源于 sdc_financial_indicator）
-    ("worker.plugins.factor_compute.factors.fundamental_quality:OcfToProfitFactor", {}),
-    ("worker.plugins.factor_compute.factors.fundamental_quality:OcfToOrFactor", {}),
-    ("worker.plugins.factor_compute.factors.fundamental_quality:SalescashToOrFactor", {}),
-    ("worker.plugins.factor_compute.factors.fundamental_quality:DtprofitToProfitFactor", {}),
-    ("worker.plugins.factor_compute.factors.fundamental_quality:AssetsTurnFactor", {}),
-    ("worker.plugins.factor_compute.factors.fundamental_quality:InvTurnFactor", {}),
-    ("worker.plugins.factor_compute.factors.fundamental_quality:ArTurnFactor", {}),
-    ("worker.plugins.factor_compute.factors.fundamental_quality:AccraFactor", {}),
-    # B5 杠杆因子（数据来源于 sdc_financial_indicator）
-    ("worker.plugins.factor_compute.factors.fundamental_leverage:DebtToAssetsFactor", {}),
-    ("worker.plugins.factor_compute.factors.fundamental_leverage:CurrentRatioFactor", {}),
-    ("worker.plugins.factor_compute.factors.fundamental_leverage:EqtToTalcapitalFactor", {}),
-    ("worker.plugins.factor_compute.factors.fundamental_leverage:EbitToInterestFactor", {}),
-    ("worker.plugins.factor_compute.factors.fundamental_leverage:OcfToDebtFactor", {}),
-    ("worker.plugins.factor_compute.factors.fundamental_leverage:MlevFactor", {}),
+    # B 类基本面因子 — 属于 CrossSectionReader，不在 Task 1 逐标的计算
+    # B1 价值因子：由 CrossSectionReader 从 sdc_daily_indicator 直接加载
+    # B2-B5 财务因子：由 FactorQuarterlyTask 计算并写入 fac_financial_factor_value
+    # 以下因子仍需注册到 registry 以便 CrossSectionReader 发现和截面标准化
     # F 合成因子（由 factor_synthesize 任务产出，不参与逐标的计算）
     # F1 组内合成因子（第一层）
     ("worker.plugins.factor_synthesize.factors:CompositeValueFactor", {}),

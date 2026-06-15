@@ -1,0 +1,38 @@
+name: factor_quarterly
+celery_task_name: factor.compute_quarterly
+version: "1.0.0"
+task_name: 季度财务因子计算
+task_name_en: Quarterly Financial Factor Compute
+description: 计算B2-B5财务因子，写入fac_financial_factor_value（按ann_date季度存储）
+description_en: Compute B2-B5 financial factors and persist to fac_financial_factor_value
+category: compute
+task_type: on_demand
+queue: factor
+timeout: 7200
+retry_config:
+  max_retries: 2
+  retry_backoff: true
+  retry_backoff_max: 600
+params_schema:
+  type: object
+  properties:
+    symbols:
+      type: array
+      items:
+        type: string
+      title: 证券代码列表
+      description: 为空时计算全市场
+    factor_ids:
+      type: array
+      items:
+        type: string
+      title: 因子ID列表
+      description: 为空时计算所有活跃财务因子
+    mode:
+      type: string
+      title: 计算模式
+      description: incremental或full
+      default: incremental
+      enum:
+        - incremental
+        - full
