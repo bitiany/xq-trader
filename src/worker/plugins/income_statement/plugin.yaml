@@ -1,0 +1,37 @@
+name: income_statement
+celery_task_name: market.income_statement_collect
+version: "1.0.0"
+task_name: 利润表采集（季度）
+task_name_en: Income Statement Collection (Quarterly)
+description: 逐标的采集上市公司利润表数据，数据源为Tushare income接口。独立全量采集任务，水位基于公告日期(ann_date)。
+description_en: Per-security collection of income statement data from Tushare income API. Independent full collection task, watermark based on announcement date.
+category: io
+task_type: on_demand
+queue: market
+timeout: 43200
+retry_config:
+  max_retries: 2
+  retry_backoff: true
+  retry_backoff_max: 600
+params_schema:
+  type: object
+  properties:
+    concurrency:
+      type: integer
+      title: 并发数
+      default: 3
+    stock_codes:
+      type: array
+      title: 股票代码列表
+      description: 为空时采集全市场
+      items:
+        type: string
+    max_count:
+      type: integer
+      title: 最大标的数量
+      description: 用于测试，0 表示不限
+      default: 0
+    collect_date:
+      type: string
+      title: 采集起始日期
+      description: 指定采集起始公告日期（格式 YYYY-MM-DD），为空时按水位日期增量采集

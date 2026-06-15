@@ -353,6 +353,175 @@ class TushareDataCollector:
                 f"fina_indicator 采集失败 ts_code={ts_code} period={period}: {e}"
             ) from e
 
+    async def fetch_income(
+        self,
+        ts_code: str = "",
+        ann_date: str = "",
+        start_date: str = "",
+        end_date: str = "",
+        period: str = "",
+        report_type: str = "",
+    ) -> pd.DataFrame:
+        """获取上市公司利润表数据。
+
+        接口：income（doc_id=33）
+        限制：单次最大返回按标的，需 2000 积分；按单只股票获取历史数据
+        字段：显式指定核心字段，避免 Tushare 默认只返回部分列
+
+        Args:
+            ts_code: 股票代码，如 "600000.SH"（必选）
+            ann_date: 公告日期 YYYYMMDD
+            start_date: 公告日开始日期 YYYYMMDD
+            end_date: 公告日结束日期 YYYYMMDD
+            period: 报告期 YYYYMMDD，如 20231231
+            report_type: 报告类型（1合并报表 2单季合并 等）
+
+        Returns:
+            DataFrame，包含利润表核心字段
+        """
+        if not ts_code and not ann_date and not period:
+            raise DataCollectionError("ts_code、ann_date、period 至少输入一个")
+
+        _fields = (
+            "ts_code,ann_date,f_ann_date,end_date,report_type,comp_type,end_type,"
+            "basic_eps,diluted_eps,"
+            "total_revenue,revenue,oper_cost,total_cogs,"
+            "sell_exp,admin_exp,fin_exp,assets_impair_loss,"
+            "invest_income,ass_invest_income,fv_value_chg_gain,forex_gain,"
+            "operate_profit,non_oper_income,non_oper_exp,nca_disploss,"
+            "total_profit,income_tax,"
+            "n_income,n_income_attr_p,minority_gain,"
+            "oth_compr_income,t_compr_income,compr_inc_attr_p,compr_inc_attr_m_s,"
+            "ebit,ebitda,rd_exp,"
+            "credit_impa_loss,oth_income,asset_disp_income,"
+            "update_flag"
+        )
+
+        try:
+            await self._limiter.acquire()
+            loop = asyncio.get_running_loop()
+            kwargs: dict[str, str] = {}
+            if ts_code:
+                kwargs["ts_code"] = ts_code
+            if ann_date:
+                kwargs["ann_date"] = ann_date
+            if start_date:
+                kwargs["start_date"] = start_date
+            if end_date:
+                kwargs["end_date"] = end_date
+            if period:
+                kwargs["period"] = period
+            if report_type:
+                kwargs["report_type"] = report_type
+            kwargs["fields"] = _fields
+            func = partial(self._pro.income, **kwargs)
+            result = await loop.run_in_executor(self._get_executor(), func)
+            df = pd.DataFrame() if result is None else pd.DataFrame(result)
+            if df.empty:
+                logger.debug(
+                    "income 无数据: ts_code=%s ann_date=%s period=%s range=%s~%s",
+                    ts_code, ann_date, period, start_date, end_date,
+                )
+                return pd.DataFrame()
+
+            logger.debug(
+                "income 获取完成: ts_code=%s rows=%d cols=%d",
+                ts_code, len(df), len(df.columns),
+            )
+            return df
+        except Exception as e:
+            raise DataCollectionError(
+                f"fina_indicator 采集失败 ts_code={ts_code} period={period}: {e}"
+            ) from e
+
+    async def fetch_balancesheet(
+        self,
+        ts_code: str = "",
+        ann_date: str = "",
+        start_date: str = "",
+        end_date: str = "",
+        period: str = "",
+        report_type: str = "",
+    ) -> pd.DataFrame:
+        """获取上市公司资产负债表数据。
+
+        接口：balancesheet（doc_id=36）
+        限制：单次最大返回按标的，需 2000 积分；按单只股票获取历史数据
+        字段：显式指定核心字段，避免 Tushare 默认只返回部分列
+
+        Args:
+            ts_code: 股票代码，如 "600000.SH"（必选）
+            ann_date: 公告日期 YYYYMMDD
+            start_date: 公告日开始日期 YYYYMMDD
+            end_date: 公告日结束日期 YYYYMMDD
+            period: 报告期 YYYYMMDD，如 20231231
+            report_type: 报告类型（1合并报表 2单季合并 等）
+
+        Returns:
+            DataFrame，包含资产负债表核心字段
+        """
+        if not ts_code and not ann_date and not period:
+            raise DataCollectionError("ts_code、ann_date、period 至少输入一个")
+
+        _fields = (
+            "ts_code,ann_date,f_ann_date,end_date,report_type,comp_type,end_type,"
+            "total_share,cap_rese,undistr_porfit,surplus_rese,special_rese,"
+            "money_cap,trad_asset,notes_receiv,accounts_receiv,oth_receiv,"
+            "prepayment,div_receiv,int_receiv,inventories,amor_exp,"
+            "nca_within_1y,total_cur_assets,"
+            "lt_eqt_invest,invest_real_estate,time_deposits,oth_assets,"
+            "fix_assets,cip,intan_assets,r_and_d,goodwill,lt_amor_exp,"
+            "defer_tax_assets,oth_nca,total_nca,total_assets,"
+            "lt_borr,st_borr,"
+            "notes_payable,acct_payable,adv_receipts,"
+            "payroll_payable,taxes_payable,int_payable,div_payable,oth_payable,"
+            "non_cur_liab_due_1y,oth_cur_liab,total_cur_liab,"
+            "bond_payable,lt_payable,specific_payables,estimated_liab,"
+            "defer_tax_liab,oth_ncl,total_ncl,oth_liab,total_liab,"
+            "treasury_share,ordin_risk_reser,forex_differ,invest_loss_unconf,"
+            "minority_int,total_hldr_eqy_exc_min_int,total_hldr_eqy_inc_min_int,"
+            "total_liab_hldr_eqy,"
+            "contract_assets,contract_liab,"
+            "update_flag"
+        )
+
+        try:
+            await self._limiter.acquire()
+            loop = asyncio.get_running_loop()
+            kwargs: dict[str, str] = {}
+            if ts_code:
+                kwargs["ts_code"] = ts_code
+            if ann_date:
+                kwargs["ann_date"] = ann_date
+            if start_date:
+                kwargs["start_date"] = start_date
+            if end_date:
+                kwargs["end_date"] = end_date
+            if period:
+                kwargs["period"] = period
+            if report_type:
+                kwargs["report_type"] = report_type
+            kwargs["fields"] = _fields
+            func = partial(self._pro.balancesheet, **kwargs)
+            result = await loop.run_in_executor(self._get_executor(), func)
+            df = pd.DataFrame() if result is None else pd.DataFrame(result)
+            if df.empty:
+                logger.debug(
+                    "balancesheet 无数据: ts_code=%s ann_date=%s period=%s range=%s~%s",
+                    ts_code, ann_date, period, start_date, end_date,
+                )
+                return pd.DataFrame()
+
+            logger.debug(
+                "balancesheet 获取完成: ts_code=%s rows=%d cols=%d",
+                ts_code, len(df), len(df.columns),
+            )
+            return df
+        except Exception as e:
+            raise DataCollectionError(
+                f"balancesheet 采集失败 ts_code={ts_code} period={period}: {e}"
+            ) from e
+
     async def fetch_stock_basic(
         self,
         ts_code: str = "",
