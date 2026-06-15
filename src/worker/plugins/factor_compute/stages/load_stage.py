@@ -72,14 +72,6 @@ class FactorLoadStage(Stage):
         # 合并财务指标数据
         if not df_fina.empty:
             df_merged = self._merge_indicator(df_merged, df_fina)
-            # 验证 ebitda 合并结果
-            if "ebitda" in df_merged.columns:
-                ebitda_valid = df_merged["ebitda"].notna().sum()
-                if ebitda_valid > 0:
-                    logger.info(
-                        "[factor.compute] %s fina_merged: ebitda_valid=%d/%d",
-                        symbol, ebitda_valid, len(df_merged),
-                    )
 
         ctx.set("kline_df", df_merged)
         ctx.set("skip_persist", False)
@@ -199,8 +191,9 @@ class FactorLoadStage(Stage):
     async def _load_financial_indicator(self, symbol: str) -> pd.DataFrame:
         """加载基本面因子所需的财务指标数据（季度 → 日频前向填充）。
 
-        从 sdc_financial_indicator 获取 ebitda 等季度财务数据，
+        从 sdc_financial_indicator 获取季度财务数据，
         按 ann_date（公告日）对齐到交易日，前向填充到日频。
+        加载 B1-B5 基本面因子所需的全部字段。
         """
         rows = await FinancialIndicator.filter(
             symbol=symbol,
@@ -211,7 +204,26 @@ class FactorLoadStage(Stage):
             return pd.DataFrame()
 
         df = pd.DataFrame([r.to_dict() for r in rows])
-        fina_cols = ["ebitda"]
+        # B1 价值: ebitda
+        # B2 盈利: roe, roe_waa, roe_dt, roa, roic, grossprofit_margin, netprofit_margin
+        # B3 成长: q_or_yoy, q_netprofit_yoy, q_dtprofit_yoy, q_op_yoy, q_ocf_yoy, q_roe_yoy,
+        #          q_netprofitgrow_qoq, q_orgrow_qoq, q_opgrow_qoq, q_roegrow_qoq
+        # B4 质量: ocf_to_profit, ocf_to_or, salescash_to_or, dtprofit_to_profit,
+        #         assets_turn, inv_turn, ar_turn
+        # B5 杠杆: debt_to_assets, current_ratio, eqt_to_talcapital, ebit_to_interest, ocf_to_debt,
+        #         assets_to_eqt
+        fina_cols = [
+            "ebitda",
+            "roe", "roe_waa", "roe_dt", "roa", "roic",
+            "grossprofit_margin", "netprofit_margin",
+            "q_or_yoy", "q_netprofit_yoy", "q_dtprofit_yoy", "q_op_yoy",
+            "q_ocf_yoy", "q_roe_yoy",
+            "q_netprofitgrow_qoq", "q_orgrow_qoq", "q_opgrow_qoq", "q_roegrow_qoq",
+            "ocf_to_profit", "ocf_to_or", "salescash_to_or", "dtprofit_to_profit",
+            "assets_turn", "inv_turn", "ar_turn",
+            "debt_to_assets", "current_ratio", "eqt_to_talcapital",
+            "ebit_to_interest", "ocf_to_debt", "assets_to_eqt",
+        ]
         for col in fina_cols:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
@@ -221,19 +233,21 @@ class FactorLoadStage(Stage):
             return pd.DataFrame()
 
         df = df.dropna(subset=["ann_date"])
-        # 只保留 ebitda 有值的行，避免 NaN 值在 asof merge 中覆盖有效值
-        df = df.dropna(subset=fina_cols, how="all")
+        # 只保留至少有一个有效值的行，避免全 NaN 行在 asof merge 中覆盖有效值
+        available_cols = [c for c in fina_cols if c in df.columns]
+        df = df.dropna(subset=available_cols, how="all")
         df = df.sort_values("ann_date").drop_duplicates(subset=["ann_date"], keep="last")
 
         if df.empty:
             return pd.DataFrame()
 
-        # 构建日频序列：ann_date → ebitda，后续由 _merge_indicator 合并时自动对齐
-        result = df[["ann_date"] + fina_cols].copy()
+        # 构建日频序列：ann_date → fina_cols，后续由 _merge_indicator 合并时自动对齐
+        result = df[["ann_date"] + available_cols].copy()
         result = result.rename(columns={"ann_date": "trade_date"})
+        valid_counts = {c: result[c].notna().sum() for c in available_cols if result[c].notna().sum() > 0}
         logger.info(
-            "[factor.compute] %s fina_loaded: rows=%d ebitda_valid=%d",
-            symbol, len(result), result["ebitda"].notna().sum(),
+            "[factor.compute] %s fina_loaded: rows=%d fields=%s",
+            symbol, len(result), valid_counts,
         )
         return result
 

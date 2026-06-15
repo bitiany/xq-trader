@@ -1,8 +1,9 @@
-"""B 类基本面因子 — 估值/盈利/成长性。
+"""B1 价值因子 — 估值指标。
 
 数据来源：
-  - ep/bp/dp/sp: sdc_daily_indicator（pe_ttm/pb/dv_ttm/ps_ttm）
+  - ep/bp/dp/sp/pe_ttm/ps_ttm: sdc_daily_indicator（pe_ttm/pb/dv_ttm/ps_ttm）
   - ev_ebitda: total_mv（sdc_daily_indicator）+ ebitda（sdc_financial_indicator 前向填充）
+  - cfp: ocf_to_or（sdc_financial_indicator）+ total_mv（sdc_daily_indicator）
 
 参照 Barra 风格因子体系与业界成熟框架：
   - ep: 盈利收益率(EP) = 1/PE_TTM，截面可比，价值因子核心
@@ -159,3 +160,79 @@ class SalesToPriceFactor(FactorPlugin):
         ps_ttm = df["ps_ttm"].astype(float)
         sp = np.where(ps_ttm > 0, 1.0 / ps_ttm, np.nan)
         return pd.DataFrame({self.factor_id: sp}, index=df.index)
+
+
+class PeTtmFactor(FactorPlugin):
+    """市盈率TTM因子 — 直接取 pe_ttm，截面可比。
+
+    方向 ASC：PE 越低越"便宜"（低估值），排名越靠前。
+    """
+
+    factor_id: str = "pe_ttm"
+    display_name: str = "市盈率TTM"
+    category: str = "fundamental"
+    group_id: str = "pe_ttm"
+    direction: str = "ASC"
+    scope: str = "both"
+    signal_type: str = "continuous"
+    dependencies: list[str] = ["pe_ttm"]
+    min_periods: int = 1
+    requires_full_history: bool = False
+    data_origin: str = "market"
+
+    def compute(self, df: pd.DataFrame) -> pd.DataFrame:
+        return pd.DataFrame({self.factor_id: df["pe_ttm"].astype(float)}, index=df.index)
+
+
+class PsTtmFactor(FactorPlugin):
+    """市销率TTM因子 — 直接取 ps_ttm，截面可比。
+
+    方向 ASC：PS 越低越"便宜"（低估值），排名越靠前。
+    """
+
+    factor_id: str = "ps_ttm"
+    display_name: str = "市销率TTM"
+    category: str = "fundamental"
+    group_id: str = "ps_ttm"
+    direction: str = "ASC"
+    scope: str = "both"
+    signal_type: str = "continuous"
+    dependencies: list[str] = ["ps_ttm"]
+    min_periods: int = 1
+    requires_full_history: bool = False
+    data_origin: str = "market"
+
+    def compute(self, df: pd.DataFrame) -> pd.DataFrame:
+        return pd.DataFrame({self.factor_id: df["ps_ttm"].astype(float)}, index=df.index)
+
+
+class CashFlowPriceFactor(FactorPlugin):
+    """现金收益率因子(CFP) — 经营现金流/总市值，截面可比。
+
+    CFP = ocf_to_or * revenue / total_mv，近似为经营现金流/总市值。
+    使用 ocf_to_or（经营现金流/营收）作为经营现金流的代理指标，
+    配合 total_mv 计算现金收益率。高 CFP 意味着低估值。
+    """
+
+    factor_id: str = "cfp"
+    display_name: str = "现金收益率"
+    category: str = "fundamental"
+    group_id: str = "cfp"
+    direction: str = "DESC"
+    scope: str = "both"
+    signal_type: str = "continuous"
+    dependencies: list[str] = ["ocf_to_or", "total_mv"]
+    min_periods: int = 1
+    requires_full_history: bool = False
+    data_origin: str = "market"
+
+    def compute(self, df: pd.DataFrame) -> pd.DataFrame:
+        ocf_to_or = df["ocf_to_or"].astype(float)
+        total_mv = df["total_mv"].astype(float)
+        # ocf_to_or 是比率（经营现金流/营收），直接用作现金收益率代理
+        cfp = np.where(
+            np.isfinite(ocf_to_or) & (total_mv > 0),
+            ocf_to_or,
+            np.nan,
+        )
+        return pd.DataFrame({self.factor_id: cfp}, index=df.index)

@@ -204,6 +204,7 @@ async def sync_to_registry() -> int:
             is_composite=1 if defn.is_composite else 0,
             composite_factor_ids=",".join(defn.composite_factor_ids),
             skip_preprocess=1 if getattr(plugin, "skip_preprocess", False) else 0,
+            composite_method=defn.composite_method or "",
             description=defn.description or "",
         ))
 
@@ -233,6 +234,7 @@ async def sync_to_registry() -> int:
                     is_composite=0,
                     composite_factor_ids="",
                     skip_preprocess=1 if getattr(plugin, "skip_preprocess", False) else 0,
+                    composite_method=defn.composite_method or "",
                     description=f"{defn.display_name}子因子",
                 ))
 
@@ -244,7 +246,7 @@ async def sync_to_registry() -> int:
             "signal_type", "base_factor", "dependencies", "min_periods",
             "compute_module", "params", "data_origin", "update_freq",
             "compute_engine", "tags", "is_composite",
-            "composite_factor_ids", "skip_preprocess", "description",
+            "composite_factor_ids", "skip_preprocess", "composite_method", "description",
         ],
         batch_size=100,
     )
@@ -350,14 +352,53 @@ _FACTOR_VARIANTS: list[tuple[str, dict[str, Any]]] = [
     ("worker.plugins.factor_compute.factors.fundamental:DividendYieldFactor", {}),
     ("worker.plugins.factor_compute.factors.fundamental:EvEbitdaFactor", {}),
     ("worker.plugins.factor_compute.factors.fundamental:SalesToPriceFactor", {}),
-    # F 复合Alpha因子（由 factor_synthesize 任务产出，不参与逐标的计算）
+    ("worker.plugins.factor_compute.factors.fundamental:PeTtmFactor", {}),
+    ("worker.plugins.factor_compute.factors.fundamental:PsTtmFactor", {}),
+    ("worker.plugins.factor_compute.factors.fundamental:CashFlowPriceFactor", {}),
+    # B2 盈利因子（数据来源于 sdc_financial_indicator）
+    ("worker.plugins.factor_compute.factors.fundamental_profitability:RoeFactor", {}),
+    ("worker.plugins.factor_compute.factors.fundamental_profitability:RoeWaaFactor", {}),
+    ("worker.plugins.factor_compute.factors.fundamental_profitability:RoeDtFactor", {}),
+    ("worker.plugins.factor_compute.factors.fundamental_profitability:RoaFactor", {}),
+    ("worker.plugins.factor_compute.factors.fundamental_profitability:RoicFactor", {}),
+    ("worker.plugins.factor_compute.factors.fundamental_profitability:GrossprofitMarginFactor", {}),
+    ("worker.plugins.factor_compute.factors.fundamental_profitability:NetprofitMarginFactor", {}),
+    ("worker.plugins.factor_compute.factors.fundamental_profitability:GpToAssetsFactor", {}),
+    # B3 成长因子（数据来源于 sdc_financial_indicator）
+    ("worker.plugins.factor_compute.factors.fundamental_growth:QOrYoyFactor", {}),
+    ("worker.plugins.factor_compute.factors.fundamental_growth:QNetprofitYoyFactor", {}),
+    ("worker.plugins.factor_compute.factors.fundamental_growth:QDtprofitYoyFactor", {}),
+    ("worker.plugins.factor_compute.factors.fundamental_growth:QOpYoyFactor", {}),
+    ("worker.plugins.factor_compute.factors.fundamental_growth:QOcfYoyFactor", {}),
+    ("worker.plugins.factor_compute.factors.fundamental_growth:QRoeYoyFactor", {}),
+    ("worker.plugins.factor_compute.factors.fundamental_growth:QNetprofitgrowQoqFactor", {}),
+    ("worker.plugins.factor_compute.factors.fundamental_growth:QOrgrowQoqFactor", {}),
+    ("worker.plugins.factor_compute.factors.fundamental_growth:QOpgrowQoqFactor", {}),
+    ("worker.plugins.factor_compute.factors.fundamental_growth:QRoegrowQoqFactor", {}),
+    # B4 质量因子（数据来源于 sdc_financial_indicator）
+    ("worker.plugins.factor_compute.factors.fundamental_quality:OcfToProfitFactor", {}),
+    ("worker.plugins.factor_compute.factors.fundamental_quality:OcfToOrFactor", {}),
+    ("worker.plugins.factor_compute.factors.fundamental_quality:SalescashToOrFactor", {}),
+    ("worker.plugins.factor_compute.factors.fundamental_quality:DtprofitToProfitFactor", {}),
+    ("worker.plugins.factor_compute.factors.fundamental_quality:AssetsTurnFactor", {}),
+    ("worker.plugins.factor_compute.factors.fundamental_quality:InvTurnFactor", {}),
+    ("worker.plugins.factor_compute.factors.fundamental_quality:ArTurnFactor", {}),
+    ("worker.plugins.factor_compute.factors.fundamental_quality:AccraFactor", {}),
+    # B5 杠杆因子（数据来源于 sdc_financial_indicator）
+    ("worker.plugins.factor_compute.factors.fundamental_leverage:DebtToAssetsFactor", {}),
+    ("worker.plugins.factor_compute.factors.fundamental_leverage:CurrentRatioFactor", {}),
+    ("worker.plugins.factor_compute.factors.fundamental_leverage:EqtToTalcapitalFactor", {}),
+    ("worker.plugins.factor_compute.factors.fundamental_leverage:EbitToInterestFactor", {}),
+    ("worker.plugins.factor_compute.factors.fundamental_leverage:OcfToDebtFactor", {}),
+    ("worker.plugins.factor_compute.factors.fundamental_leverage:MlevFactor", {}),
+    # F 合成因子（由 factor_synthesize 任务产出，不参与逐标的计算）
     # F1 组内合成因子（第一层）
-    ("worker.plugins.factor_synthesize.factors:AlphaValueFactor", {}),
-    ("worker.plugins.factor_synthesize.factors:AlphaMomentumFactor", {}),
-    ("worker.plugins.factor_synthesize.factors:AlphaVolatilityFactor", {}),
-    ("worker.plugins.factor_synthesize.factors:AlphaLiquidityFactor", {}),
-    ("worker.plugins.factor_synthesize.factors:AlphaTechnicalFactor", {}),
-    ("worker.plugins.factor_synthesize.factors:AlphaFundFlowFactor", {}),
+    ("worker.plugins.factor_synthesize.factors:CompositeValueFactor", {}),
+    ("worker.plugins.factor_synthesize.factors:CompositeMomentumFactor", {}),
+    ("worker.plugins.factor_synthesize.factors:CompositeVolatilityFactor", {}),
+    ("worker.plugins.factor_synthesize.factors:CompositeLiquidityFactor", {}),
+    ("worker.plugins.factor_synthesize.factors:CompositeTechnicalFactor", {}),
+    ("worker.plugins.factor_synthesize.factors:CompositeFundFlowFactor", {}),
     # F2 跨组合成因子（第二层）
-    ("worker.plugins.factor_synthesize.factors:AlphaFactor", {}),
+    ("worker.plugins.factor_synthesize.factors:CompositeAlphaFactor", {}),
 ]
