@@ -233,6 +233,119 @@ class TushareDataCollector:
                 f"daily_basic 采集失败 ts_code={ts_code} trade_date={trade_date}: {e}"
             ) from e
 
+    async def fetch_fina_indicator(
+        self,
+        ts_code: str = "",
+        ann_date: str = "",
+        start_date: str = "",
+        end_date: str = "",
+        period: str = "",
+    ) -> pd.DataFrame:
+        """获取上市公司财务指标数据。
+
+        接口：fina_indicator（doc_id=79）
+        限制：单次最大 100 条，需 2000 积分；按单只股票获取历史数据
+        字段：显式指定全部字段，避免 Tushare 默认只返回部分列
+
+        Args:
+            ts_code: 股票代码，如 "600000.SH"（必选）
+            ann_date: 公告日期 YYYYMMDD
+            start_date: 报告期开始日期 YYYYMMDD
+            end_date: 报告期结束日期 YYYYMMDD
+            period: 报告期 YYYYMMDD，如 20231231
+
+        Returns:
+            DataFrame，包含全部 fina_indicator 字段
+        """
+        if not ts_code and not ann_date and not period:
+            raise DataCollectionError("ts_code、ann_date、period 至少输入一个")
+
+        # 显式指定全部字段（含默认显示 N 的字段），避免遗漏
+        _fields = (
+            "ts_code,ann_date,end_date,"
+            "eps,dt_eps,total_revenue_ps,revenue_ps,capital_rese_ps,"
+            "surplus_rese_ps,undist_profit_ps,extra_item,profit_dedt,"
+            "gross_margin,current_ratio,quick_ratio,cash_ratio,"
+            "invturn_days,arturn_days,inv_turn,ar_turn,ca_turn,fa_turn,assets_turn,"
+            "op_income,valuechange_income,interst_income,daa,"
+            "ebit,ebitda,fcff,fcfe,"
+            "current_exint,noncurrent_exint,interestdebt,netdebt,"
+            "tangible_asset,working_capital,networking_capital,"
+            "invest_capital,retained_earnings,"
+            "diluted2_eps,bps,ocfps,retainedps,cfps,"
+            "ebit_ps,fcff_ps,fcfe_ps,"
+            "netprofit_margin,grossprofit_margin,cogs_of_sales,expense_of_sales,"
+            "profit_to_gr,saleexp_to_gr,adminexp_of_gr,finaexp_of_gr,"
+            "impai_ttm,gc_of_gr,op_of_gr,ebit_of_gr,"
+            "roe,roe_waa,roe_dt,roa,npta,roic,"
+            "roe_yearly,roa2_yearly,roe_avg,"
+            "opincome_of_ebt,investincome_of_ebt,n_op_profit_of_ebt,"
+            "tax_to_ebt,dtprofit_to_profit,"
+            "salescash_to_or,ocf_to_or,ocf_to_opincome,capitalized_to_da,"
+            "debt_to_assets,assets_to_eqt,dp_assets_to_eqt,"
+            "ca_to_assets,nca_to_assets,tbassets_to_totalassets,"
+            "int_to_talcap,eqt_to_talcapital,"
+            "currentdebt_to_debt,longdeb_to_debt,"
+            "ocf_to_shortdebt,debt_to_eqt,eqt_to_debt,eqt_to_interestdebt,"
+            "tangibleasset_to_debt,tangasset_to_intdebt,tangibleasset_to_netdebt,"
+            "ocf_to_debt,ocf_to_interestdebt,ocf_to_netdebt,"
+            "ebit_to_interest,longdebt_to_workingcapital,ebitda_to_debt,"
+            "turn_days,roa_yearly,roa_dp,fixed_assets,"
+            "profit_prefin_exp,non_op_profit,op_to_ebt,nop_to_ebt,"
+            "ocf_to_profit,cash_to_liqdebt,cash_to_liqdebt_withinterest,"
+            "op_to_liqdebt,op_to_debt,roic_yearly,total_fa_trun,profit_to_op,"
+            "q_opincome,q_investincome,q_dtprofit,q_eps,"
+            "q_netprofit_margin,q_gsprofit_margin,q_exp_to_sales,"
+            "q_profit_to_gr,q_saleexp_to_gr,q_adminexp_to_gr,q_finaexp_to_gr,"
+            "q_impair_to_gr_ttm,q_gc_to_gr,q_op_to_gr,"
+            "q_roe,q_dt_roe,q_npta,"
+            "q_opincome_to_ebt,q_investincome_to_ebt,q_dtprofit_to_profit,"
+            "q_salescash_to_or,q_ocf_to_sales,q_ocf_to_or,"
+            "basic_eps_yoy,dt_eps_yoy,cfps_yoy,"
+            "op_yoy,ebt_yoy,netprofit_yoy,dt_netprofit_yoy,ocf_yoy,"
+            "roe_yoy,bps_yoy,assets_yoy,eqt_yoy,"
+            "tr_yoy,or_yoy,"
+            "q_gr_yoy,q_gr_qoq,q_sales_yoy,q_sales_qoq,"
+            "q_op_yoy,q_op_qoq,q_profit_yoy,q_profit_qoq,"
+            "q_netprofit_yoy,q_netprofit_qoq,"
+            "equity_yoy,rd_exp,update_flag"
+        )
+
+        try:
+            await self._limiter.acquire()
+            loop = asyncio.get_running_loop()
+            kwargs: dict[str, str] = {}
+            if ts_code:
+                kwargs["ts_code"] = ts_code
+            if ann_date:
+                kwargs["ann_date"] = ann_date
+            if start_date:
+                kwargs["start_date"] = start_date
+            if end_date:
+                kwargs["end_date"] = end_date
+            if period:
+                kwargs["period"] = period
+            kwargs["fields"] = _fields
+            func = partial(self._pro.fina_indicator, **kwargs)
+            result = await loop.run_in_executor(self._get_executor(), func)
+            df = pd.DataFrame() if result is None else pd.DataFrame(result)
+            if df.empty:
+                logger.debug(
+                    "fina_indicator 无数据: ts_code=%s ann_date=%s period=%s range=%s~%s",
+                    ts_code, ann_date, period, start_date, end_date,
+                )
+                return pd.DataFrame()
+
+            logger.debug(
+                "fina_indicator 获取完成: ts_code=%s rows=%d cols=%d",
+                ts_code, len(df), len(df.columns),
+            )
+            return df
+        except Exception as e:
+            raise DataCollectionError(
+                f"fina_indicator 采集失败 ts_code={ts_code} period={period}: {e}"
+            ) from e
+
     async def fetch_stock_basic(
         self,
         ts_code: str = "",
