@@ -134,7 +134,7 @@ class FinancialIndicator(Base):
     roic_yearly: Mapped[float | None] = mapped_column(Float, comment="年化投入资本回报率")
     total_fa_trun: Mapped[float | None] = mapped_column(Float, comment="固定资产周转率")
     profit_to_op: Mapped[float | None] = mapped_column(Float, comment="净利润/营业利润")
-    # ── 非 Tushare fina_indicator 字段（当前 API 不返回，保留供其他数据源填充） ──
+    # ── 单季度同比/环比增长率 ──
     q_opincome_qoq: Mapped[float | None] = mapped_column(Float, comment="单季度经营利润环比增长率")
     q_investincome_qoq: Mapped[float | None] = mapped_column(Float, comment="单季度投资收益环比增长率")
     q_dtprofit_qoq: Mapped[float | None] = mapped_column(Float, comment="单季度扣非净利润环比增长率")

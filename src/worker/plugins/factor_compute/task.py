@@ -118,14 +118,19 @@ class FactorComputeTask(BaseTask):
         )
 
         # 全局上下文
-        # 当用户显式指定 start_date 时，作为 collect_date 传入，绕过水位检查
-        # persist_start_date 为持久化截断下限，PersistStage 使用 max(start_date, persist_start_date)
+        # full 模式：强制从 persist_start_date 开始重新计算，绕过水位检查
+        # incremental 模式：当用户显式指定 start_date 时绕过水位，否则按水位增量
+        collect_date: str | None
+        if mode == _COMPUTE_MODE_FULL:
+            collect_date = persist_start_date
+        else:
+            collect_date = start_date if user_start_date else None
         global_ctx: dict[str, Any] = {
             "start_date": start_date,
             "persist_start_date": persist_start_date,
             "factor_ids": [f.factor_id for f in factors],
             "factor_plugins": factors,
-            "collect_date": start_date if user_start_date else None,
+            "collect_date": collect_date if collect_date else None,
             "warmup_bars": warmup_bars,
         }
 
