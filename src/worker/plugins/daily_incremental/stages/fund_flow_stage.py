@@ -344,8 +344,18 @@ class FundFlowIncrementalStage:
 
     @staticmethod
     async def _update_item_watermarks(df: pd.DataFrame, trade_date: date) -> None:
-        """批量更新有新数据的标的的水位日期（使用 bulk_create_or_update）。"""
-        codes = df["symbol"].unique().tolist()
+        """批量更新有新数据的标的的水位日期（使用 bulk_create_or_update）。
+
+        仅更新上市标的的水位，跳过退市标的（避免退市标的水位被反复更新）。
+        """
+        from xqtrader.domain.security.models import Security  # noqa: PLC0415
+
+        listed = await Security.filter(list_status="L")
+        listed_codes = {s.symbol for s in listed}
+
+        codes = [c for c in df["symbol"].unique().tolist() if c in listed_codes]
+        if not codes:
+            return
         instances = [
             CollectWatermark(
                 data_type=_DATA_TYPE,

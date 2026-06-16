@@ -46,7 +46,6 @@ function statusClass(status: string): string {
 
 interface TriggerParamsFormValues {
   start_date: dayjs.Dayjs | null
-  end_date: dayjs.Dayjs | null
   force_refresh: boolean
 }
 
@@ -88,9 +87,6 @@ export function TaskCard({ task, onRefresh }: TaskCardProps) {
       const params: Record<string, unknown> = {}
       if (values.start_date) {
         params.start_date = values.start_date.format('YYYY-MM-DD')
-      }
-      if (values.end_date) {
-        params.end_date = values.end_date.format('YYYY-MM-DD')
       }
       if (values.force_refresh) {
         params.force_refresh = true
@@ -170,9 +166,6 @@ export function TaskCard({ task, onRefresh }: TaskCardProps) {
       >
         <Form form={form} layout="vertical" initialValues={{ force_refresh: false }}>
           <Form.Item name="start_date" label={t('data.tasks.startDate')}>
-            <DatePicker style={{ width: '100%' }} />
-          </Form.Item>
-          <Form.Item name="end_date" label={t('data.tasks.endDate')}>
             <DatePicker style={{ width: '100%' }} />
           </Form.Item>
           <Form.Item name="force_refresh" label={t('data.tasks.forceRefresh')} valuePropName="checked">

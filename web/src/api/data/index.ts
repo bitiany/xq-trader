@@ -120,3 +120,31 @@ export async function fetchTaskLogs(
 export async function fetchNodes(): Promise<NodeItem[]> {
   return request.get<NodeItem[]>('/data/nodes')
 }
+
+export interface PipelineStep {
+  name: string
+  task: string
+  depends_on?: string[]
+  args?: Record<string, unknown>
+}
+
+export interface PipelineItem {
+  pipeline_name: string
+  description: string
+  mode: string
+  cron: string | null
+  queue: string
+  enabled: boolean
+  steps: PipelineStep[]
+  step_count: number
+  status: string
+  last_run_at: string | null
+}
+
+export async function fetchPipelines(): Promise<PipelineItem[]> {
+  return request.get<PipelineItem[]>('/data/pipelines')
+}
+
+export async function triggerPipeline(pipelineName: string): Promise<TriggerTaskResponse> {
+  return request.post<TriggerTaskResponse>(`/data/pipelines/${pipelineName}/trigger`)
+}

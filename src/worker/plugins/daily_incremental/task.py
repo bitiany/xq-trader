@@ -36,8 +36,8 @@ from worker.plugins.daily_incremental.stages.index_daily_stage import (
 from worker.plugins.daily_incremental.stages.sw_daily_stage import (
     SwDailyIncrementalStage,
 )
+from xqtrader.domain.security.models import Security
 from xqtrader.domain.watermark.models.collect_watermark import CollectWatermark
-from xqtrader.domain.watermark.services.watermark_service import WatermarkService
 
 logger = get_logger(__name__)
 
@@ -47,18 +47,16 @@ class DailyIncrementalTask(BaseTask):
 
     入参：
       - start_date: 采集起始日期（格式 YYYY-MM-DD，为空时按各 Stage 标的级水位）
-      - end_date: 采集结束日期（格式 YYYY-MM-DD，为空时取最新交易日）
       - kline_batch_size: QMT 标的分片大小（默认 50）
     """
     task_name = "market.daily_incremental_collect"
 
     async def _run_impl(self, **kwargs: Any) -> dict[str, Any]:
         start_date_str: str | None = kwargs.get("start_date")
-        end_date_str: str | None = kwargs.get("end_date")
         kline_batch_size: int = kwargs.get("kline_batch_size", 500)
 
-        # 确定 end_date
-        end_date = await self._resolve_end_date(end_date_str)
+        # end_date 默认取当前日期
+        end_date = date.today()
 
         # 各 Stage 独立确定 start_date
         kline_start = await self._resolve_stage_start(
@@ -160,32 +158,28 @@ class DailyIncrementalTask(BaseTask):
         return results
 
     @staticmethod
-    async def _resolve_end_date(end_date_str: str | None) -> date:
-        """确定增量采集的结束日期。"""
-        if end_date_str:
-            return date.fromisoformat(end_date_str)
-        ws = WatermarkService()
-        latest = await ws.get_latest_trade_date()
-        if latest is None:
-            logger.warning("[daily.incremental] 未找到最新交易日")
-            return date.today()
-        return latest
-
-    @staticmethod
     async def _resolve_stage_start(
         data_type: str,
         start_date_str: str | None,
     ) -> date | None:
         """确定单个 Stage 的起始日期。
 
-        优先使用指定的 start_date；否则查询该 data_type 下所有标的的最大水位日期。
+        优先使用指定的 start_date；否则查询该 data_type 下**仅上市标的**的最小水位日期。
+        退市标的（list_status=D）的水位停留在退市日，不应拉低整体起始日期。
         无水位返回 None（该 Stage 将被跳过）。
         """
         if start_date_str:
             return date.fromisoformat(start_date_str)
 
+        # 仅取上市标的的 symbol 集合
+        listed = await Security.filter(list_status="L")
+        listed_codes = {s.symbol for s in listed}
+
         rows = await CollectWatermark.filter(data_type=data_type, status="active")
-        dates = [row.watermark_date for row in rows if row.watermark_date is not None]
+        dates = [
+            row.watermark_date for row in rows
+            if row.watermark_date is not None and row.watermark_code in listed_codes
+        ]
         if dates:
             return min(dates)
         return None

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections import defaultdict
 from datetime import date, datetime
 from pathlib import Path
@@ -12,6 +13,7 @@ from sqlalchemy import text
 
 from framework.commons.logger import get_logger
 from framework.commons.pagination import build_paginated_response
+from framework.config.settings import settings
 from framework.dal.enginee import engines_manager
 from xqtrader.domain.data.services.registries import DataTypeRegistry, TableRegistry
 from xqtrader.domain.watermark.models.collect_watermark import CollectWatermark
@@ -261,7 +263,7 @@ class DataService:
             schedule_display = self._format_schedule(schedule) if schedule else ""
             schedule_display_en = self._format_schedule_en(schedule) if schedule else ""
 
-            status = self._resolve_task_status(last_exec, task_def)
+            status = self._resolve_task_status(last_exec, getattr(task_def, "is_active", True))
 
             result.append({
                 "task_id": task_name,
@@ -367,6 +369,110 @@ class DataService:
             logger.warning("获取工作节点信息失败", exc_info=True)
             return []
 
+    # ── 编排管线 ──
+
+    async def get_pipelines(self) -> list[dict[str, Any]]:
+        """编排管线列表 — 从 schedules YAML + sch_pipeline_def 聚合。
+
+        schedules/ 目录下每个 YAML 文件定义一个编排，
+        sch_pipeline_def 中 type=dependent 的记录提供子步骤信息。
+        """
+        from worker.models import PipelineDef
+
+        # 1. 从 YAML 文件加载编排定义
+        pipelines_config = self._load_pipeline_yaml()
+
+        # 2. 从 DB 获取子步骤和执行状态
+        all_defs = await PipelineDef.filter()
+        step_defs: dict[str, list[dict[str, Any]]] = {}
+        for d in all_defs:
+            config: dict[str, Any] = {}
+            if d.config:
+                try:
+                    config = json.loads(d.config)
+                except Exception:
+                    config = {}
+
+            if config.get("type") == "dependent":
+                pn = config.get("pipeline_name", "")
+                step_info: dict[str, Any] = {
+                    "name": d.name,
+                    "task": config.get("celery_task_name", ""),
+                    "depends_on": config.get("depends_on", []),
+                    "args": config.get("kwargs", {}),
+                }
+                step_defs.setdefault(pn, []).append(step_info)
+
+        # 3. 聚合
+        pipeline_names = list(pipelines_config.keys())
+        last_execs = await self._get_last_executions(pipeline_names)
+
+        result: list[dict[str, Any]] = []
+        for pname, pcfg in pipelines_config.items():
+            last_exec = last_execs.get(pname)
+            steps = step_defs.get(pname, pcfg.get("steps", []))
+
+            result.append({
+                "pipeline_name": pname,
+                "description": pcfg.get("description", ""),
+                "mode": pcfg.get("mode", "canvas"),
+                "cron": pcfg.get("cron"),
+                "queue": pcfg.get("queue", "celery"),
+                "enabled": pcfg.get("enabled", True),
+                "steps": steps,
+                "step_count": len(steps),
+                "status": self._resolve_task_status(last_exec, pcfg.get("enabled", True)),
+                "last_run_at": last_exec.get("finished_at") if last_exec else None,
+            })
+
+        return result
+
+    @staticmethod
+    def _load_pipeline_yaml() -> dict[str, dict[str, Any]]:
+        """从 schedules/ 目录加载编排 YAML 配置。"""
+        schedule_dir = Path(settings.APP.ROOT_DIR) / "schedules"
+        if not schedule_dir.exists():
+            return {}
+
+        result: dict[str, dict[str, Any]] = {}
+        for yml_file in sorted(schedule_dir.glob("*.yml")):
+            try:
+                with open(yml_file, encoding="utf-8") as f:
+                    config = yaml.safe_load(f) or {}
+            except Exception:
+                logger.warning("解析编排配置失败: %s", yml_file, exc_info=True)
+                continue
+
+            if not config or "name" not in config or "steps" not in config:
+                continue
+
+            result[config["name"]] = config
+        return result
+
+    async def trigger_pipeline(self, pipeline_name: str) -> dict[str, Any]:
+        """触发编排管线。"""
+        pipelines_config = self._load_pipeline_yaml()
+        if pipeline_name not in pipelines_config:
+            from framework.commons.exceptions import NotFoundException
+            raise NotFoundException(message=f"编排 {pipeline_name} 不存在")
+
+        pcfg = pipelines_config[pipeline_name]
+        queue = pcfg.get("queue", "celery")
+
+        from worker.celery_app import celery_app
+
+        celery_app.send_task(
+            "worker.orchestration.trigger_pipeline",
+            kwargs={"pipeline_name": pipeline_name},
+            queue=queue,
+        )
+
+        return {
+            "pipeline_name": pipeline_name,
+            "queued": True,
+            "message": f"编排 {pipeline_name} 已加入队列",
+        }
+
     # ── 私有方法 ──
 
     async def _query_table_stats(self) -> list[dict[str, Any]]:
@@ -437,9 +543,9 @@ class DataService:
         return result
 
     @staticmethod
-    def _resolve_task_status(last_exec: dict[str, Any] | None, task_def: Any | None) -> str:
+    def _resolve_task_status(last_exec: dict[str, Any] | None, is_active: bool = True) -> str:
         """解析任务当前状态。"""
-        if not task_def or not task_def.is_active:
+        if not is_active:
             return "disabled"
         if last_exec is None:
             return "idle"

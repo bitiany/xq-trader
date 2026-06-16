@@ -100,9 +100,11 @@ class FactorComputeTask(BaseTask):
         # 同步因子元数据到 DB
         await sync_to_registry()
 
-        # 解析因子列表，过滤掉 B 类基本面因子（由 FactorQuarterlyTask / CrossSectionReader 负责）
+        # 解析因子列表，过滤掉：
+        # - B 类基本面因子（由 FactorQuarterlyTask / CrossSectionReader 负责）
+        # - D 类合成因子（由 FactorSynthesizeTask 负责）
         factors = await resolve_factor_list(factor_ids)
-        factors = [f for f in factors if not _is_fundamental_factor(f)]
+        factors = [f for f in factors if not _is_fundamental_factor(f) and f.compute_engine != "synthesize"]
         if not factors:
             return {"status": "FAILED", "message": "No factors resolved"}
 

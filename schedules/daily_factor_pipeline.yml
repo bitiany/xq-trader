@@ -1,0 +1,16 @@
+name: daily_factor_pipeline
+description: "日频因子计算流水线：增量采集日行情数据 → 计算日频因子"
+mode: canvas
+queue: celery
+enabled: true
+
+steps:
+  - name: daily_incremental_collect
+    task: market.daily_incremental_collect
+    args: {}
+
+  - name: daily_factor_compute
+    task: factor.compute_daily
+    depends_on: [daily_incremental_collect]
+    args:
+      mode: incremental

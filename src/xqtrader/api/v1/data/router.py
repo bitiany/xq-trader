@@ -60,3 +60,15 @@ async def get_task_logs(
 async def get_nodes() -> list:
     """查询 Celery Worker 节点信息。"""
     return await _service.get_nodes()
+
+
+@router.get("/pipelines", summary="编排管线列表")
+async def get_pipelines() -> list:
+    """返回所有编排管线的详细信息，包含步骤、状态等。"""
+    return await _service.get_pipelines()
+
+
+@router.post("/pipelines/{pipeline_name}/trigger", summary="触发编排管线")
+async def trigger_pipeline(pipeline_name: str) -> dict:
+    """手动触发指定编排管线。"""
+    return await _service.trigger_pipeline(pipeline_name)

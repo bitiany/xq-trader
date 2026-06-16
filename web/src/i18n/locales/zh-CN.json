@@ -592,7 +592,6 @@
       "workerOffline": "Worker 离线",
       "taskSettings": "参数设置",
       "startDate": "开始日期",
-      "endDate": "结束日期",
       "forceRefresh": "强制刷新",
       "confirmTrigger": "确认触发",
       "status": {
@@ -604,6 +603,19 @@
       "taskType": {
         "scheduled": "定时调度",
         "on_demand": "按需触发"
+      },
+      "tabTasks": "任务",
+      "tabPipelines": "编排"
+    },
+    "pipeline": {
+      "stepCount": "{{count}} 个步骤",
+      "name": {
+        "daily_factor_pipeline": "日频因子流水线",
+        "quarterly_factor_pipeline": "季度因子流水线"
+      },
+      "desc": {
+        "daily_factor_pipeline": "日频因子计算流水线：增量采集日行情数据 → 计算日频因子",
+        "quarterly_factor_pipeline": "季度财务因子计算流水线：采集财务四表 → 计算B2-B5因子"
       }
     }
   },

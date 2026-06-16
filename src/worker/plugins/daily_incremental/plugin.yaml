@@ -1,4 +1,4 @@
-name: daily_incremental
+﻿name: daily_incremental
 celery_task_name: market.daily_incremental_collect
 version: "1.0.0"
 task_name: 日行情与资金流向及指标增量采集
@@ -20,10 +20,6 @@ params_schema:
       type: string
       title: 采集起始日期
       description: 格式 YYYY-MM-DD，为空时按市场水位日期增量采集
-    end_date:
-      type: string
-      title: 采集结束日期
-      description: 格式 YYYY-MM-DD，为空时取最新交易日
     kline_batch_size:
       type: integer
       title: QMT标的分片大小
