@@ -1,0 +1,29 @@
+name: quarterly_factor_pipeline
+description: "季度财务因子计算流水线：采集财务四表 → 计算B2-B5因子"
+mode: canvas
+cron: "0 20 15 1,4,7,10 *"    # 每季度首月15号20:00（财报披露后）
+queue: market
+enabled: true
+
+steps:
+  - name: financial_indicator_collect
+    task: market.financial_indicator_collect
+    args: {}
+
+  - name: income_statement_collect
+    task: market.income_statement_collect
+    args: {}
+
+  - name: balance_sheet_collect
+    task: market.balance_sheet_collect
+    args: {}
+
+  - name: cash_flow_collect
+    task: market.cash_flow_collect
+    args: {}
+
+  - name: quarterly_factor_compute
+    task: factor.compute_quarterly
+    depends_on: [financial_indicator_collect, income_statement_collect, balance_sheet_collect]
+    args:
+      mode: incremental

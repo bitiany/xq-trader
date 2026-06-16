@@ -264,7 +264,7 @@ class PersistStage(Stage):
                     max_td = valid_dates.map(
                         lambda v: date_type.fromisoformat(str(v))
                     ).max()
-                    ctx.set("max_trade_date", max_td)
+                    ctx.set("max_ann_date", max_td)
 
             logger.debug("[fina_indicator.collect] 持久化完成: %s rows=%d", stock_code, count)
             return StageResult.ok(data={"stock_code": stock_code, "persisted": count})

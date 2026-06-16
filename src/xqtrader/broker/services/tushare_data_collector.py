@@ -431,7 +431,7 @@ class TushareDataCollector:
             return df
         except Exception as e:
             raise DataCollectionError(
-                f"fina_indicator 采集失败 ts_code={ts_code} period={period}: {e}"
+                f"income 采集失败 ts_code={ts_code} period={period}: {e}"
             ) from e
 
     async def fetch_balancesheet(
@@ -520,6 +520,93 @@ class TushareDataCollector:
         except Exception as e:
             raise DataCollectionError(
                 f"balancesheet 采集失败 ts_code={ts_code} period={period}: {e}"
+            ) from e
+
+    async def fetch_cashflow(
+        self,
+        ts_code: str = "",
+        ann_date: str = "",
+        start_date: str = "",
+        end_date: str = "",
+        period: str = "",
+        report_type: str = "",
+    ) -> pd.DataFrame:
+        """获取上市公司现金流量表数据。
+
+        接口：cashflow（doc_id=34）
+        限制：单次最大返回按标的，需 2000 积分；按单只股票获取历史数据
+        字段：显式指定核心字段，避免 Tushare 默认只返回部分列
+
+        Args:
+            ts_code: 股票代码，如 "600000.SH"（必选）
+            ann_date: 公告日期 YYYYMMDD
+            start_date: 公告日开始日期 YYYYMMDD
+            end_date: 公告日结束日期 YYYYMMDD
+            period: 报告期 YYYYMMDD，如 20231231
+            report_type: 报告类型（1合并报表 2单季合并 等）
+
+        Returns:
+            DataFrame，包含现金流量表核心字段
+        """
+        if not ts_code and not ann_date and not period:
+            raise DataCollectionError("ts_code、ann_date、period 至少输入一个")
+
+        _fields = (
+            "ts_code,ann_date,f_ann_date,end_date,report_type,comp_type,end_type,"
+            "net_profit,"
+            "c_fr_sale_sg,recp_tax_rends,n_depos_incr_fi,c_inf_fr_operate_a,"
+            "c_paid_goods_s,c_paid_to_for_empl,c_paid_for_taxes,"
+            "oth_cash_pay_oper_act,st_cash_out_act,n_cashflow_act,"
+            "c_disp_withdrwl_invest,c_recp_return_invest,n_recp_disp_fiolta,"
+            "stot_inflows_inv_act,"
+            "c_pay_acq_const_fiolta,c_paid_invest,n_disp_subs_oth_biz,"
+            "oth_pay_ral_inv_act,n_incr_pledge_loan,stot_out_inv_act,"
+            "n_cashflow_inv_act,"
+            "c_recp_borrow,proc_issue_bonds,oth_cash_recp_ral_fnc_act,"
+            "stot_cash_in_fnc_act,free_cashflow,"
+            "c_prepay_amt_borr,c_pay_dist_dpcp_int_exp,"
+            "incl_dvd_profit_paid_sc_ms,oth_cashpay_ral_fnc_act,"
+            "stot_cashout_fnc_act,n_cash_flows_fnc_act,"
+            "eff_fx_flu_cash,n_incr_cash_cash_equ,"
+            "c_cash_equ_beg_period,c_cash_equ_end_period,"
+            "update_flag"
+        )
+
+        try:
+            await self._limiter.acquire()
+            loop = asyncio.get_running_loop()
+            kwargs: dict[str, str] = {}
+            if ts_code:
+                kwargs["ts_code"] = ts_code
+            if ann_date:
+                kwargs["ann_date"] = ann_date
+            if start_date:
+                kwargs["start_date"] = start_date
+            if end_date:
+                kwargs["end_date"] = end_date
+            if period:
+                kwargs["period"] = period
+            if report_type:
+                kwargs["report_type"] = report_type
+            kwargs["fields"] = _fields
+            func = partial(self._pro.cashflow, **kwargs)
+            result = await loop.run_in_executor(self._get_executor(), func)
+            df = pd.DataFrame() if result is None else pd.DataFrame(result)
+            if df.empty:
+                logger.debug(
+                    "cashflow 无数据: ts_code=%s ann_date=%s period=%s range=%s~%s",
+                    ts_code, ann_date, period, start_date, end_date,
+                )
+                return pd.DataFrame()
+
+            logger.debug(
+                "cashflow 获取完成: ts_code=%s rows=%d cols=%d",
+                ts_code, len(df), len(df.columns),
+            )
+            return df
+        except Exception as e:
+            raise DataCollectionError(
+                f"cashflow 采集失败 ts_code={ts_code} period={period}: {e}"
             ) from e
 
     async def fetch_stock_basic(

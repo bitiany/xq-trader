@@ -70,7 +70,7 @@ class WatermarkAspect(Aspect):
     async def after(self, item: Any, ctx: PipelineContext, result: StageResult) -> None:
         """后切：持久化成功后按数据实际最新日期更新水位。
 
-        优先使用 PersistStage 设置的 max_trade_date（数据实际最新日期），
+        优先使用 PersistStage 设置的 max_ann_date / max_trade_date（数据实际最新日期），
         若无则回退到参考日期（当前或前一交易日）。
         """
         if not result.success:
@@ -83,14 +83,15 @@ class WatermarkAspect(Aspect):
 
         try:
             # 仅在有数据实际最新日期时更新水位
-            max_trade_date = ctx.get("max_trade_date")
-            if max_trade_date is None:
+            # 季频财务插件使用 max_ann_date（公告日期），日频插件使用 max_trade_date（交易日）
+            watermark_date = ctx.get("max_ann_date") or ctx.get("max_trade_date")
+            if watermark_date is None:
                 return
 
             instance = CollectWatermark(
                 data_type=self._data_type,
                 watermark_code=stock_code,
-                watermark_date=max_trade_date,
+                watermark_date=watermark_date,
                 record_count=0,
                 status="active",
             )
@@ -99,7 +100,7 @@ class WatermarkAspect(Aspect):
                 on_conflict=["data_type", "watermark_code"],
                 update_fields=["watermark_date", "status"],
             )
-            logger.debug("水位更新: %s → %s", stock_code, max_trade_date)
+            logger.debug("水位更新: %s → %s", stock_code, watermark_date)
         except Exception as e:
             raise PipelineError(f"水位更新失败 {stock_code}: {e}") from e
 

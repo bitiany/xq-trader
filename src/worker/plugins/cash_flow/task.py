@@ -1,10 +1,10 @@
-"""A股资产负债表采集任务（Tushare balancesheet 数据源）。
+"""A股现金流量表采集任务（Tushare cashflow 数据源）。
 
-数据源：Tushare balancesheet 接口（doc_id=36），采集上市公司资产负债表数据写入 BalanceSheet 表。
+数据源：Tushare cashflow 接口（doc_id=34），采集上市公司现金流量表数据写入 CashFlowStatement 表。
 管线流程（每个标的串行执行）：
   WatermarkAspect(前切) → DownloadStage → CleanStage → PersistStage → WatermarkAspect(后切)
 
-字段映射（balancesheet → BalanceSheet）：
+字段映射（cashflow → CashFlowStatement）：
   ts_code → symbol
   ann_date → ann_date
   f_ann_date → f_ann_date
@@ -16,9 +16,9 @@
   - 后切：持久化成功后更新水位日期为数据实际最新公告日期（ann_date）
 
 注意事项：
-  - balancesheet 接口需按标的逐个采集
+  - cashflow 接口需按标的逐个采集
   - 显式指定 fields 参数，确保全部字段（含默认不显示字段）均被采集
-  - 资产负债表为季度数据，水位基于 ann_date（公告日期），非交易日维度
+  - 现金流量表为季度数据，水位基于 ann_date（公告日期），非交易日维度
 """
 
 from __future__ import annotations
@@ -41,23 +41,22 @@ from framework.pipeline import (
 from framework.scheduler.base_task import BaseTask
 from worker.plugins.aspects import WatermarkAspect
 from xqtrader.broker.services.tushare_data_collector import TushareDataCollector
-from xqtrader.domain.market.models.balance_sheet import BalanceSheet
+from xqtrader.domain.market.models.cash_flow import CashFlowStatement
 from xqtrader.domain.security.models import Security
 
 logger = get_logger(__name__)
 
 _collector: TushareDataCollector | None = None
 
-_DATA_TYPE = "balance_sheet"
+_DATA_TYPE = "cash_flow"
 
-# balancesheet → BalanceSheet 列映射
+# cashflow → CashFlowStatement 列映射
 _COLUMN_MAPPING: dict[str, str] = {
     "ts_code": "symbol",
 }
 
 # ORM 模型中存在的全部列名（用于过滤 Tushare 返回的额外字段）
-# 从 BalanceSheet ORM 模型自动推导，无需手动维护
-_ORM_COLUMNS: set[str] = {c.name for c in BalanceSheet.__table__.columns}
+_ORM_COLUMNS: set[str] = {c.name for c in CashFlowStatement.__table__.columns}
 
 # 数值列（需要强制转 numeric + 精度处理）— 仅 ORM 中存在的列
 _NUMERIC_COLS = [
@@ -84,10 +83,10 @@ def _get_collector() -> TushareDataCollector:
     return _collector
 
 
-def clean_balance_sheet_data(df: pd.DataFrame) -> pd.DataFrame:
-    """资产负债表数据清洗 — 列映射 + 格式统一 + 数值处理。
+def clean_cash_flow_data(df: pd.DataFrame) -> pd.DataFrame:
+    """现金流量表数据清洗 — 列映射 + 格式统一 + 数值处理。
 
-    1. 列名映射（balancesheet → BalanceSheet）
+    1. 列名映射（cashflow → CashFlowStatement）
     2. 过滤掉 ORM 模型中不存在的列（Tushare 返回的额外字段）
     3. ann_date/f_ann_date/end_date 格式统一 YYYY-MM-DD
     4. 删除 symbol/end_date 为空的行
@@ -101,7 +100,7 @@ def clean_balance_sheet_data(df: pd.DataFrame) -> pd.DataFrame:
     # 2. 过滤掉 ORM 中不存在的列，避免持久化时属性错误
     extra_cols = [c for c in df.columns if c not in _ORM_COLUMNS]
     if extra_cols:
-        logger.debug("[balance_sheet.clean] 过滤 ORM 外字段: %s", extra_cols)
+        logger.debug("[cash_flow.clean] 过滤 ORM 外字段: %s", extra_cols)
         df = df[[c for c in df.columns if c in _ORM_COLUMNS]]
 
     # 3. 日期格式统一
@@ -133,16 +132,16 @@ def clean_balance_sheet_data(df: pd.DataFrame) -> pd.DataFrame:
     return df.reset_index(drop=True)
 
 
-async def persist_balance_sheet_data(df: pd.DataFrame) -> int:
-    """将资产负债表数据 upsert 到 BalanceSheet 表。"""
+async def persist_cash_flow_data(df: pd.DataFrame) -> int:
+    """将现金流量表数据 upsert 到 CashFlowStatement 表。"""
     instances = DataFrameToModelConverter.convert(
         df=df,
-        model_class=BalanceSheet,
+        model_class=CashFlowStatement,
         custom_transforms=_PERSIST_CUSTOM_TRANSFORMS,
     )
     if not instances:
         return 0
-    return await BalanceSheet.bulk_create_or_update(
+    return await CashFlowStatement.bulk_create_or_update(
         instances,  # type: ignore[arg-type]
         on_conflict=["symbol", "end_date", "update_flag"],
         update_fields=_PERSIST_UPDATE_FIELDS,
@@ -150,20 +149,20 @@ async def persist_balance_sheet_data(df: pd.DataFrame) -> int:
     )
 
 
-class BalanceSheetError(PipelineError):
-    """资产负债表采集异常基类。"""
+class CashFlowError(PipelineError):
+    """现金流量表采集异常基类。"""
 
 
-class DownloadError(BalanceSheetError):
+class DownloadError(CashFlowError):
     """下载阶段异常。"""
 
 
-class PersistError(BalanceSheetError):
+class PersistError(CashFlowError):
     """持久化阶段异常。"""
 
 
 class DownloadStage(Stage):
-    """下载阶段 — 调用 TushareDataCollector 获取资产负债表数据。"""
+    """下载阶段 — 调用 TushareDataCollector 获取现金流量表数据。"""
 
     @property
     def name(self) -> str:
@@ -184,7 +183,7 @@ class DownloadStage(Stage):
             ts_start = start_date.replace("-", "")
             ts_end = end_date.replace("-", "") if end_date else ""
 
-            df = await _get_collector().fetch_balancesheet(
+            df = await _get_collector().fetch_cashflow(
                 ts_code=stock_code,
                 start_date=ts_start,
                 end_date=ts_end,
@@ -192,7 +191,7 @@ class DownloadStage(Stage):
 
             if df is None or df.empty:
                 logger.debug(
-                    "[balance_sheet.collect] 无数据: %s range=%s~%s",
+                    "[cash_flow.collect] 无数据: %s range=%s~%s",
                     stock_code, start_date, end_date,
                 )
                 ctx.set("download_data", None)
@@ -209,7 +208,7 @@ class DownloadStage(Stage):
 
 
 class CleanStage(Stage):
-    """清洗阶段 — 对资产负债表数据进行列映射和数值处理。"""
+    """清洗阶段 — 对现金流量表数据进行列映射和数值处理。"""
 
     @property
     def name(self) -> str:
@@ -226,7 +225,7 @@ class CleanStage(Stage):
             return StageResult.ok(data={"stock_code": stock_code, "cleaned": 0})
 
         initial_len = len(df)
-        df = clean_balance_sheet_data(df)
+        df = clean_cash_flow_data(df)
 
         ctx.set("download_data", df)
         ctx.set("row_count", len(df))
@@ -234,7 +233,7 @@ class CleanStage(Stage):
         cleaned = initial_len - len(df)
         if cleaned > 0:
             logger.debug(
-                "[balance_sheet.collect] 清洗: %s removed %d invalid rows",
+                "[cash_flow.collect] 清洗: %s removed %d invalid rows",
                 stock_code, cleaned,
             )
 
@@ -242,7 +241,7 @@ class CleanStage(Stage):
 
 
 class PersistStage(Stage):
-    """持久化阶段 — 将资产负债表数据写入 BalanceSheet 表。"""
+    """持久化阶段 — 将现金流量表数据写入 CashFlowStatement 表。"""
 
     @property
     def name(self) -> str:
@@ -259,7 +258,7 @@ class PersistStage(Stage):
             return StageResult.ok(data={"stock_code": stock_code, "persisted": 0})
 
         try:
-            count = await persist_balance_sheet_data(df)
+            count = await persist_cash_flow_data(df)
 
             ctx.set("persisted_count", count)
             # 水位基于 ann_date（公告日期），非报告期 end_date
@@ -271,25 +270,25 @@ class PersistStage(Stage):
                     ).max()
                     ctx.set("max_ann_date", max_td)
 
-            logger.debug("[balance_sheet.collect] 持久化完成: %s rows=%d", stock_code, count)
+            logger.debug("[cash_flow.collect] 持久化完成: %s rows=%d", stock_code, count)
             return StageResult.ok(data={"stock_code": stock_code, "persisted": count})
         except Exception as e:
             raise PersistError(f"持久化失败 {stock_code}: {e}") from e
 
 
-class BalanceSheetCollectTask(BaseTask):
-    """A股资产负债表采集任务（Tushare balancesheet 数据源）。
+class CashFlowCollectTask(BaseTask):
+    """A股现金流量表采集任务（Tushare cashflow 数据源）。
 
     入参：
-      - data_type: 数据类型（默认 balance_sheet）
-      - concurrency: 并发数（默认 3，balancesheet 接口限流较严）
+      - data_type: 数据类型（默认 cash_flow）
+      - concurrency: 并发数（默认 3，cashflow 接口限流较严）
       - stock_codes: 股票代码列表（为空时采集全市场）
       - max_count: 最大标的数量（用于测试，0 表示不限）
       - collect_date: 采集起始日期（格式 YYYY-MM-DD，为空时按水位日期增量采集）
     """
 
-    task_name = "market.balance_sheet_collect"
-    description = "A股资产负债表采集-Tushare balancesheet数据源（管道引擎并发）"
+    task_name = "market.cash_flow_collect"
+    description = "A股现金流量表采集-Tushare cashflow数据源（管道引擎并发）"
 
     async def _run_impl(self, **kwargs: Any) -> dict[str, Any]:
         data_type = kwargs.get("data_type", _DATA_TYPE)
@@ -302,13 +301,13 @@ class BalanceSheetCollectTask(BaseTask):
         if not stock_codes:
             stock_codes = await self._get_all_stock_codes()
             if not stock_codes:
-                logger.warning("[balance_sheet.collect] 未找到任何标的代码")
+                logger.warning("[cash_flow.collect] 未找到任何标的代码")
                 return {"total": 0, "succeeded": 0, "failed": 0}
 
         # 限制标的数量（用于测试）
         if max_count > 0 and len(stock_codes) > max_count:
             stock_codes = stock_codes[:max_count]
-            logger.debug("[balance_sheet.collect] 限制标的数量: max_count=%d", max_count)
+            logger.debug("[cash_flow.collect] 限制标的数量: max_count=%d", max_count)
 
         # 构建全局上下文
         global_ctx: dict[str, Any] = {}
@@ -316,7 +315,7 @@ class BalanceSheetCollectTask(BaseTask):
             global_ctx["collect_date"] = collect_date
 
         logger.info(
-            "[balance_sheet.collect] 开始采集: pipeline=%s concurrency=%d stocks=%d collect_date=%s",
+            "[cash_flow.collect] 开始采集: pipeline=%s concurrency=%d stocks=%d collect_date=%s",
             data_type, concurrency, len(stock_codes), collect_date or "按水位",
         )
 
@@ -345,5 +344,5 @@ class BalanceSheetCollectTask(BaseTask):
             order_by=Security.symbol.asc(),
         )
         codes = [row.symbol for row in rows]
-        logger.debug("[balance_sheet.collect] 全市场标的数: %d", len(codes))
+        logger.debug("[cash_flow.collect] 全市场标的数: %d", len(codes))
         return codes
