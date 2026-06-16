@@ -6,6 +6,9 @@ from fastapi import FastAPI
 from framework.commons.logger import get_logger
 from xqtrader.ws.scheduler import WsTopicScheduler
 
+# 导入因子领域模型，确保 ORM 子类注册到 Base.metadata，create_tables 时可发现
+import xqtrader.domain.factor.models  # noqa: F401
+
 logger = get_logger("LIFESPAN")
 
 

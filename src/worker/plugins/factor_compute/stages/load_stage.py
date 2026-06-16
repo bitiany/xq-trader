@@ -152,11 +152,11 @@ class FactorLoadStage(Stage):
         return df_merged
 
     async def _load_daily_indicator(self, symbol: str) -> pd.DataFrame:
-        """加载风险因子和基本面因子所需的每日指标数据。
+        """加载风险因子所需的每日指标数据。
 
-        注意：ev/ebitda/ev_ebitda/peg/pcf 列虽然在 DailyIndicator 模型中定义，
-        但 Tushare daily_basic 接口不返回这些字段，值全为 NULL。
-        这些字段由 _load_financial_indicator 单独加载，此处排除避免占位。
+        仅加载风险因子计算依赖的 total_mv/turnover_rate/turnover_rate_f。
+        B1 估值指标（pe_ttm/pb/dv_ttm/ps_ttm）由 CrossSectionReader 从
+        sdc_daily_indicator 直接加载，不在 Task 1 逐标的计算。
         """
         rows = await DailyIndicator.filter(
             symbol=symbol,
@@ -168,7 +168,6 @@ class FactorLoadStage(Stage):
         df = pd.DataFrame([r.to_dict() for r in rows])
         indicator_cols = [
             "total_mv", "turnover_rate", "turnover_rate_f",
-            "pe_ttm", "pb", "dv_ttm", "ps_ttm",
         ]
         for col in indicator_cols:
             if col in df.columns:

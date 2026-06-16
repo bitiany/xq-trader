@@ -20,7 +20,7 @@ class ICCalculator:
         factor_panel: pd.DataFrame,
         returns_panel: pd.DataFrame,
         window: int = 252,
-        min_periods: int = 60,
+        min_periods: int = 20,
     ) -> pd.Series:
         """计算滚动 Spearman 秩 IC 序列。
 
@@ -28,7 +28,7 @@ class ICCalculator:
             factor_panel: MultiIndex (trade_date, symbol), columns = factor_ids
             returns_panel: MultiIndex (trade_date, symbol), column = 'fwd_ret_1d'
             window: 滚动窗口（未使用，保留接口兼容）
-            min_periods: 最小有效截面数
+            min_periods: 最小有效截面数（默认20，需小于样本池标的数）
 
         Returns:
             Series indexed by trade_date, values = IC (float)
@@ -101,16 +101,18 @@ class ICCalculator:
         factor_panel: pd.DataFrame,
         returns_panel: pd.DataFrame,
         max_horizon: int = 20,
+        min_periods: int = 20,
     ) -> float | None:
         """计算 IC 衰减半衰期。
 
         对 h = 1..max_horizon，将收益率前移 h 天后计算截面 IC，
-        拟合指数衰减 IC(h) = IC(0) * exp(-h * lambda)，半衰期 = ln(2) / lambda。
+        拟合指数衰减 IC(h) = IC(0) * exp(-lambda * h)，半衰期 = ln(2) / lambda。
 
         Args:
             factor_panel: MultiIndex (trade_date, symbol), columns = factor_ids
             returns_panel: MultiIndex (trade_date, symbol), column = 'fwd_ret_1d'
             max_horizon: 最大前移天数
+            min_periods: 最小有效截面数
 
         Returns:
             半衰期（天），拟合失败返回 None
@@ -137,13 +139,13 @@ class ICCalculator:
                     continue
 
                 common = fv.index.intersection(rv.index)
-                if len(common) < 30:
+                if len(common) < min_periods:
                     continue
 
                 fv_aligned = fv.reindex(common).values
                 rv_aligned = rv.reindex(common).values
                 valid = np.isfinite(fv_aligned) & np.isfinite(rv_aligned)
-                if valid.sum() < 30:
+                if valid.sum() < min_periods:
                     continue
 
                 corr, _ = spearmanr(fv_aligned[valid], rv_aligned[valid])

@@ -42,6 +42,10 @@ class FacFactorRegistry(AuditedBase):
         String(256), nullable=True, default="", comment="组合因子子ID，逗号分隔",
     )
     skip_preprocess: Mapped[int] = mapped_column(Integer, nullable=True, default=0, comment="是否跳过预处理 0/1")
+    composite_method: Mapped[str] = mapped_column(
+        String(32), nullable=True, default="",
+        comment="合成方法: equal_weight/icir_weight/ml/interaction",
+    )
     description: Mapped[str] = mapped_column(String(256), nullable=True, default="", comment="因子描述")
 
     __table_args__ = (

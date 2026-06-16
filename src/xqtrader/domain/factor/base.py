@@ -33,12 +33,14 @@ class FactorDefinition:
     data_origin: str = ""
     update_freq: str = "daily"
     compute_engine: str = "plugin"
+    report_lag_days: int = 0
     tags: str = ""
     status: str = "draft"
     description: str = ""
     is_composite: bool = False
     composite_factor_ids: list[str] = field(default_factory=list)
     skip_preprocess: bool = False
+    composite_method: str = ""
 
 
 class FactorPlugin(ABC):
@@ -69,9 +71,11 @@ class FactorPlugin(ABC):
     is_composite: bool = False
     composite_factor_ids: list[str] = []
     skip_preprocess: bool = False
+    composite_method: str = ""
     data_origin: str = "computed"
     update_freq: str = "daily"
     compute_engine: str = "plugin"
+    report_lag_days: int = 0
     tags: str = ""
 
     @abstractmethod
@@ -104,8 +108,10 @@ class FactorPlugin(ABC):
             data_origin=self.data_origin,
             update_freq=self.update_freq,
             compute_engine=self.compute_engine,
+            report_lag_days=self.report_lag_days,
             tags=self.tags,
             is_composite=self.is_composite,
             composite_factor_ids=list(self.composite_factor_ids),
             skip_preprocess=self.skip_preprocess,
+            composite_method=self.composite_method,
         )

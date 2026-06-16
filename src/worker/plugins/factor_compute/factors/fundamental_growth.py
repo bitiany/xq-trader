@@ -2,9 +2,9 @@
 
 数据来源：
   - q_or_yoy/q_netprofit_yoy/q_dtprofit_yoy/q_op_yoy/q_ocf_yoy/q_roe_yoy:
-    sdc_financial_indicator（前向填充），同比增长率
+    sdc_financial_indicator（季频原始值，前向填充由 CrossSectionReader 完成），同比增长率
   - q_netprofitgrow_qoq/q_orgrow_qoq/q_opgrow_qoq/q_roegrow_qoq:
-    sdc_financial_indicator（前向填充），环比增长率
+    sdc_financial_indicator（季频原始值，前向填充由 CrossSectionReader 完成），环比增长率
 
 参照 Barra 风格因子体系与业界成熟框架：
   - 同比增长因子：衡量长期成长趋势
@@ -31,7 +31,9 @@ class QOrYoyFactor(FactorPlugin):
     dependencies: list[str] = ["q_or_yoy"]
     min_periods: int = 1
     requires_full_history: bool = False
-    data_origin: str = "market"
+    data_origin: str = "fina_indicator"
+    update_freq: str = "quarterly"
+    report_lag_days: int = 120
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame({self.factor_id: df[self.dependencies[0]].astype(float)}, index=df.index)
@@ -50,7 +52,9 @@ class QNetprofitYoyFactor(FactorPlugin):
     dependencies: list[str] = ["q_netprofit_yoy"]
     min_periods: int = 1
     requires_full_history: bool = False
-    data_origin: str = "market"
+    data_origin: str = "fina_indicator"
+    update_freq: str = "quarterly"
+    report_lag_days: int = 120
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame({self.factor_id: df[self.dependencies[0]].astype(float)}, index=df.index)
@@ -69,7 +73,9 @@ class QDtprofitYoyFactor(FactorPlugin):
     dependencies: list[str] = ["q_dtprofit_yoy"]
     min_periods: int = 1
     requires_full_history: bool = False
-    data_origin: str = "market"
+    data_origin: str = "fina_indicator"
+    update_freq: str = "quarterly"
+    report_lag_days: int = 120
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame({self.factor_id: df[self.dependencies[0]].astype(float)}, index=df.index)
@@ -88,7 +94,9 @@ class QOpYoyFactor(FactorPlugin):
     dependencies: list[str] = ["q_op_yoy"]
     min_periods: int = 1
     requires_full_history: bool = False
-    data_origin: str = "market"
+    data_origin: str = "fina_indicator"
+    update_freq: str = "quarterly"
+    report_lag_days: int = 120
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame({self.factor_id: df[self.dependencies[0]].astype(float)}, index=df.index)
@@ -107,7 +115,9 @@ class QOcfYoyFactor(FactorPlugin):
     dependencies: list[str] = ["q_ocf_yoy"]
     min_periods: int = 1
     requires_full_history: bool = False
-    data_origin: str = "market"
+    data_origin: str = "fina_indicator"
+    update_freq: str = "quarterly"
+    report_lag_days: int = 120
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame({self.factor_id: df[self.dependencies[0]].astype(float)}, index=df.index)
@@ -126,7 +136,9 @@ class QRoeYoyFactor(FactorPlugin):
     dependencies: list[str] = ["q_roe_yoy"]
     min_periods: int = 1
     requires_full_history: bool = False
-    data_origin: str = "market"
+    data_origin: str = "fina_indicator"
+    update_freq: str = "quarterly"
+    report_lag_days: int = 120
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame({self.factor_id: df[self.dependencies[0]].astype(float)}, index=df.index)
@@ -145,7 +157,9 @@ class QNetprofitgrowQoqFactor(FactorPlugin):
     dependencies: list[str] = ["q_netprofitgrow_qoq"]
     min_periods: int = 1
     requires_full_history: bool = False
-    data_origin: str = "market"
+    data_origin: str = "fina_indicator"
+    update_freq: str = "quarterly"
+    report_lag_days: int = 120
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame({self.factor_id: df[self.dependencies[0]].astype(float)}, index=df.index)
@@ -164,7 +178,9 @@ class QOrgrowQoqFactor(FactorPlugin):
     dependencies: list[str] = ["q_orgrow_qoq"]
     min_periods: int = 1
     requires_full_history: bool = False
-    data_origin: str = "market"
+    data_origin: str = "fina_indicator"
+    update_freq: str = "quarterly"
+    report_lag_days: int = 120
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame({self.factor_id: df[self.dependencies[0]].astype(float)}, index=df.index)
@@ -183,7 +199,9 @@ class QOpgrowQoqFactor(FactorPlugin):
     dependencies: list[str] = ["q_opgrow_qoq"]
     min_periods: int = 1
     requires_full_history: bool = False
-    data_origin: str = "market"
+    data_origin: str = "fina_indicator"
+    update_freq: str = "quarterly"
+    report_lag_days: int = 120
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame({self.factor_id: df[self.dependencies[0]].astype(float)}, index=df.index)
@@ -202,7 +220,9 @@ class QRoegrowQoqFactor(FactorPlugin):
     dependencies: list[str] = ["q_roegrow_qoq"]
     min_periods: int = 1
     requires_full_history: bool = False
-    data_origin: str = "market"
+    data_origin: str = "fina_indicator"
+    update_freq: str = "quarterly"
+    report_lag_days: int = 120
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame({self.factor_id: df[self.dependencies[0]].astype(float)}, index=df.index)

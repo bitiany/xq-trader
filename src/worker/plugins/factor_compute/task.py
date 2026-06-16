@@ -30,6 +30,7 @@ from worker.plugins.factor_compute.stages import (
     FactorPreprocessStage,
 )
 from worker.plugins.utils import parse_list_param
+from xqtrader.domain.factor.base import FactorPlugin
 from xqtrader.domain.factor.services.registry import (
     auto_discover_factors,
     register_factor_variants,
@@ -44,6 +45,21 @@ _COMPUTE_MODE_INCREMENTAL = "incremental"
 _COMPUTE_MODE_FULL = "full"
 _DEFAULT_WARMUP_BARS = 300
 _WATERMARK_DATA_TYPE = "factor_compute"
+
+# B 类基本面因子所在的模块路径前缀 — 由 FactorQuarterlyTask / CrossSectionReader 负责
+_FUNDAMENTAL_MODULE_PREFIXES = frozenset({
+    "worker.plugins.factor_compute.factors.fundamental",
+    "worker.plugins.factor_compute.factors.fundamental_profitability",
+    "worker.plugins.factor_compute.factors.fundamental_growth",
+    "worker.plugins.factor_compute.factors.fundamental_quality",
+    "worker.plugins.factor_compute.factors.fundamental_leverage",
+})
+
+
+def _is_fundamental_factor(plugin: FactorPlugin) -> bool:
+    """判断因子插件是否为 B 类基本面因子。"""
+    module = plugin.__class__.__module__
+    return any(module.startswith(prefix) for prefix in _FUNDAMENTAL_MODULE_PREFIXES)
 
 
 class FactorComputeTask(BaseTask):
@@ -84,8 +100,9 @@ class FactorComputeTask(BaseTask):
         # 同步因子元数据到 DB
         await sync_to_registry()
 
-        # 解析因子列表
+        # 解析因子列表，过滤掉 B 类基本面因子（由 FactorQuarterlyTask / CrossSectionReader 负责）
         factors = await resolve_factor_list(factor_ids)
+        factors = [f for f in factors if not _is_fundamental_factor(f)]
         if not factors:
             return {"status": "FAILED", "message": "No factors resolved"}
 

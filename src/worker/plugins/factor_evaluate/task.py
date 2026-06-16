@@ -159,9 +159,10 @@ class FactorEvaluateTask(BaseTask):
         total_factors = len(factor_ids)
         logger.info("[factor.evaluate] 评估样本池: %s (%s), factors=%d", pool_id, pool.pool_name, total_factors)
 
-        # 预加载样本池标的列表和行业映射（所有因子共用）
+        # 预加载样本池标的列表、行业映射和市值映射（所有因子共用）
         symbols = await reader.load_pool_symbols(pool_id)
         industry_map = await reader.load_industry_map(symbols)
+        market_cap_map = await reader.load_market_cap_map(symbols)
 
         if not symbols:
             logger.warning("[factor.evaluate] 样本池 %s 无标的，跳过", pool_id)
@@ -183,7 +184,7 @@ class FactorEvaluateTask(BaseTask):
 
         for idx, factor_id in enumerate(factor_ids, 1):
             try:
-                # 加载单因子截面面板（含估值/财务指标 + Z-score + 行业中性化）
+                # 加载单因子截面面板（含截面预处理：缺失值填充→MAD→Z-score→行业+市值中性化→再Z-score）
                 factor_panel = await reader.load_single_factor_panel(
                     start_date=start_date,
                     end_date=end_date,
@@ -191,6 +192,7 @@ class FactorEvaluateTask(BaseTask):
                     symbols=symbols,
                     factor_id=factor_id,
                     industry_map=industry_map,
+                    market_cap_map=market_cap_map,
                 )
 
                 if factor_panel.empty or factor_id not in factor_panel.columns:

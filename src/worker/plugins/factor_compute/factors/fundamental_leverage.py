@@ -2,8 +2,8 @@
 
 数据来源：
   - debt_to_assets/current_ratio/eqt_to_talcapital/ebit_to_interest/ocf_to_debt:
-    sdc_financial_indicator（前向填充），杠杆与偿债指标
-  - mlev: 由 debt_to_assets × assets_to_eqt 计算得出
+    sdc_financial_indicator（季频原始值，前向填充由 CrossSectionReader 完成），杠杆与偿债指标
+  - mlev: 由 debt_to_assets × assets_to_eqt 计算得出（D/E 比率近似，非市场杠杆）
 
 参照 Barra 风格因子体系与业界成熟框架：
   - 资产负债率：方向 ASC（负债率越低风险越小）
@@ -32,7 +32,9 @@ class DebtToAssetsFactor(FactorPlugin):
     dependencies: list[str] = ["debt_to_assets"]
     min_periods: int = 1
     requires_full_history: bool = False
-    data_origin: str = "market"
+    data_origin: str = "fina_indicator"
+    update_freq: str = "quarterly"
+    report_lag_days: int = 120
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame({self.factor_id: df[self.dependencies[0]].astype(float)}, index=df.index)
@@ -51,7 +53,9 @@ class CurrentRatioFactor(FactorPlugin):
     dependencies: list[str] = ["current_ratio"]
     min_periods: int = 1
     requires_full_history: bool = False
-    data_origin: str = "market"
+    data_origin: str = "fina_indicator"
+    update_freq: str = "quarterly"
+    report_lag_days: int = 120
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame({self.factor_id: df[self.dependencies[0]].astype(float)}, index=df.index)
@@ -70,7 +74,9 @@ class EqtToTalcapitalFactor(FactorPlugin):
     dependencies: list[str] = ["eqt_to_talcapital"]
     min_periods: int = 1
     requires_full_history: bool = False
-    data_origin: str = "market"
+    data_origin: str = "fina_indicator"
+    update_freq: str = "quarterly"
+    report_lag_days: int = 120
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame({self.factor_id: df[self.dependencies[0]].astype(float)}, index=df.index)
@@ -89,7 +95,9 @@ class EbitToInterestFactor(FactorPlugin):
     dependencies: list[str] = ["ebit_to_interest"]
     min_periods: int = 1
     requires_full_history: bool = False
-    data_origin: str = "market"
+    data_origin: str = "fina_indicator"
+    update_freq: str = "quarterly"
+    report_lag_days: int = 120
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame({self.factor_id: df[self.dependencies[0]].astype(float)}, index=df.index)
@@ -108,21 +116,25 @@ class OcfToDebtFactor(FactorPlugin):
     dependencies: list[str] = ["ocf_to_debt"]
     min_periods: int = 1
     requires_full_history: bool = False
-    data_origin: str = "market"
+    data_origin: str = "fina_indicator"
+    update_freq: str = "quarterly"
+    report_lag_days: int = 120
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame({self.factor_id: df[self.dependencies[0]].astype(float)}, index=df.index)
 
 
 class MlevFactor(FactorPlugin):
-    """市场杠杆因子 — 资产负债率 × 权益乘数。
+    """杠杆因子(D/E) — 资产负债率 × 权益乘数。
 
-    近似计算：市场杠杆 = debt_to_assets × assets_to_eqt（资产负债率 × 权益乘数 = 债务/权益）。
-    方向 ASC：市场杠杆越低风险越小。
+    近似计算：D/E = debt_to_assets × assets_to_eqt（资产负债率 × 权益乘数 = 债务/权益）。
+    注：因子目录定义 mlev 为"市场杠杆 = (总市值+优先股+长债)/总市值"，
+    当前使用 D/E 比率近似，需在因子目录中同步标注。
+    方向 ASC：杠杆越低风险越小。
     """
 
     factor_id: str = "mlev"
-    display_name: str = "市场杠杆"
+    display_name: str = "杠杆因子(D/E)"
     category: str = "fundamental"
     group_id: str = "mlev"
     direction: str = "ASC"
@@ -131,7 +143,9 @@ class MlevFactor(FactorPlugin):
     dependencies: list[str] = ["debt_to_assets", "assets_to_eqt"]
     min_periods: int = 1
     requires_full_history: bool = False
-    data_origin: str = "market"
+    data_origin: str = "fina_indicator"
+    update_freq: str = "quarterly"
+    report_lag_days: int = 120
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         debt_to_assets = df["debt_to_assets"].astype(float)

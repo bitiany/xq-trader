@@ -1,10 +1,10 @@
-"""日行情、资金流向、每日指标、指数行情、申万行业行情与季度财务数据增量采集任务。
+"""日行情、资金流向、每日指标、指数行情与申万行业行情增量采集任务。
 
 按日期增量采集全市场日行情K线、资金流向、每日指标、指数行情和申万行业行情数据，
 每个数据类型独立完成采集→清洗→持久化→更新水位闭环。
 
-季度财务数据（fina_indicator / income_statement / balance_sheet）在日频增量任务末尾
-判断是否有水位更新，若有则触发增量采集。三个季度数据源共享水位策略（基于 ann_date）。
+季度财务数据（fina_indicator / income_statement / balance_sheet）由独立的季频管线
+（market.financial_indicator_collect 等）按财报季调度采集，不在此日频任务中处理。
 
 水位策略：
   - 每个数据类型独立检查水位，缺失水位的 Stage 跳过执行
@@ -33,9 +33,6 @@ from worker.plugins.daily_incremental.stages.fund_flow_stage import (
 from worker.plugins.daily_incremental.stages.index_daily_stage import (
     IndexDailyIncrementalStage,
 )
-from worker.plugins.daily_incremental.stages.quarterly_financial_stage import (
-    QuarterlyFinancialIncrementalStage,
-)
 from worker.plugins.daily_incremental.stages.sw_daily_stage import (
     SwDailyIncrementalStage,
 )
@@ -53,9 +50,6 @@ class DailyIncrementalTask(BaseTask):
       - end_date: 采集结束日期（格式 YYYY-MM-DD，为空时取最新交易日）
       - kline_batch_size: QMT 标的分片大小（默认 50）
     """
-
-    task_name = "market.daily_incremental_collect"
-    description = "按日期增量采集全市场日行情K线、资金流向、每日指标、指数行情和申万行业行情数据"
     async def _run_impl(self, **kwargs: Any) -> dict[str, Any]:
         start_date_str: str | None = kwargs.get("start_date")
         end_date_str: str | None = kwargs.get("end_date")
@@ -160,19 +154,6 @@ class DailyIncrementalTask(BaseTask):
             logger.info("[daily.incremental] 申万行业行情: 无水位或已最新，跳过")
             results["sw_daily"] = {"status": "SKIPPED"}
 
-        # Stage 6: 季度财务数据增量（fina_indicator / income_statement / balance_sheet）
-        # 季度数据与日频数据不同，水位基于 ann_date，只在财报季有更新
-        quarterly_start = await self._resolve_quarterly_start(start_date_str)
-        if quarterly_start is not None and quarterly_start < end_date:
-            logger.info(
-                "[daily.incremental] 季度财务数据增量: %s~%s", quarterly_start, end_date,
-            )
-            quarterly_stage = QuarterlyFinancialIncrementalStage()
-            results["quarterly_financial"] = await quarterly_stage.execute(quarterly_start, end_date)
-        else:
-            logger.info("[daily.incremental] 季度财务数据: 无水位或已最新，跳过")
-            results["quarterly_financial"] = {"status": "SKIPPED"}
-
         logger.info("[daily.incremental] 全部完成: %s", results)
         return results
 
@@ -203,27 +184,6 @@ class DailyIncrementalTask(BaseTask):
 
         rows = await CollectWatermark.filter(data_type=data_type, status="active")
         dates = [row.watermark_date for row in rows if row.watermark_date is not None]
-        if dates:
-            return min(dates)
-        return None
-
-    @staticmethod
-    async def _resolve_quarterly_start(start_date_str: str | None) -> date | None:
-        """确定季度财务数据增量的起始日期。
-
-        优先使用指定的 start_date；否则取三个季度数据源中最早的水位日期。
-        任一数据源无水位则返回 None（需先全量采集）。
-        """
-        if start_date_str:
-            return date.fromisoformat(start_date_str)
-
-        dates: list[date] = []
-        for data_type in ("financial_indicator", "income_statement", "balance_sheet"):
-            rows = await CollectWatermark.filter(data_type=data_type, status="active")
-            for row in rows:
-                if row.watermark_date is not None:
-                    dates.append(row.watermark_date)
-
         if dates:
             return min(dates)
         return None

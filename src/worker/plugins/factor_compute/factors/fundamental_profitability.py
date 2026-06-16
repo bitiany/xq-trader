@@ -2,7 +2,7 @@
 
 数据来源：
   - roe/roe_waa/roe_dt/roa/roic/grossprofit_margin/netprofit_margin:
-    sdc_financial_indicator（前向填充）
+    sdc_financial_indicator（季频原始值，前向填充由 CrossSectionReader 完成）
   - gp_to_assets: 由 grossprofit_margin × assets_turn 计算得出
 
 参照 Barra 风格因子体系与业界成熟框架：
@@ -37,7 +37,9 @@ class RoeFactor(FactorPlugin):
     dependencies: list[str] = ["roe"]
     min_periods: int = 1
     requires_full_history: bool = False
-    data_origin: str = "market"
+    data_origin: str = "fina_indicator"
+    update_freq: str = "quarterly"
+    report_lag_days: int = 120
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame({self.factor_id: df[self.dependencies[0]].astype(float)}, index=df.index)
@@ -56,7 +58,9 @@ class RoeWaaFactor(FactorPlugin):
     dependencies: list[str] = ["roe_waa"]
     min_periods: int = 1
     requires_full_history: bool = False
-    data_origin: str = "market"
+    data_origin: str = "fina_indicator"
+    update_freq: str = "quarterly"
+    report_lag_days: int = 120
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame({self.factor_id: df[self.dependencies[0]].astype(float)}, index=df.index)
@@ -75,7 +79,9 @@ class RoeDtFactor(FactorPlugin):
     dependencies: list[str] = ["roe_dt"]
     min_periods: int = 1
     requires_full_history: bool = False
-    data_origin: str = "market"
+    data_origin: str = "fina_indicator"
+    update_freq: str = "quarterly"
+    report_lag_days: int = 120
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame({self.factor_id: df[self.dependencies[0]].astype(float)}, index=df.index)
@@ -94,7 +100,9 @@ class RoaFactor(FactorPlugin):
     dependencies: list[str] = ["roa"]
     min_periods: int = 1
     requires_full_history: bool = False
-    data_origin: str = "market"
+    data_origin: str = "fina_indicator"
+    update_freq: str = "quarterly"
+    report_lag_days: int = 120
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame({self.factor_id: df[self.dependencies[0]].astype(float)}, index=df.index)
@@ -113,7 +121,9 @@ class RoicFactor(FactorPlugin):
     dependencies: list[str] = ["roic"]
     min_periods: int = 1
     requires_full_history: bool = False
-    data_origin: str = "market"
+    data_origin: str = "fina_indicator"
+    update_freq: str = "quarterly"
+    report_lag_days: int = 120
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame({self.factor_id: df[self.dependencies[0]].astype(float)}, index=df.index)
@@ -132,7 +142,9 @@ class GrossprofitMarginFactor(FactorPlugin):
     dependencies: list[str] = ["grossprofit_margin"]
     min_periods: int = 1
     requires_full_history: bool = False
-    data_origin: str = "market"
+    data_origin: str = "fina_indicator"
+    update_freq: str = "quarterly"
+    report_lag_days: int = 120
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame({self.factor_id: df[self.dependencies[0]].astype(float)}, index=df.index)
@@ -151,7 +163,9 @@ class NetprofitMarginFactor(FactorPlugin):
     dependencies: list[str] = ["netprofit_margin"]
     min_periods: int = 1
     requires_full_history: bool = False
-    data_origin: str = "market"
+    data_origin: str = "fina_indicator"
+    update_freq: str = "quarterly"
+    report_lag_days: int = 120
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame({self.factor_id: df[self.dependencies[0]].astype(float)}, index=df.index)
@@ -174,7 +188,9 @@ class GpToAssetsFactor(FactorPlugin):
     dependencies: list[str] = ["grossprofit_margin", "assets_turn"]
     min_periods: int = 1
     requires_full_history: bool = False
-    data_origin: str = "market"
+    data_origin: str = "fina_indicator"
+    update_freq: str = "quarterly"
+    report_lag_days: int = 120
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         grossprofit_margin = df["grossprofit_margin"].astype(float)

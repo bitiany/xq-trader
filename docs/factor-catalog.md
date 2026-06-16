@@ -270,24 +270,27 @@ flowchart LR
 ## 三、Task 2: Alpha合成 — 截面多因子合成
 
 > **调度**: 周频 (周六 10:00, 依赖 Task 3 评估完成) | **计算模式**: 逐样本池(pool_id), 截面批量
-> **输入**: Task 1 逐标的因子 + CrossSectionReader 截面因子 → 截面标准化 → 融合计算
-> **设计原则**: Alpha合成负责权重计算和因子融合。合成结果写回 fac_factor_value (factor_id 以 alpha_ 前缀)。
-> **业界参考**: Barra 因子合成 (IC加权正交化), Qlib Model 层 (XGBoost/LightGBM预测), 华泰金工《多因子合成方法比较》
+> **输入**: Task 1 逐标的因子 + CrossSectionReader 截面因子 → 截面预处理 → 融合计算
+> **设计原则**: Alpha合成负责权重计算和因子融合。合成结果写回 fac_factor_value (factor_id 以 composite_ 前缀)。合成因子按Alpha维度命名，合成方法（等权/ICIR加权/ML）是配置项而非独立因子。
+> **业界参考**: Barra 按风格维度合成因子 (Value/Momentum/Volatility...), 华泰金工将等权/IC/ICIR视为方法对比而非独立因子
 
-### 3.1 F 类 — 复合Alpha因子 (6个)
+### 3.1 F 类 — 合成因子 (7个)
 
-> **血缘**: 全部 A级+B级 单因子 → 截面标准化 → 融合方法 → alpha_* 因子值
+> **血缘**: 全部 A级+B级 单因子 → 截面预处理 → 分层合成 → composite_* 因子值
+> **命名规范**: `composite_<维度>` — composite_ 前缀标识合成因子，后缀为Alpha维度名
 
-| factor_id | 展示名 | 融合方法 | 输入因子 | 说明 |
-|-----------|--------|---------|---------|------|
-| alpha_eq | 等权Alpha | 等权平均 | 全部A级因子 | 基线Alpha，Barra标准做法 |
-| alpha_ic | IC加权Alpha | IC加权 | 全部A级因子 | 预测力自适应，华泰推荐 |
-| alpha_icir | ICIR加权Alpha | ICIR加权 | 全部A级因子 | 稳健加权，兼顾预测力与稳定性 |
-| alpha_xgb | XGBoost Alpha | Walk-Forward ML | 全部A级+B级因子 | 非线性Alpha, 业界主流ML融合 |
-| alpha_lgb | LightGBM Alpha | Walk-Forward ML | 全部A级+B级因子 | 非线性Alpha, Qlib默认模型 |
-| alpha_ensemble | 集成Alpha | Stacking | alpha_ic + alpha_icir + alpha_xgb + alpha_lgb | 最终融合Alpha |
+| factor_id | 展示名 | 层级 | composite_method | 输入因子 | 说明 |
+|-----------|--------|------|-----------------|---------|------|
+| composite_value | 价值合成因子 | L1 | equal_weight | ep, bp, dp, ev_ebitda, sp | 价值维度Alpha |
+| composite_momentum | 动量合成因子 | L1 | equal_weight | mom_5d, mom_20d, mom_60d, barra_momentum, barra_strev, roc_10, cs_pct_chg | 动量维度Alpha |
+| composite_volatility | 波动率合成因子 | L1 | equal_weight | hist_vol_10/20/60, atr_ratio, natr_14, dastd, cmra, vol_osc, downside_vol, amihud, adv_20 | 波动率维度Alpha |
+| composite_liquidity | 流动性合成因子 | L1 | equal_weight | cs_turnover, turnover_f, cs_log_amount, cs_volume_ratio, cs_log_mv | 流动性维度Alpha |
+| composite_technical | 技术合成因子 | L1 | equal_weight | rsi_*, kdj_*, macd_*, adx_*, boll_*, ma_bias_*, alpha101/158, chan_*, cdl_* | 技术维度Alpha |
+| composite_fund_flow | 资金流合成因子 | L1 | equal_weight | cs_main_net_pct, cs_net_mf_pct, huge_net_pct, big_net_pct | 资金流维度Alpha |
+| composite_alpha | 综合合成因子 | L2 | icir_weight | composite_value, composite_momentum, composite_volatility, composite_liquidity, composite_technical, composite_fund_flow | 跨维度融合Alpha |
 
-> **ML Walk-Forward 规范** (参考 Qlib rolling training): 训练窗口120日, 重训间隔20日, Gap=5日防信息泄露, 标签=次日涨跌二分类。
+> **L1 组内等权**：同组因子高度共线（如 hist_vol_10 和 hist_vol_20 相关系数 >0.9），等权消除共线性同时保留组Alpha方向。
+> **L2 跨组ICIR加权**：不同组代表不同Alpha维度（价值 vs 动量 IC相关 < 0.3），ICIR加权兼顾预测力与稳定性，无足够IC历史时退化为等权。
 
 ### 3.2 D4 类 — 交互因子 (6个)
 
@@ -381,7 +384,7 @@ flowchart LR
 | eqt_to_talcapital | 权益/投入资本 | DESC | fina_indicator.eqt_to_talcapital |
 | ebit_to_interest | 利息保障倍数 | DESC | fina_indicator.ebit_to_interest |
 | ocf_to_debt | 经营现金流/负债 | DESC | fina_indicator.ocf_to_debt |
-| mlev | 市场杠杆 | ASC | (总市值+优先股+长债)/总市值 |
+| mlev | 杠杆因子(D/E) | ASC | debt_to_assets × assets_to_eqt（D/E近似） |
 
 ### 4.2 A 类 — 风险因子 截面部分 (5个)
 

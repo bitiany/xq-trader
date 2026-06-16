@@ -2,9 +2,9 @@
 
 数据来源：
   - ocf_to_profit/ocf_to_or/salescash_to_or/dtprofit_to_profit:
-    sdc_financial_indicator（前向填充），盈利质量指标
+    sdc_financial_indicator（季频原始值，前向填充由 CrossSectionReader 完成），盈利质量指标
   - assets_turn/inv_turn/ar_turn:
-    sdc_financial_indicator（前向填充），运营效率指标
+    sdc_financial_indicator（季频原始值，前向填充由 CrossSectionReader 完成），运营效率指标
   - accra: 由 (netprofit_margin - ocf_to_or) * assets_turn 计算得出
 
 参照 Barra 风格因子体系与业界成熟框架：
@@ -34,7 +34,9 @@ class OcfToProfitFactor(FactorPlugin):
     dependencies: list[str] = ["ocf_to_profit"]
     min_periods: int = 1
     requires_full_history: bool = False
-    data_origin: str = "market"
+    data_origin: str = "fina_indicator"
+    update_freq: str = "quarterly"
+    report_lag_days: int = 120
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame({self.factor_id: df[self.dependencies[0]].astype(float)}, index=df.index)
@@ -53,7 +55,9 @@ class OcfToOrFactor(FactorPlugin):
     dependencies: list[str] = ["ocf_to_or"]
     min_periods: int = 1
     requires_full_history: bool = False
-    data_origin: str = "market"
+    data_origin: str = "fina_indicator"
+    update_freq: str = "quarterly"
+    report_lag_days: int = 120
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame({self.factor_id: df[self.dependencies[0]].astype(float)}, index=df.index)
@@ -72,7 +76,9 @@ class SalescashToOrFactor(FactorPlugin):
     dependencies: list[str] = ["salescash_to_or"]
     min_periods: int = 1
     requires_full_history: bool = False
-    data_origin: str = "market"
+    data_origin: str = "fina_indicator"
+    update_freq: str = "quarterly"
+    report_lag_days: int = 120
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame({self.factor_id: df[self.dependencies[0]].astype(float)}, index=df.index)
@@ -91,7 +97,9 @@ class DtprofitToProfitFactor(FactorPlugin):
     dependencies: list[str] = ["dtprofit_to_profit"]
     min_periods: int = 1
     requires_full_history: bool = False
-    data_origin: str = "market"
+    data_origin: str = "fina_indicator"
+    update_freq: str = "quarterly"
+    report_lag_days: int = 120
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame({self.factor_id: df[self.dependencies[0]].astype(float)}, index=df.index)
@@ -110,7 +118,9 @@ class AssetsTurnFactor(FactorPlugin):
     dependencies: list[str] = ["assets_turn"]
     min_periods: int = 1
     requires_full_history: bool = False
-    data_origin: str = "market"
+    data_origin: str = "fina_indicator"
+    update_freq: str = "quarterly"
+    report_lag_days: int = 120
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame({self.factor_id: df[self.dependencies[0]].astype(float)}, index=df.index)
@@ -129,7 +139,9 @@ class InvTurnFactor(FactorPlugin):
     dependencies: list[str] = ["inv_turn"]
     min_periods: int = 1
     requires_full_history: bool = False
-    data_origin: str = "market"
+    data_origin: str = "fina_indicator"
+    update_freq: str = "quarterly"
+    report_lag_days: int = 120
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame({self.factor_id: df[self.dependencies[0]].astype(float)}, index=df.index)
@@ -148,7 +160,9 @@ class ArTurnFactor(FactorPlugin):
     dependencies: list[str] = ["ar_turn"]
     min_periods: int = 1
     requires_full_history: bool = False
-    data_origin: str = "market"
+    data_origin: str = "fina_indicator"
+    update_freq: str = "quarterly"
+    report_lag_days: int = 120
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame({self.factor_id: df[self.dependencies[0]].astype(float)}, index=df.index)
@@ -171,7 +185,9 @@ class AccraFactor(FactorPlugin):
     dependencies: list[str] = ["netprofit_margin", "ocf_to_or", "assets_turn"]
     min_periods: int = 1
     requires_full_history: bool = False
-    data_origin: str = "market"
+    data_origin: str = "fina_indicator"
+    update_freq: str = "quarterly"
+    report_lag_days: int = 120
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         netprofit_margin = df["netprofit_margin"].astype(float)

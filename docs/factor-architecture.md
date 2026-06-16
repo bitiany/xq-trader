@@ -113,14 +113,16 @@ sequenceDiagram
 
 > **调度**: 周频 (周六 10:00, 依赖 Task 3 评估完成) | **粒度**: 逐样本池(pool_id)
 > **输入**: fac_factor_value + CrossSectionReader 截面因子
-> **输出**: fac_factor_value (alpha_* 因子) + fac_factor_registry.params (Alpha权重)
-> **归属因子**: F类复合Alpha(6) + D4交互因子(6)
+> **输出**: fac_factor_value (composite_* 因子) + fac_factor_registry.params (合成权重)
+> **归属因子**: F类合成因子(7个) + D4交互因子(6个)
 
 ### 3.1 设计原则
 
-Alpha合成负责**权重优化**与**因子融合**。通过 CrossSectionReader 加载全市场同日因子值，截面标准化后按样本池批量计算。合成结果写回 fac_factor_value 且以 `alpha_` 前缀标识。
+Alpha合成负责**权重优化**与**因子融合**。通过 CrossSectionReader 加载全市场同日因子值，截面标准化后按样本池批量计算。合成结果写回 fac_factor_value 且以 `composite_` 前缀标识。
 
-> **业界参考**: Barra IC加权正交化合成; Qlib Model层 XGBoost/LightGBM 预测; 华泰金工《多因子合成方法比较》
+**合成因子 vs 合成方法**：合成因子按Alpha维度命名（composite_value/momentum/...），代表独立的Alpha来源；合成方法（等权/IC加权/ICIR加权/ML）是合成因子的配置项，不作为独立因子落库。同一组输入因子用不同权重方案产出的结果高度相关（>0.95），不具备独立评估价值。
+
+> **业界参考**: Barra按风格维度合成因子（Value/Momentum/Volatility...），合成方法内化为权重计算；华泰金工将等权/IC/ICIR视为方法对比而非独立因子
 
 ### 3.2 合成流程
 
@@ -128,20 +130,43 @@ Alpha合成负责**权重优化**与**因子融合**。通过 CrossSectionReader
 flowchart TD
     START[合成触发] --> SELECT[筛选因子: A级+B级]
     SELECT --> LOAD[CrossSectionReader 加载全因子截面值]
-    LOAD --> PREPROC[截面标准化 → 行业中性化]
-    PREPROC --> EQ[等权合成 → alpha_eq]
-    PREPROC --> IC[IC加权 → alpha_ic]
-    PREPROC --> ICIR[ICIR加权 → alpha_icir]
-    PREPROC --> ML[ML融合 → alpha_xgb / alpha_lgb]
-    EQ --> ENS[Stacking集成 → alpha_ensemble]
-    IC --> ENS
-    ICIR --> ENS
-    ML --> ENS
-    ENS --> EVAL[复合Alpha评估: ICIR>1.5 / 多空年化>15%]
-    EVAL --> PERSIST[持久化权重 + Alpha因子值]
+    LOAD --> PREPROC[截面预处理: 缺失值填充→MAD去极值→Z-score→行业+市值中性化→再Z-score]
+    PREPROC --> L1[第一层: 组内等权合成]
+    L1 --> CV[composite_value<br/>价值合成因子]
+    L1 --> CM[composite_momentum<br/>动量合成因子]
+    L1 --> CVL[composite_volatility<br/>波动率合成因子]
+    L1 --> CL[composite_liquidity<br/>流动性合成因子]
+    L1 --> CT[composite_technical<br/>技术合成因子]
+    L1 --> CF[composite_fund_flow<br/>资金流合成因子]
+    CV --> L2[第二层: 跨组ICIR加权合成]
+    CM --> L2
+    CVL --> L2
+    CL --> L2
+    CT --> L2
+    CF --> L2
+    L2 --> CA[composite_alpha<br/>综合合成因子]
+    CA --> EVAL[合成因子评估: ICIR>1.5 / 多空年化>15%]
+    EVAL --> PERSIST[持久化权重 + 合成因子值]
 ```
 
-### 3.3 ML Walk-Forward 规范
+### 3.3 合成因子命名与血缘
+
+合成因子以 `composite_<维度>` 命名，`composite_` 前缀明确标识"合成因子"，后缀为Alpha维度名。血缘信息通过注册表的 `composite_factor_ids` + `composite_method` + `params` 字段完整追踪。
+
+| 层级 | factor_id | 展示名 | composite_method | 输入因子 |
+|------|-----------|--------|-----------------|---------|
+| L1 | composite_value | 价值合成因子 | equal_weight | ep, bp, dp, ev_ebitda, sp |
+| L1 | composite_momentum | 动量合成因子 | equal_weight | mom_5d, mom_20d, mom_60d, barra_momentum, barra_strev, roc_10, cs_pct_chg |
+| L1 | composite_volatility | 波动率合成因子 | equal_weight | hist_vol_*, atr_ratio, natr_14, dastd, cmra, vol_osc, downside_vol, amihud, adv_20 |
+| L1 | composite_liquidity | 流动性合成因子 | equal_weight | cs_turnover, turnover_f, cs_log_amount, cs_volume_ratio, cs_log_mv |
+| L1 | composite_technical | 技术合成因子 | equal_weight | rsi_*, kdj_*, macd_*, adx_*, boll_*, ma_bias_*, alpha101/158, chan_*, cdl_* |
+| L1 | composite_fund_flow | 资金流合成因子 | equal_weight | cs_main_net_pct, cs_net_mf_pct, huge_net_pct, big_net_pct |
+| L2 | composite_alpha | 综合合成因子 | icir_weight | composite_value, composite_momentum, composite_volatility, composite_liquidity, composite_technical, composite_fund_flow |
+
+> L1 组内等权：同组因子高度共线（如 hist_vol_10 和 hist_vol_20 相关系数 >0.9），等权消除共线性同时保留组Alpha方向。
+> L2 跨组ICIR加权：不同组代表不同Alpha维度（价值 vs 动量 IC相关 < 0.3），ICIR加权兼顾预测力与稳定性，无足够IC历史时退化为等权。
+
+### 3.4 ML Walk-Forward 规范
 
 | 参数 | 值 | 说明 |
 |------|-----|------|
@@ -1953,24 +1978,23 @@ steps:
 
 ***
 
-### 11.5 截面预处理在计算阶段还是评估阶段执行
+### 11.5 截面预处理在计算阶段还是评估/合成阶段执行
 
-**决策：计算阶段执行预处理，评估阶段使用预处理后的值**
+**决策：计算阶段输出原始值，截面预处理在评估/合成阶段由 CrossSectionReader 按需执行**
 
 理由：
 
-- 因子值入库前应已完成标准化，保证存储的值可直接用于截面比较
-- 评估阶段需要的是"真实预测力"，使用中性化后的值计算IC更准确
-- 下游消费者（合成、选股）直接使用入库值，无需重复预处理
+- 截面预处理（MAD去极值/Z-score/行业+市值中性化）依赖全市场同日数据，与逐标的计算模式矛盾
+- 不同样本池、不同截面日的标准化结果不同，存储层只存原始值保证数据唯一性
+- 评估和合成通过 CrossSectionReader 按需加载并截面标准化，支持灵活的样本池差异化处理
 
-**实现细节**：
+**截面预处理流程**（在 CrossSectionReader 中执行）：
 
-截面预处理分为两级：
+```
+原始因子值 → 缺失值填充(行业均值) → 去极值(MAD, n=5) → Z-score标准化 → 行业+市值中性化(回归取残差) → 再Z-score
+```
 
-1. **单股级**（PreprocessStage）：在 Pipeline 内执行，仅做基本清洗（NaN处理、有效因子计数）
-2. **截面级**（FactorComputeTask.\_cross\_section\_preprocess）：在 PipelineEngine 执行完毕后批量执行，包含去极值(MAD)、Z-score标准化、行业中性化
-
-这种设计是因为截面操作（如行业中性化）需要全市场数据，而 Pipeline 是逐标的串行执行的，单股阶段无法完成截面操作。
+> **顺序严格**：先去极值再标准化，否则极端值扭曲均值方差；先标准化再中性化，否则异常值影响回归系数。参考 Barra/华泰共识。
 
 ### 11.6 缠论因子的计算时机
 

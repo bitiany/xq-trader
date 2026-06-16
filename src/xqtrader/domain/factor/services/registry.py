@@ -200,7 +200,7 @@ async def sync_to_registry() -> int:
             tags=defn.tags or "",
             status="draft",
             factor_grade=None,
-            report_lag_days=0,
+            report_lag_days=defn.report_lag_days,
             is_composite=1 if defn.is_composite else 0,
             composite_factor_ids=",".join(defn.composite_factor_ids),
             skip_preprocess=1 if getattr(plugin, "skip_preprocess", False) else 0,
