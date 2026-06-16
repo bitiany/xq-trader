@@ -50,6 +50,8 @@ class DailyIncrementalTask(BaseTask):
       - end_date: 采集结束日期（格式 YYYY-MM-DD，为空时取最新交易日）
       - kline_batch_size: QMT 标的分片大小（默认 50）
     """
+    task_name = "market.daily_incremental_collect"
+
     async def _run_impl(self, **kwargs: Any) -> dict[str, Any]:
         start_date_str: str | None = kwargs.get("start_date")
         end_date_str: str | None = kwargs.get("end_date")
