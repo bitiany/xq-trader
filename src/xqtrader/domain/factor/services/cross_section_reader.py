@@ -44,6 +44,24 @@ _WINSORIZE_MAD_N = 5.0
 # 高斯分布 MAD → std 换算系数
 _MAD_TO_STD_FACTOR = 1.4826
 
+# 风险警示股名称前缀（ST/*ST/PT），这些标的需要从样本池中排除
+# 参考: 沪深交易所《股票上市规则》风险警示板相关规定
+RISK_WARNING_PREFIXES: tuple[str, ...] = ("ST", "*ST", "PT")
+
+
+def is_risk_warning_name(name: str) -> bool:
+    """判断证券名称是否为风险警示股（ST/*ST/PT）。
+
+    Args:
+        name: 证券名称，如 "ST三木"、"*ST海航"
+
+    Returns:
+        True 表示为风险警示股，应从样本池中排除
+    """
+    if not name:
+        return False
+    return name.startswith(RISK_WARNING_PREFIXES)
+
 
 class CrossSectionReader:
     """截面因子数据加载服务。
@@ -176,11 +194,19 @@ class CrossSectionReader:
         return returns_panel
 
     async def load_pool_symbols(self, pool_id: str) -> list[str]:
-        """获取样本池标的列表。"""
+        """获取样本池标的列表。
+
+        全市场样本池(pool_id='all')仅保留 list_status='L' 的上市标的，
+        并排除 ST/*ST/PT 风险警示股。指数成分股池无需过滤（指数本身不含 ST）。
+        """
         if pool_id == "all":
             securities = await Security.filter(list_status="L")
-            symbols = [s.symbol for s in securities]
-            logger.debug("全 A 样本池: %d 只标的", len(symbols))
+            # 过滤 ST/*ST 风险警示股（流动性差、退市风险高，会扭曲因子统计）
+            symbols = [s.symbol for s in securities if not is_risk_warning_name(s.name)]
+            logger.debug(
+                "全 A 样本池: %d 只标的（过滤 ST/*ST 后，原始 %d 只）",
+                len(symbols), len(securities),
+            )
             return symbols
 
         index_code = _POOL_INDEX_MAP.get(pool_id, pool_id)

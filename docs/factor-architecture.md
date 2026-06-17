@@ -1,6 +1,6 @@
 # xqtrader 因子系统技术架构
 
-> **版本**: v2.0 | **更新**: 2026-06-11
+> **更新**: 2026-06-11
 > **依赖**: [factor-catalog.md](./factor-catalog.md) 因子规格目录
 > **框架**: Pipeline引擎 + Celery插件 + DAL/ORM
 > **参考**: Barra CNE6 (MSCI) / Qlib (Microsoft) / WorldQuant / 华泰金工
@@ -507,7 +507,7 @@ flowchart TD
 
 **理由**: 截面标准化依赖全市场同日数据，与逐标的计算模式矛盾。分离后避免估值/财务数据冗余存储, 支持按样本池差异化标准化。
 
-### 9.2 因子元数据: 代码声明 + DB 注册表双轨
+### 9.2 因子元数据: 代码声明 + DB 注册表
 
 - **代码声明** (FactorPlugin / FactorDefinition): 因子的静态属性 — 唯一真相源
 - **DB 注册表** (fac_factor_registry): 因子的运行时状态 (factor_grade, status) — 由 Task 3 动态更新
@@ -1015,36 +1015,20 @@ flowchart TD
 
 ## 十、存储模型设计
 
-### 10.1 新旧表隔离策略
+### 10.1 表命名与职责
 
-**核心原则：旧表不动，新表独立建表，通过新 ORM 模型定义**
+**表命名规范**：`fac_` 前缀（factor architecture 缩写）
 
-当前已存在的因子相关表：
+| 表名                          | 用途                            | bind\_key |
+| ---------------------------- | ----------------------------- | --------- |
+| `fac_factor_value`           | 逐标的因子值窄表（含 pool\_id，不含估值和财务）           | stock     |
+| `fac_financial_factor_value` | 季度财务因子值（按 ann\_date 存储，无前向填充） | stock     |
+| `fac_factor_registry`        | 因子注册表（含 factor\_grade）        | research  |
+| `fac_factor_stats`           | 因子统计指标表                       | research  |
+| `fac_factor_pool`            | 样本池配置表                        | research  |
+| `fac_signal_value`           | 信号值表                          | stock     |
 
-| 旧表名                   | 模型类            | bind\_key | 状态       |
-| --------------------- | -------------- | --------- | -------- |
-| `sdc_factor_value`    | FactorValue    | stock     | **保留不动** |
-| `sdc_factor_registry` | FactorRegistry | research  | **保留不动** |
-
-新方案表命名规范：`fac_` 前缀（factor architecture 缩写），与旧表 `sdc_factor_` 前缀明确区分。
-
-| 新表名                          | 用途                            | bind\_key | 对应旧表                  |
-| ---------------------------- | ----------------------------- | --------- | --------------------- |
-| `fac_factor_value`           | 逐标的因子值窄表（含 pool\_id，不含估值和财务）           | stock     | sdc\_factor\_value    |
-| `fac_financial_factor_value` | 季度财务因子值（按 ann\_date 存储，无前向填充） | stock     | 无（新增）                 |
-| `fac_factor_registry`        | 因子注册表（含 factor\_grade）        | research  | sdc\_factor\_registry |
-| `fac_factor_stats`           | 因子统计指标表                       | research  | 无（新增）                 |
-| `fac_factor_pool`            | 样本池配置表                        | research  | 无（新增）                 |
-| `fac_signal_value`           | 信号值表                          | stock     | 无（新增）                 |
-
-**迁移策略**：
-
-- 旧表 `sdc_factor_value` / `sdc_factor_registry` 保持不变，现有代码继续使用
-- 新表通过新 ORM 模型定义，新因子系统全部使用新表
-- 数据迁移通过一次性 ETL 脚本完成（旧表数据转换写入新表）
-- 新旧表并行期结束后，旧表可归档但**不删除**
-
-### 10.2 新表 ER 关系
+### 10.2 ER 关系
 
 ```mermaid
 erDiagram
@@ -1131,7 +1115,7 @@ erDiagram
 
 ### 10.3 数据源表全景（已存在，只读引用）
 
-因子计算所需的数据源表分布在 `stock` schema 下，新因子系统**只读引用**这些表，不做任何修改：
+因子计算所需的数据源表分布在 `stock` schema 下，因子系统**只读引用**这些表，不做任何修改：
 
 ```mermaid
 flowchart TD
@@ -1149,21 +1133,9 @@ flowchart TD
         TAG[sdc_stock_tag / sdc_tag_definition<br/>股票标签]
     end
 
-    subgraph "stock schema — 旧因子表（保留不动）"
-        FV_OLD[sdc_factor_value<br/>8.8亿行, 104因子, 5511标的]
-        FS_OLD[sdc_factor_stats<br/>0行(空表)]
-        SP_OLD[sdc_sample_pool<br/>0行(空表)]
-        AS_OLD[sdc_alpha_signal<br/>alpha_id + alpha_score]
-        AST_OLD[sdc_alpha_stats<br/>IC/ICIR统计]
-    end
-
-    subgraph "stock schema — 新因子表"
-        FV_NEW[fac_factor_value<br/>逐标的因子值<br/>技术/量价/资金流]
-        FFV_NEW[fac_financial_factor_value<br/>季度财务因子值<br/>按ann_date存储]
-    end
-
-    subgraph "research schema — 旧注册表（仅参考）"
-        FR_OLD[sdc_factor_registry<br/>182条因子元数据<br/>23个category]
+    subgraph "stock schema — 因子表"
+        FV[fac_factor_value<br/>逐标的因子值<br/>技术/量价/资金流]
+        FFV[fac_financial_factor_value<br/>季度财务因子值<br/>按ann_date存储]
     end
 
     DI -->|daily_derived| CALC[因子计算引擎]
@@ -1173,8 +1145,8 @@ flowchart TD
     CF -->|quarterly PIT| CALC
     BS -->|quarterly PIT| CALC
 
-    CALC -->|日频因子| FV_NEW
-    CALC -->|季度财务因子| FFV_NEW
+    CALC -->|日频因子| FV
+    CALC -->|季度财务因子| FFV
 ```
 
 #### 数据源表关键字段
@@ -1193,33 +1165,7 @@ flowchart TD
 
 | 表名                        | 行数        | 时间范围               | 标的数   |
 | ------------------------- | --------- | ------------------ | ----- |
-| sdc\_factor\_value        | **8.85亿** | —                  | 5,511 |
 | sdc\_financial\_indicator | 423,444   | 1990-06 \~ 2026-03 | 6,483 |
-| sdc\_factor\_registry     | 182       | —                  | —     |
-| sdc\_factor\_stats        | 0         | —                  | —     |
-| sdc\_sample\_pool         | 0         | —                  | —     |
-
-> 旧因子系统已有 8.85 亿行因子值数据，验证了窄表方案在大数据量下的可行性。新表 `fac_factor_value` 将沿用相同的窄表 + TimescaleDB 架构。
-
-### 10.4 新表 vs 旧表字段差异
-
-#### fac\_factor\_registry vs sdc\_factor\_registry
-
-| 字段                | 旧表 | 新表         | 变更说明                               |
-| ----------------- | -- | ---------- | ---------------------------------- |
-| factor\_grade     | 无  | String(2)  | **新增**：因子等级 A/B/C/D                |
-| update\_freq      | 无  | String(16) | **新增**：更新频率 daily/quarterly/annual |
-| report\_lag\_days | 无  | Integer    | **新增**：财报发布滞后天数（防未来函数）             |
-| 其余字段              | —  | —          | 与旧表一致                              |
-
-#### fac\_factor\_value vs sdc\_factor\_value
-
-| 字段       | 旧表       | 新表             | 变更说明                                           |
-| -------- | -------- | -------------- | ---------------------------------------------- |
-| pool\_id | 无        | String(16), PK | **新增**：样本池标识，单因子默认 `all`                       |
-| 估值因子     | 包含       | **不含**         | **变更**：估值指标按需从 sdc\_daily\_indicator 加载 |
-| 财务因子     | 包含（前向填充） | **不含**         | **变更**：财务因子独立存储到 fac\_financial\_factor\_value |
-| 其余字段     | —        | —              | 与旧表一致                                          |
 
 ### 10.4 数据量评估
 
@@ -1233,7 +1179,7 @@ flowchart TD
 | ---------- | ----- | ------------------------- |
 | 标的数        | 5,500 | 全A股（剔除ST/停牌后约4,800活跃）     |
 | 交易日/年      | 242   | A股年交易日                    |
-| 日频截面因子数 | 62 | 技术因子+量价因子+资金流因子（不含估值和财务，按factor-catalog v5.0） |
+| 日频截面因子数 | 62 | 技术因子+量价因子+资金流因子（不含估值和财务，按factor-catalog） |
 | 季度财务因子数    | 40    | B类基本面因子（价值/盈利/成长/质量/杠杆）     |
 | 复合Alpha因子数 | 6     | F类                        |
 | 日频因子总数 | 68 | 62逐标的 + 6 Alpha |
@@ -1255,7 +1201,7 @@ flowchart TD
 | 3年 | 2.1 GB    | 21 MB     | 21 MB       | < 1 MB | ≈ 2.2 GB |
 | 5年 | 3.5 GB    | 35 MB     | 35 MB       | < 1 MB | ≈ 3.6 GB |
 
-> 对比旧方案（估值+财务全部存入 factor_value）：5年合计 7.6 GB → 3.6 GB，节省 53%。截面因子按需加载不仅减少存储，更消除了逐标的计算与截面标准化的架构矛盾。
+> 截面因子按需加载不仅减少存储，更消除了逐标的计算与截面标准化的架构矛盾。
 
 > TimescaleDB 压缩比通常 5:1 \~ 10:1，上表取保守 5:1。
 
@@ -1370,7 +1316,7 @@ Alpha因子按样本池的保留策略：
 | Q3 三季报 | 9月30日  | 10月31日  | \~31天      |
 | Q4 年报  | 12月31日 | 次年4月30日 | **\~120天** |
 
-> CASE-C 示例代码 `bonus_fundamental.py` 已验证：使用 lag\_days=60 会在1\~4月误用年报数据（未来函数），导致策略虚高。严控 lag\_days=120 后效果回归真实水平。但 `ann_date` 方案比固定 lag\_days 更优：精确到个股级别，既不过严也不遗漏。
+> 使用 lag\_days=60 会在1\~4月误用年报数据（未来函数），导致策略虚高。严控 lag\_days=120 后效果回归真实水平。但 `ann_date` 方案比固定 lag\_days 更优：精确到个股级别，既不过严也不遗漏。
 
 #### Point-in-Time 双模式取值规则
 
@@ -1490,7 +1436,7 @@ CrossSectionReader 前向填充（应用内存，每日粒度）：
 > 此表仅存储**逐标的可独立计算**的因子（技术因子、量价因子、资金流因子）。截面因子（估值指标、财务指标）不在此表存储，通过 CrossSectionReader 按需加载。
 
 ```python
-# 新表 ORM 模型（示意，非完整代码）
+# ORM 模型（示意，非完整代码）
 @timescale(
     time_column="trade_date",
     chunk_interval="6 month",
@@ -1640,7 +1586,7 @@ flowchart TD
 
 ## 十一、关键设计决策
 
-### 11.1 因子元数据持久化：DB注册表 + 代码声明双轨制
+### 11.1 因子元数据持久化：DB注册表 + 代码声明
 
 **决策：因子元数据必须持久化到** **`fac_factor_registry`** **数据库表，同时以代码声明为唯一真相源（Single Source of Truth）**
 
@@ -1655,7 +1601,7 @@ flowchart TD
 | API 暴露 | 前端/研究平台需查询因子元数据（分类、方向、描述等）                             |
 | 跨服务共享  | 调度层、计算层、研究层均需访问因子元数据，DB 是最自然的共享介质                      |
 
-#### 双轨制设计
+#### 代码声明与DB注册表
 
 ```mermaid
 flowchart TD

@@ -1,6 +1,6 @@
 # xqtrader 因子系统实施计划
 
-> **版本**: v1.0 | **更新**: 2026-06-07
+> **更新**: 2026-06-07
 > **依赖**: [factor-architecture.md](./factor-architecture.md) 技术架构 | [factor-catalog.md](./factor-catalog.md) 因子分类
 > **约定**: dal-orm（模型+CRUD） | celery-plugin（任务插件）
 
@@ -10,7 +10,7 @@
 
 | 阶段 | 名称 | 核心交付 | 预计工作量 |
 |------|------|---------|-----------|
-| P1 | 基础设施 | 新表模型 + 注册表同步 + 样本池 | 中 |
+| P1 | 基础设施 | 表模型 + 注册表同步 + 样本池 | 中 |
 | P2 | 因子计算管线 | CalcStage + FactorPlugin + 日频调度 | 大 |
 | P3 | 因子评估管线 | EvaluateStage + IC/ICIR + 分层回测 | 大 |
 | P4 | 因子合成管线 | SynthesizeStage + Alpha因子 | 中 |
@@ -20,18 +20,18 @@
 
 ---
 
-## P1: 基础设施 — 新表模型 + 注册表同步 + 样本池
+## P1: 基础设施 — 表模型 + 注册表同步 + 样本池
 
 ### P1.1 目标
 
-建立因子系统的数据基础：新表 ORM 模型、因子注册表同步机制、样本池管理。
+建立因子系统的数据基础：ORM 模型、因子注册表同步机制、样本池管理。
 
 ### P1.2 交付物
 
 | # | 交付物 | 路径 | 说明 |
 |---|--------|------|------|
-| 1 | FacFactorValue 模型 | `src/xqtrader/domain/factor/models/factor_value.py` | 新因子值窄表，含 pool_id |
-| 2 | FacFactorRegistry 模型 | `src/xqtrader/domain/factor/models/factor_registry.py` | 新因子注册表，含 factor_grade/update_freq/report_lag_days |
+| 1 | FacFactorValue 模型 | `src/xqtrader/domain/factor/models/factor_value.py` | 因子值窄表，含 pool_id |
+| 2 | FacFactorRegistry 模型 | `src/xqtrader/domain/factor/models/factor_registry.py` | 因子注册表，含 factor_grade/update_freq/report_lag_days |
 | 3 | FacFactorStats 模型 | `src/xqtrader/domain/factor/models/factor_stats.py` | 因子统计指标表 |
 | 4 | FacFactorPool 模型 | `src/xqtrader/domain/factor/models/factor_pool.py` | 样本池配置表 |
 | 5 | FacSignalValue 模型 | `src/xqtrader/domain/factor/models/signal_value.py` | 信号值表 |
@@ -72,14 +72,13 @@ src/xqtrader/domain/factor/
 
 | # | 验收项 | 验证方式 | 通过条件 |
 |---|--------|---------|---------|
-| 1 | 新表建表成功 | db_tools 查询 `SELECT tablename FROM pg_tables WHERE schemaname IN ('stock','research') AND tablename LIKE 'fac_%'` | 返回 5 行（fac_factor_value, fac_factor_registry, fac_factor_stats, fac_factor_pool, fac_signal_value） |
+| 1 | 建表成功 | db_tools 查询 `SELECT tablename FROM pg_tables WHERE schemaname IN ('stock','research') AND tablename LIKE 'fac_%'` | 返回 5 行（fac_factor_value, fac_factor_registry, fac_factor_stats, fac_factor_pool, fac_signal_value） |
 | 2 | FacFactorValue 是 TimescaleDB 超表 | db_tools 查询 `SELECT hypertable_name FROM timescaledb_information.hypertables WHERE hypertable_name='fac_factor_value'` | 返回 1 行 |
 | 3 | 因子定义声明完整性 | 运行同步脚本 | 所有 factor-catalog.md 中的因子均有对应 FactorDefinition |
 | 4 | 注册表同步正确 | 同步后查询 `SELECT count(*) FROM research.fac_factor_registry` | 行数 = factor-catalog.md 中定义的因子总数 |
 | 5 | 注册表同步幂等 | 连续执行 2 次同步 | 第 2 次无 INSERT，仅 UPDATE |
 | 6 | 样本池初始化 | 查询 `SELECT count(*) FROM research.fac_factor_pool` | ≥ 3 行（all, idx_300, idx_1000） |
 | 7 | DAL CRUD 可用 | 单元测试 | create/filter/update/delete 全部通过 |
-| 8 | 旧表不受影响 | 查询 `SELECT count(*) FROM stock.fac_factor_value` | 行数不变 |
 
 ### P1.5 实施步骤
 
@@ -103,7 +102,7 @@ src/xqtrader/domain/factor/
 
 ### P2.1 目标
 
-实现因子日频计算管线：从数据源读取原始数据 → 按 FactorPlugin 计算因子值 → 预处理 → 持久化到新表。
+实现因子日频计算管线：从数据源读取原始数据 → 按 FactorPlugin 计算因子值 → 预处理 → 持久化到因子值窄表。
 
 ### P2.2 交付物
 
@@ -152,10 +151,9 @@ src/worker/plugins/factor_compute/
 | 2 | 估值因子读取正确 | 对 3 只标的读取 pe_ttm，与 sdc_daily_indicator 原值对比 | 完全一致 |
 | 3 | 基本面因子PIT正确 | 对 1 只标的，截面日=2026-01-15，验证 roe 取的是 ann_date ≤ 2026-01-15 的最新记录 | 与手动SQL查询结果一致 |
 | 4 | 预处理正确 | 对 10 只标的做 Z-score 标准化，验证均值≈0、标准差≈1 | 均值 < 0.01，标准差 0.99~1.01 |
-| 5 | 因子值写入新表 | 执行计算任务后查询 `SELECT count(*) FROM stock.fac_factor_value WHERE trade_date = '<当日>'` | 行数 = 标的数 × 当日活跃因子数 |
+| 5 | 因子值写入 | 执行计算任务后查询 `SELECT count(*) FROM stock.fac_factor_value WHERE trade_date = '<当日>'` | 行数 = 标的数 × 当日活跃因子数 |
 | 6 | Celery任务可调度 | 手动触发 factor.compute_daily 任务 | 任务状态 SUCCESS |
 | 7 | 编排依赖正确 | daily_pipeline 执行 | collect → factor_compute 顺序执行 |
-| 8 | 旧表不受影响 | 查询 `SELECT count(*) FROM stock.fac_factor_value` | 行数不变 |
 
 ### P2.5 实施步骤
 
@@ -222,7 +220,7 @@ src/worker/plugins/factor_compute/
 
 ### P4.1 目标
 
-实现多因子合成管线：从 A/B 级因子中选因子 → 按样本池合成 Alpha 因子 → 持久化到新表。
+实现多因子合成管线：从 A/B 级因子中选因子 → 按样本池合成 Alpha 因子 → 持久化到因子值窄表。
 
 ### P4.2 交付物
 
@@ -314,7 +312,7 @@ graph LR
 ```
 
 - P1 是所有后续阶段的前置条件
-- P2 依赖 P1（新表模型）
+- P2 依赖 P1（表模型）
 - P3 依赖 P2（需要因子值才能评估）
 - P4 依赖 P3（需要因子等级才能选因子合成）
 - P5 依赖 P3 + P4（需要评估结果 + Alpha因子）

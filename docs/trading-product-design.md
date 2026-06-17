@@ -1,8 +1,7 @@
 # xq-trader 交易模块前端产品设计
 
-> **版本**: v1.1 | **更新**: 2026-06-09  
-> **关联**: [trading-architecture.md](./trading-architecture.md)（后端架构）、[factor-architecture.md](./factor-architecture.md)（因子管线）  
-> **状态**: 设计阶段，尚未实施
+> **更新**: 2026-06-09
+> **关联**: [trading-system-design.md](./trading-system-design.md)（后端架构）、[factor-architecture.md](./factor-architecture.md)（因子管线）
 
 ---
 
@@ -267,7 +266,7 @@ flowchart LR
 | 配仓依据 | 展示 `sizing_strategy` + `target_weight` |
 | 确认下单 | `Button type="primary"` 色 `--accent-primary` |
 | 拒绝 | `Button danger` |
-| 提交 | `POST /workflow/run/{run_id}/resume` |
+| 提交 | `POST /trading/approval/{id}` |
 
 ### 4.4 订单管理 `/trading/orders`
 
@@ -315,7 +314,7 @@ flowchart LR
 
 ```
 ┌──────────┬──────────────────────────────────────────────────────────────┐
-│          │  工作流监控                     [+ 手动触发 trading_cycle]   │
+│          │  工作流监控                     [+ 手动触发 trading_decision]   │
 │          ├──────────────────────────────────────────────────────────────┤
 │          │  Run 列表                                                    │
 │          │  run_id  flow  状态  当前节点  开始时间  耗时  [详情]        │
@@ -325,7 +324,7 @@ flowchart LR
 │          │  ┌─ 节点输出 ──────────────────────────────────────────┐   │
 │          │  │ cross_select: { symbols: [600519.SH, ...] }          │   │
 │          │  └──────────────────────────────────────────────────────┘   │
-│          │  [恢复] [停止]  ← paused 时显示恢复                        │
+│          │  [停止]                                                       │
 │          └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -351,7 +350,7 @@ sequenceDiagram
     Note over Factor: T日收盘后
     Factor->>Factor: 因子计算 + Alpha信号 (fac_signal_value)
     WF->>WF: 选股 → 仓位管理 → 预订单
-    WF->>Bell: HumanInput 待审批
+    WF->>Bell: WS 推送待审批信号
 
     Note over User,Drawer: T日 18:30 ~ T+1 09:25
     Bell->>User: 徽章 +1
@@ -436,7 +435,7 @@ flowchart TD
 | 实盘 KPI | `GET /trading/accounts/{id}/snapshot` | `ws.trading.pnl` |
 | 持仓表 | `GET /trading/positions` | `ws.trading.positions` |
 | 预订单审批 | `GET /trading/pre-orders?status=pending` | `ws.trading.signals` |
-| 审批提交 | `POST /workflow/run/{id}/resume` | — |
+| 审批提交 | `POST /trading/approval/{id}` | — |
 | 订单列表 | `GET /trading/orders` | `ws.trading.orders` |
 | 成交列表 | `GET /trading/trades` | `ws.trading.trades` |
 | 风控规则 | `GET /trading/risk/rules` | — |
