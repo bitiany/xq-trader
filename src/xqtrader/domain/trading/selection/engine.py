@@ -174,6 +174,7 @@ class SelectionEngine:
 
         # 6. 收集所有依赖因子
         factor_ids = await self._collect_factor_ids(all_bindings)
+        self._ensure_direction_factors(factor_ids)
 
         # 7. 加载截面因子数据（含每日指标聚合）
         # 因子数据统一存储在 pool_id='all'（Task1 逐标的因子产出）
@@ -259,7 +260,7 @@ class SelectionEngine:
                 results[symbol] = SelectionScore(
                     symbol=symbol,
                     score=score,
-                    direction="long",
+                    direction=self._infer_direction(factor_snapshot),
                     confidence=score,
                     detail={
                         "strategy_id": strategy_id,
@@ -423,6 +424,20 @@ class SelectionEngine:
             combined_scores.loc[symbol] = combined.score
 
         return combined_scores
+
+    @staticmethod
+    def _ensure_direction_factors(factor_ids: list[str]) -> None:
+        for factor_id in ("mom_20d", "barra_momentum"):
+            if factor_id not in factor_ids:
+                factor_ids.append(factor_id)
+
+    @staticmethod
+    def _infer_direction(factor_snapshot: dict[str, float]) -> str:
+        for factor_id in ("mom_20d", "barra_momentum"):
+            value = factor_snapshot.get(factor_id)
+            if value is not None and value < 0:
+                return "short"
+        return "long"
 
     def _extract_factor_snapshot(
         self,
