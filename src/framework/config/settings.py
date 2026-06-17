@@ -58,6 +58,14 @@ class AppSettings(BaseSettings):
     FACTOR_LAB_AUTO_SEED: bool = True
     GENERATE_SCHEMA_ON_START: bool = True
     #: 是否在启动时自动生成数据库表结构（仅在开发环境下有效）
+    CORS_ALLOW_ORIGINS: list[str] = [
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "http://localhost:3000",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:5174",
+    ]
+    #: CORS 允许的来源白名单（仅前端开发环境使用，生产应通过 Nginx 同域部署）
 
     @model_validator(mode="after")
     def post_process(self) -> "AppSettings":

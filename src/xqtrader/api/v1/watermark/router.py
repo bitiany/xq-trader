@@ -1,10 +1,29 @@
+from datetime import date
+
 from fastapi import APIRouter, Query
 
+from xqtrader.domain.watermark.models.trade_calendar import DEFAULT_TRADE_EXCHANGE, TradeCalendar
 from xqtrader.domain.watermark.services.watermark_service import WatermarkService
 
 router = APIRouter(prefix="/watermarks", tags=["水位"])
 
 _service = WatermarkService()
+
+
+@router.get("/trade-calendar/latest", summary="查询最近交易日")
+async def get_latest_trade_date(
+    exchange: str = Query(default=DEFAULT_TRADE_EXCHANGE, description="交易所代码：SSE/SZSE/BSE"),
+    on_or_before: date | None = Query(default=None, description="查询该日期及之前最近交易日"),
+) -> dict:
+    """返回交易日历中 on_or_before 当日及之前最近的一个交易日。"""
+    latest = await TradeCalendar.get_latest_trade_date(
+        exchange=exchange,
+        on_or_before=on_or_before,
+    )
+    return {
+        "exchange": exchange,
+        "latest_trade_date": str(latest) if latest else None,
+    }
 
 
 @router.get("/incremental-start", summary="计算增量采集起始日期")

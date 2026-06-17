@@ -1,4 +1,5 @@
 import { createBrowserRouter } from 'react-router-dom'
+import { Navigate } from 'react-router-dom'
 import { AppLayout } from '@/layouts/AppLayout'
 import { DataLayout } from '@/pages/data/DataLayout'
 import { DataOverviewPage } from '@/pages/data/DataOverviewPage'
@@ -12,9 +13,14 @@ import { ApiTestPage } from '@/pages/settings/ApiTestPage'
 import { ModelMarketplacePage } from '@/pages/settings/models/ModelMarketplacePage'
 import { SettingsLayout } from '@/pages/settings/SettingsLayout'
 import { SettingsOverviewPage } from '@/pages/settings/SettingsOverviewPage'
+import { StrategyLayout } from '@/pages/strategy/StrategyLayout'
+import { SelectionWorkbenchPage } from '@/pages/strategy/SelectionWorkbenchPage'
+import { StrategyListPage } from '@/pages/strategy/StrategyListPage'
+import { StrategyDetailPage } from '@/pages/strategy/StrategyDetailPage'
+import { SelectionHistoryPage } from '@/pages/strategy/SelectionHistoryPage'
 import { AuthGuard } from '@/router/AuthGuard'
 import { RouteErrorBoundary } from '@/router/RouteErrorBoundary'
-import { Activity, Radio } from 'lucide-react'
+import { Activity } from 'lucide-react'
 import { LiveCockpitPage } from '@/pages/trading/LiveCockpitPage'
 
 export const router = createBrowserRouter([
@@ -32,6 +38,17 @@ export const router = createBrowserRouter([
       { path: 'stock/:symbol', element: <StockDetailPage /> },
       { path: 'backtest', element: <BacktestPage /> },
       { path: 'backtest/:symbol', element: <BacktestPage /> },
+      {
+        path: 'strategy',
+        element: <StrategyLayout />,
+        children: [
+          { index: true, element: <Navigate to="/strategy/workbench" replace /> },
+          { path: 'workbench', element: <SelectionWorkbenchPage /> },
+          { path: 'list', element: <StrategyListPage /> },
+          { path: 'list/:strategyId', element: <StrategyDetailPage /> },
+          { path: 'history', element: <SelectionHistoryPage /> },
+        ],
+      },
       { path: 'data', element: <DataLayout />, children: [
         { index: true, element: <DataOverviewPage /> },
         { path: 'tasks', element: <DataTasksPage /> },

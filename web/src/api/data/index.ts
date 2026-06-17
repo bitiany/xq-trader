@@ -55,6 +55,11 @@ export interface DataSummaryResponse {
   worker_available: boolean
 }
 
+export interface LatestTradeDateResponse {
+  exchange: string
+  latest_trade_date: string | null
+}
+
 export interface TriggerTaskResponse {
   task_id: string
   queued: boolean
@@ -92,6 +97,10 @@ export interface WatermarksResponse {
 
 export async function fetchWatermarks(): Promise<WatermarksResponse> {
   return request.get<WatermarksResponse>('/data/watermarks')
+}
+
+export async function fetchLatestTradeDate(): Promise<LatestTradeDateResponse> {
+  return request.get<LatestTradeDateResponse>('/watermarks/trade-calendar/latest')
 }
 
 export async function fetchStockTables(): Promise<StockTableStatItem[]> {

@@ -1,5 +1,6 @@
 import uvicorn
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from framework.config.settings import settings
 from framework.dal.datasource_loader import DatasourceLoader
@@ -21,6 +22,15 @@ def create_app() -> FastAPI:
         version=settings.APP.VERSION,
         description=settings.APP.DESCRIPTION,
         lifespan=app_lifespan,
+    )
+
+    # CORS：允许前端开发环境跨域调用（生产建议通过 Nginx 同域部署 + 收紧白名单）
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.APP.CORS_ALLOW_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
 
     app.add_middleware(ResponseMiddleware)

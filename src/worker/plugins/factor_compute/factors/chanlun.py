@@ -301,6 +301,18 @@ class ChanlunFactor(FactorPlugin):
     requires_full_history: bool = True
     is_composite: bool = True
     composite_factor_ids: list[str] = _CHAN_FACTOR_IDS
+    child_display_names: dict[str, str] = {
+        "chan_fractal_strength": "缠论分型强度",
+        "chan_bi_length": "缠论笔长度",
+        "chan_bi_kcount": "缠论笔内K线数",
+        "chan_bi_slope": "缠论笔斜率",
+        "chan_bi_amplitude": "缠论笔振幅",
+        "chan_bi_strength": "缠论笔强度",
+        "chan_zs_height_ratio": "缠论中枢高度比",
+        "chan_zs_range": "缠论中枢区间",
+        "chan_divergence_ratio": "缠论背驰强度",
+        "chan_macd_area": "缠论MACD面积",
+    }
     data_origin: str = "computed"
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:

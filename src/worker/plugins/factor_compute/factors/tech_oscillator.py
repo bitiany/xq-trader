@@ -43,7 +43,7 @@ class RSIFactor(FactorPlugin):
     def __init__(self, period: int = 14, **kwargs: Any) -> None:
         self.period = period
         self.factor_id = f"rsi_{period}"
-        self.display_name = f"RSI({period})"
+        self.display_name = f"{period}日RSI"
         self.min_periods = period + 1
         self.params = {"period": period}
 
@@ -99,6 +99,11 @@ class KDJFactor(FactorPlugin):
     requires_full_history: bool = True
     is_composite: bool = True
     composite_factor_ids: list[str] = ["kdj_k", "kdj_d", "kdj_j"]
+    child_display_names: dict[str, str] = {
+        "kdj_k": "KDJ-K值",
+        "kdj_d": "KDJ-D值",
+        "kdj_j": "KDJ-J值",
+    }
 
     def __init__(self, fastk: int = 9, slowk: int = 3, slowd: int = 3, **kwargs: Any) -> None:
         self.fastk = fastk

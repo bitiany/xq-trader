@@ -108,7 +108,7 @@ class VolatilityFactor(FactorPlugin):
     def __init__(self, period: int = 20, **kwargs: Any) -> None:
         self.period = period
         self.factor_id = f"hist_vol_{period}"
-        self.display_name = f"HistVol({period})"
+        self.display_name = f"{period}日历史波动率"
         self.min_periods = period
         self.params = {"period": period}
 

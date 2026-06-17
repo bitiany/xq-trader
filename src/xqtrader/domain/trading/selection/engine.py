@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date
 from typing import Any
 
 import pandas as pd
@@ -12,7 +12,7 @@ from framework.commons.logger import get_logger
 from ..models.decision import SelectionResult
 from ..models.rule import RuleRegistry as RuleRegistryModel
 from ..models.strategy import Strategy, StrategyRuleBinding, StrategyRuleGroup
-from ..rules.base import RuleResult, SelectionScore, UniverseProvider
+from ..rules.base import RuleContext, RulePlugin, RuleResult, SelectionScore, UniverseProvider
 from ..rules.combination.and_or import AndCombination, OrCombination
 from ..rules.combination.base import CombinationStrategy
 from ..rules.combination.ic_weighted import ICWeightedCombination
@@ -67,8 +67,10 @@ _DAILY_INDICATOR_DERIVED_MAP: dict[str, tuple[str, str]] = {
 # 数据来源: stock.sdc_financial_indicator (季频财务指标)
 # 文档参考: docs/factor-catalog.md B2-B5 基本面因子
 # 注意: gross_margin 是"毛利"(绝对值), grossprofit_margin 才是"销售毛利率"(百分比)
+# 选股策略中的 roe 阈值通常表达年化 ROE，优先使用 Tushare 的 roe_yearly 口径。
 _FINANCIAL_INDICATOR_FIELD_MAP: dict[str, str] = {
-    "roe": "roe",
+    "roe": "roe_yearly",
+    "roe_yearly": "roe_yearly",
     "roe_waa": "roe_waa",
     "roe_dt": "roe_dt",
     "roa": "roa",
@@ -107,6 +109,7 @@ class SelectionEngine:
     def __init__(self) -> None:
         self._rule_registry = RuleRegistry()
         self._evaluator = ExpressionEvaluator()
+        self.last_diagnostics: dict[str, Any] = {}
 
     async def run(
         self,
@@ -130,6 +133,8 @@ class SelectionEngine:
             msg = f"策略不存在: {strategy_id}"
             raise ValueError(msg)
 
+        self.last_diagnostics = {}
+
         # 2. 获取候选标的
         symbols = await universe.get_symbols()
         if not symbols:
@@ -148,25 +153,27 @@ class SelectionEngine:
             logger.warning(f"策略无规则组: {strategy_id}")
             return {}
 
-        # 4. 加载截面规则组（仅取 cross_section 类型）
-        cs_group = None
-        for g in rule_groups:
-            if g.group_type == "cross_section":
-                cs_group = g
-                break
-
-        if not cs_group:
+        # 4. 加载截面规则组：组内按 combination_method，多个截面规则组之间按 AND 关系
+        cs_groups = [g for g in rule_groups if g.group_type == "cross_section"]
+        if not cs_groups:
             logger.warning(f"策略无截面规则组: {strategy_id}")
             return {}
 
-        # 5. 加载规则绑定
-        bindings = await StrategyRuleBinding.filter(group_id=cs_group.id)
-        if not bindings:
-            logger.warning(f"规则组无绑定规则: {cs_group.id}")
+        # 5. 加载全部截面规则绑定
+        group_bindings: dict[int, list[StrategyRuleBinding]] = {}
+        all_bindings: list[StrategyRuleBinding] = []
+        for group in cs_groups:
+            bindings = await StrategyRuleBinding.filter(group_id=group.id)
+            if not bindings:
+                logger.warning(f"规则组无绑定规则: {group.id}")
+                continue
+            group_bindings[group.id] = bindings
+            all_bindings.extend(bindings)
+        if not all_bindings:
             return {}
 
         # 6. 收集所有依赖因子
-        factor_ids = await self._collect_factor_ids(bindings)
+        factor_ids = await self._collect_factor_ids(all_bindings)
 
         # 7. 加载截面因子数据（含每日指标聚合）
         # 因子数据统一存储在 pool_id='all'（Task1 逐标的因子产出）
@@ -180,35 +187,72 @@ class SelectionEngine:
             return {}
 
         # 8. 注册规则（从 DB 加载或使用已注册的）
-        await self._ensure_rules_registered(bindings)
+        await self._ensure_rules_registered(all_bindings)
 
         # 9. 逐规则执行截面评估
         all_rule_results: dict[str, pd.Series] = {}
-        for binding in bindings:
+        for binding in all_bindings:
             rule = self._rule_registry.get(binding.rule_id)
             if isinstance(rule, ExpressionRule):
                 series_result = self._evaluate_expression_cross_section(
                     rule, cross_section_df, binding.config_override or {},
                 )
                 all_rule_results[binding.rule_id] = series_result
+            elif isinstance(rule, RulePlugin):
+                series_result = await self._evaluate_plugin_cross_section(
+                    rule, cross_section_df, signal_date, binding.config_override or {},
+                )
+                all_rule_results[binding.rule_id] = series_result
 
-        # 10. 组合规则结果
-        weights = {b.rule_id: b.weight for b in bindings if b.weight}
-        combination = _COMBINATION_STRATEGIES.get(
-            cs_group.combination_method, WeightedScoreCombination(),
-        )
-        combined = self._combine_cross_section(
-            all_rule_results, combination, weights,
-            cs_group.combination_params or {},
-        )
+        # 10. 按规则组组合结果；多个规则组之间采用 AND 关系，最终分数取各组得分均值
+        group_scores: list[pd.Series] = []
+        group_pass_masks: list[pd.Series] = []
+        group_pass_by_id: dict[int, pd.Series] = {}
+        for group in cs_groups:
+            bindings = group_bindings.get(group.id, [])
+            rule_results = {
+                b.rule_id: all_rule_results[b.rule_id]
+                for b in bindings
+                if b.rule_id in all_rule_results
+            }
+            if not rule_results:
+                continue
+            weights = {b.rule_id: b.weight for b in bindings if b.weight}
+            combination = _COMBINATION_STRATEGIES.get(
+                group.combination_method, WeightedScoreCombination(),
+            )
+            combined = self._combine_cross_section(
+                rule_results, combination, weights,
+                group.combination_params or {},
+            )
+            group_scores.append(combined)
+            group_pass_mask = combined >= (group.threshold or 0.0)
+            group_pass_masks.append(group_pass_mask)
+            group_pass_by_id[group.id] = group_pass_mask
+        if not group_scores:
+            return {}
+
+        final_score = pd.concat(group_scores, axis=1).mean(axis=1)
+        final_pass = group_pass_masks[0]
+        for mask in group_pass_masks[1:]:
+            final_pass = final_pass & mask
+
+        self.last_diagnostics = {
+            "filter_steps": await self._build_filter_steps(
+                universe_size=len(symbols),
+                groups=cs_groups,
+                group_bindings=group_bindings,
+                rule_results=all_rule_results,
+                group_pass_by_id=group_pass_by_id,
+                final_pass=final_pass,
+            )
+        }
 
         # 11. 构建选股结果（含因子快照）
-        threshold = cs_group.threshold or 0.0
         results: dict[str, SelectionScore] = {}
-        for symbol in combined.index:
-            score = float(combined.loc[symbol])
-            if score >= threshold:
-                # 提取该标的的因子快照
+        for symbol in final_score.index:
+            score = float(final_score.loc[symbol])
+            if bool(final_pass.loc[symbol]):
                 factor_snapshot = self._extract_factor_snapshot(
                     symbol, cross_section_df, factor_ids,
                 )
@@ -230,9 +274,74 @@ class SelectionEngine:
         logger.info(
             f"SelectionEngine | strategy={strategy_id} | "
             f"selected={len(results)}/{len(symbols)} | "
-            f"method={cs_group.combination_method}"
+            f"cross_section_groups={len(cs_groups)}"
         )
         return results
+
+    async def _build_filter_steps(
+        self,
+        universe_size: int,
+        groups: list[StrategyRuleGroup],
+        group_bindings: dict[int, list[StrategyRuleBinding]],
+        rule_results: dict[str, pd.Series],
+        group_pass_by_id: dict[int, pd.Series],
+        final_pass: pd.Series,
+    ) -> list[dict[str, Any]]:
+        steps: list[dict[str, Any]] = [{
+            "step_type": "universe",
+            "label": "候选池",
+            "count": universe_size,
+            "pass_rate": 1.0,
+        }]
+        rule_ids = [b.rule_id for bindings in group_bindings.values() for b in bindings]
+        rule_models = await RuleRegistryModel.filter(rule_id__in=rule_ids) if rule_ids else []
+        rule_map = {r.rule_id: r for r in rule_models}
+
+        for group in groups:
+            bindings = sorted(
+                group_bindings.get(group.id, []),
+                key=lambda b: b.sort_order,
+            )
+            for binding in bindings:
+                series = rule_results.get(binding.rule_id)
+                if series is None:
+                    continue
+                pass_count = int((series > 0).sum())
+                rule_model = rule_map.get(binding.rule_id)
+                steps.append({
+                    "step_type": "rule",
+                    "group_id": group.id,
+                    "group_method": group.combination_method,
+                    "rule_id": binding.rule_id,
+                    "label": rule_model.name if rule_model else binding.rule_id,
+                    "expression": rule_model.expression if rule_model else None,
+                    "spi_class": rule_model.spi_class if rule_model else None,
+                    "factors": rule_model.factors if rule_model else [],
+                    "weight": binding.weight,
+                    "count": pass_count,
+                    "pass_rate": pass_count / universe_size if universe_size else 0.0,
+                })
+            group_mask = group_pass_by_id.get(group.id)
+            if group_mask is not None:
+                pass_count = int(group_mask.sum())
+                steps.append({
+                    "step_type": "group",
+                    "group_id": group.id,
+                    "group_method": group.combination_method,
+                    "label": f"规则组通过({group.combination_method})",
+                    "threshold": group.threshold,
+                    "count": pass_count,
+                    "pass_rate": pass_count / universe_size if universe_size else 0.0,
+                })
+
+        final_count = int(final_pass.sum())
+        steps.append({
+            "step_type": "final",
+            "label": "最终入选",
+            "count": final_count,
+            "pass_rate": final_count / universe_size if universe_size else 0.0,
+        })
+        return steps
 
     def _evaluate_expression_cross_section(
         self,
@@ -254,6 +363,31 @@ class SelectionEngine:
         except (KeyError, ValueError) as e:
             logger.warning(f"截面表达式求值异常: rule={rule.rule_id} error={e}")
             return pd.Series(0.0, index=cross_section_df.index)
+
+    async def _evaluate_plugin_cross_section(
+        self,
+        rule: RulePlugin,
+        cross_section_df: pd.DataFrame,
+        signal_date: date,
+        config_override: dict[str, Any],
+    ) -> pd.Series:
+        """截面模式下求值 SPI 插件规则，返回 Series(index=symbol)。"""
+        scores = pd.Series(0.0, index=cross_section_df.index)
+        for symbol in cross_section_df.index:
+            factor_values = {
+                col: float(value)
+                for col, value in cross_section_df.loc[symbol].items()
+                if pd.notna(value)
+            }
+            result = await rule.evaluate(RuleContext(
+                symbol=symbol,
+                signal_date=signal_date,
+                factor_values=factor_values,
+                cross_section_df=cross_section_df,
+                config=config_override,
+            ))
+            scores.loc[symbol] = result.score if result.passed else 0.0
+        return scores
 
     def _combine_cross_section(
         self,
@@ -477,29 +611,18 @@ class SelectionEngine:
     ) -> pd.DataFrame | None:
         """从 sdc_financial_indicator 加载财务指标数据
 
-        PIT (Point-in-Time) 加载策略（参考 docs/factor-architecture.md 10.7）:
-        - 优先使用 ann_date（公告日期）精确判断：ann_date <= signal_date 的最新财报
-        - ann_date 缺失时回退 end_date（报告期）+ 120天保守滞后
-        - 每个 symbol 取最新一期已公告的财报数据
+        季度因子截面补全策略:
+        - 按报告期 end_date 向前找最近一期季度因子
+        - 例如 03-31 之后的交易日使用 03-31 这期季度因子，直到下一期报告期出现
+        - 每个 symbol 取 end_date <= signal_date 的最新一条记录
         """
         from xqtrader.domain.market.models.financial_indicator import FinancialIndicator
 
-        # PIT 查询：ann_date <= signal_date 的最新财报
-        # 使用 ann_date 精确模式，避免未来函数风险
         records = await FinancialIndicator.filter(
             symbol__in=symbols,
-            ann_date__lte=signal_date,
+            end_date__lte=signal_date,
             order_by=FinancialIndicator.end_date.desc(),
         )
-
-        if not records:
-            # 回退：ann_date 缺失时使用 end_date + 120天保守滞后
-            conservative_date = signal_date - timedelta(days=120)
-            records = await FinancialIndicator.filter(
-                symbol__in=symbols,
-                end_date__lte=conservative_date,
-                order_by=FinancialIndicator.end_date.desc(),
-            )
 
         if not records:
             return None
@@ -516,6 +639,8 @@ class SelectionEngine:
                 field = _FINANCIAL_INDICATOR_FIELD_MAP.get(fid)
                 if field:
                     val = getattr(r, field, None)
+                    if val is None and fid == "roe":
+                        val = getattr(r, "roe", None)
                     if val is not None:
                         row[fid] = float(val)
             rows.append(row)

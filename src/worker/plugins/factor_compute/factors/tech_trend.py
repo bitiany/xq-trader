@@ -117,6 +117,11 @@ class ADXFactor(FactorPlugin):
     requires_full_history: bool = True
     is_composite: bool = True
     composite_factor_ids: list[str] = ["adx_14", "adx_plus_di", "adx_minus_di"]
+    child_display_names: dict[str, str] = {
+        "adx_14": "14日ADX",
+        "adx_plus_di": "上升方向指标",
+        "adx_minus_di": "下降方向指标",
+    }
 
     def __init__(self, period: int = 14, **kwargs: Any) -> None:
         self.period = period
@@ -187,6 +192,11 @@ class BOLLPositionFactor(FactorPlugin):
     requires_full_history: bool = False
     is_composite: bool = True
     composite_factor_ids: list[str] = ["boll_position", "boll_position_delta", "boll_width"]
+    child_display_names: dict[str, str] = {
+        "boll_position": "布林带位置",
+        "boll_position_delta": "布林带位置变化",
+        "boll_width": "布林带宽度",
+    }
 
     def __init__(self, period: int = 20, nbdev: int = 2, **kwargs: Any) -> None:
         self.period = period

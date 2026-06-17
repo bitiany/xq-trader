@@ -39,6 +39,7 @@ class FactorDefinition:
     description: str = ""
     is_composite: bool = False
     composite_factor_ids: list[str] = field(default_factory=list)
+    child_display_names: dict[str, str] = field(default_factory=dict)
     skip_preprocess: bool = False
     composite_method: str = ""
 
@@ -70,6 +71,7 @@ class FactorPlugin(ABC):
     params: dict[str, Any] = {}
     is_composite: bool = False
     composite_factor_ids: list[str] = []
+    child_display_names: dict[str, str] = {}
     skip_preprocess: bool = False
     composite_method: str = ""
     data_origin: str = "computed"
@@ -112,6 +114,7 @@ class FactorPlugin(ABC):
             tags=self.tags,
             is_composite=self.is_composite,
             composite_factor_ids=list(self.composite_factor_ids),
+            child_display_names=dict(self.child_display_names),
             skip_preprocess=self.skip_preprocess,
             composite_method=self.composite_method,
         )

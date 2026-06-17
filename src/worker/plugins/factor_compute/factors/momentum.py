@@ -60,7 +60,7 @@ class MomentumFactor(FactorPlugin):
     def __init__(self, period: int = 20, **kwargs: Any) -> None:
         self.period = period
         self.factor_id = f"mom_{period}d"
-        self.display_name = f"Momentum({period})"
+        self.display_name = f"{period}日动量"
         self.min_periods = period + 1
         self.params = {"period": period}
 

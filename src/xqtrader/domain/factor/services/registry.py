@@ -211,9 +211,10 @@ async def sync_to_registry() -> int:
         # 组合因子的子因子自动注册（如 macd_dif / macd_dea / macd_hist）
         if defn.is_composite and defn.composite_factor_ids:
             for child_id in defn.composite_factor_ids:
+                child_display_name = defn.child_display_names[child_id]
                 rows.append(FacFactorRegistry(
                     factor_id=child_id,
-                    display_name=f"{defn.display_name}·{child_id}",
+                    display_name=child_display_name,
                     category=defn.category,
                     group_id=defn.group_id or "",
                     direction=defn.direction,
