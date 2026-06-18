@@ -22,7 +22,7 @@ _BUILTIN_POOLS = [
 ]
 
 
-@router.get("/pools", summary="样本池列表")
+@router.get("/pools", summary="样本池列表", operation_id="list_universe_pools")
 async def list_pools(include_db: bool = Query(default=True, description="是否合并数据库样本池")) -> list[dict]:
     """返回内置样本池 + 数据库注册的样本池。"""
     out: list[dict] = list(_BUILTIN_POOLS)
@@ -41,7 +41,7 @@ async def list_pools(include_db: bool = Query(default=True, description="是否�
     return out
 
 
-@router.get("/pools/{pool_id}/symbols", summary="样本池标的列表")
+@router.get("/pools/{pool_id}/symbols", summary="样本池标的列表", operation_id="get_universe_pool_symbols")
 async def list_pool_symbols(
     pool_id: str,
     page: int = Query(default=1, ge=1),

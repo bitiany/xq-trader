@@ -278,13 +278,13 @@ async def cancel_order_async(
 # ── 查询 ──────────────────────────────────────────────────
 
 
-@router.get("/asset", summary="查询资金资产")
+@router.get("/asset", summary="查询资金资产", operation_id="get_broker_asset")
 async def query_asset() -> dict:
     """查询当前账户资金资产。"""
     return await _trader.query_asset()
 
 
-@router.get("/orders", summary="查询当日委托")
+@router.get("/orders", summary="查询当日委托", operation_id="list_broker_orders")
 async def query_orders(
     cancelable_only: bool = Query(default=False, description="是否仅查询可撤委托"),
 ) -> dict:
@@ -302,21 +302,21 @@ async def query_order(order_id: int) -> dict:
     return order
 
 
-@router.get("/trades", summary="查询当日成交")
+@router.get("/trades", summary="查询当日成交", operation_id="list_broker_trades")
 async def query_trades() -> dict:
     """查询当日成交列表。"""
     trades = await _trader.query_trades()
     return {"trades": trades}
 
 
-@router.get("/positions", summary="查询所有持仓")
+@router.get("/positions", summary="查询所有持仓", operation_id="list_broker_positions")
 async def query_positions() -> dict:
     """查询所有持仓。"""
     positions = await _trader.query_positions()
     return {"positions": positions}
 
 
-@router.get("/positions/{stock_code}", summary="查询单只股票持仓")
+@router.get("/positions/{stock_code}", summary="查询单只股票持仓", operation_id="get_broker_position")
 async def query_position(stock_code: str) -> dict:
     """查询单只股票持仓。"""
     position = await _trader.query_position(stock_code)

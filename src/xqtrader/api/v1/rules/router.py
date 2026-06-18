@@ -13,7 +13,7 @@ from xqtrader.domain.trading.models.rule import RuleRegistry as RuleRegistryMode
 router = APIRouter(prefix="/rules", tags=["规则注册表"])
 
 
-@router.get("", summary="规则列表")
+@router.get("", summary="规则列表", operation_id="list_rules")
 async def list_rules(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=500),
@@ -64,7 +64,7 @@ async def create_rule(req: RuleCreate) -> dict:
     return rule.to_dict()
 
 
-@router.get("/{rule_id}", summary="规则详情")
+@router.get("/{rule_id}", summary="规则详情", operation_id="get_rule")
 async def get_rule(rule_id: str) -> dict:
     rule = await RuleRegistryModel.get_or_none(rule_id=rule_id)
     if rule is None:

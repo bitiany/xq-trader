@@ -40,7 +40,7 @@ async def list_stocks(
     )
 
 
-@router.get("/search", summary="搜索股票")
+@router.get("/search", summary="搜索股票", operation_id="search_stocks")
 async def search_stocks(
     q: str = Query(default="", description="股票代码、名称或拼音"),
     limit: int = Query(default=20, ge=1, le=50, description="返回数量"),
@@ -58,12 +58,12 @@ async def get_stock_tags(symbol: str) -> list[dict]:
     return await _directory_service.get_stock_tags(symbol)
 
 
-@router.get("/{symbol}", summary="查询个股概览")
+@router.get("/{symbol}", summary="查询个股概览", operation_id="get_stock_overview")
 async def get_stock_overview(symbol: str) -> dict:
     return await _detail_service.get_overview(symbol)
 
 
-@router.get("/{symbol}/kline", summary="查询个股日K及技术指标")
+@router.get("/{symbol}/kline", summary="查询个股日K及技术指标", operation_id="get_stock_kline")
 async def get_stock_kline(
     symbol: str,
     limit: int = Query(default=1200, ge=100, le=12000, description="K线条数"),
@@ -84,22 +84,22 @@ async def get_stock_chanlun(symbol: str) -> dict:
     return await _chanlun_service.get_chanlun(symbol)
 
 
-@router.get("/{symbol}/news", summary="查询个股资讯")
+@router.get("/{symbol}/news", summary="查询个股资讯", operation_id="get_stock_news")
 async def get_stock_news(symbol: str) -> dict:
     return await _detail_service.get_news(symbol)
 
 
-@router.get("/{symbol}/announcements", summary="查询个股公告")
+@router.get("/{symbol}/announcements", summary="查询个股公告", operation_id="get_stock_announcements")
 async def get_stock_announcements(symbol: str) -> dict:
     return await _detail_service.get_announcements(symbol)
 
 
-@router.get("/{symbol}/financials", summary="查询个股财务摘要")
+@router.get("/{symbol}/financials", summary="查询个股财务摘要", operation_id="get_stock_financials")
 async def get_stock_financials(symbol: str) -> dict:
     return await _detail_service.get_financials(symbol)
 
 
-@router.get("/{symbol}/fund-flow", summary="查询个股资金流")
+@router.get("/{symbol}/fund-flow", summary="查询个股资金流", operation_id="get_stock_fund_flow")
 async def get_stock_fund_flow(
     symbol: str,
     limit: int = Query(default=120, ge=1, le=12000, description="返回条数"),
@@ -107,6 +107,6 @@ async def get_stock_fund_flow(
     return await _fund_flow_service.get_fund_flow(symbol, limit=limit)
 
 
-@router.get("/{symbol}/diagnosis", summary="查询个股诊断")
+@router.get("/{symbol}/diagnosis", summary="查询个股诊断", operation_id="get_stock_diagnosis")
 async def get_stock_diagnosis(symbol: str) -> dict:
     return await _detail_service.get_diagnosis(symbol)

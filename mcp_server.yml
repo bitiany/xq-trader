@@ -1,0 +1,86 @@
+# xqtrader OpenAPI -> MCP 通用转换器配置
+# 默认启动后会从 source.url 拉取 OpenAPI，对每个 group 暴露一个独立 SSE 端点：
+#   /sse                 -> default_group
+#   /sse/<group_name>    -> 对应分组
+
+server:
+  name: xqtrader
+  transport: sse
+  host: 127.0.0.1
+  port: 8097
+  routes_prefix: /sse
+  default_group: stocks
+  tool_name_prefix: xq_
+
+source:
+  type: http
+  url: http://127.0.0.1:8096/openapi.json
+  api_base_url: http://127.0.0.1:8096
+  refresh_interval: 0
+
+invoker:
+  timeout_seconds: 30
+  max_keepalive_connections: 32
+  unwrap_response_data: true
+
+# 全局黑名单（任何 group 都不会暴露）
+deny:
+  - method: POST
+  - method: PUT
+  - method: DELETE
+  - method: PATCH
+  - path_glob: /api/v1/agent/**
+
+groups:
+  stocks:
+    title: 个股研究
+    description: 个股行情、估值、技术面、资金流向、新闻公告
+    include:
+      - operation_id: search_stocks
+      - operation_id: get_stock_overview
+      - operation_id: get_stock_kline
+      - operation_id: get_stock_financials
+      - operation_id: get_stock_fund_flow
+      - operation_id: get_stock_news
+      - operation_id: get_stock_announcements
+      - operation_id: get_stock_diagnosis
+
+  factors:
+    title: 因子研究
+    description: 因子列表、分类、值与统计
+    include:
+      - operation_id: list_factors
+      - operation_id: list_factor_categories
+      - operation_id: get_factor
+      - operation_id: get_factor_values
+      - operation_id: get_factor_stats_latest
+
+  strategies:
+    title: 策略与规则
+    description: 策略、规则组、规则绑定
+    include:
+      - operation_id: list_strategies
+      - operation_id: get_strategy
+      - operation_id: list_strategy_rule_groups
+      - operation_id: list_rule_group_bindings
+      - operation_id: list_rules
+      - operation_id: get_rule
+
+  selection:
+    title: 选股与样本池
+    description: 样本池、选股结果与日期
+    include:
+      - operation_id: list_universe_pools
+      - operation_id: get_universe_pool_symbols
+      - operation_id: list_selection_results
+      - operation_id: list_selection_result_dates
+
+  positions:
+    title: 持仓盘点
+    description: 持仓、资产、订单与成交（仅只读）
+    include:
+      - operation_id: list_broker_positions
+      - operation_id: get_broker_position
+      - operation_id: get_broker_asset
+      - operation_id: list_broker_orders
+      - operation_id: list_broker_trades

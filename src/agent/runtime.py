@@ -1,4 +1,4 @@
-"""Nanobot Runtime 工厂。"""
+"""Nanobot Runtime 工厂 — 通过 MCP 接入工具，不再注册自定义 HTTP 包装。"""
 
 from __future__ import annotations
 
@@ -9,11 +9,6 @@ from typing import Any
 from nanobot.nanobot import Nanobot
 
 from agent.config import agent_settings
-from agent.tools.stock_financials import GetStockFinancialsTool
-from agent.tools.stock_fund_flow import GetStockFundFlowTool
-from agent.tools.stock_overview import GetStockOverviewTool
-from agent.tools.stock_position import GetStockPositionTool
-from agent.tools.stock_technicals import GetStockTechnicalsTool
 from framework.commons.logger import get_logger
 
 logger = get_logger("AGENT_RUNTIME")
@@ -77,6 +72,21 @@ def _patch_nanobot_list_arguments() -> None:
     logger.info("Patched nanobot.agent.runner.AgentRunner._run_tool for list-argument normalization")
 
 
+def _build_mcp_servers() -> dict[str, dict[str, Any]]:
+    """根据 MCP_GROUPS 配置生成 mcpServers 节点（多端点路由静态分流）。"""
+
+    base = agent_settings.MCP_BASE_URL.rstrip("/")
+    return {
+        f"xq_{group}": {
+            "type": "sse",
+            "url": f"{base}/sse/{group}",
+            "toolTimeout": agent_settings.MCP_TOOL_TIMEOUT,
+            "enabledTools": ["*"],
+        }
+        for group in agent_settings.MCP_GROUPS
+    }
+
+
 def _write_runtime_config() -> None:
     _WORKSPACE.mkdir(parents=True, exist_ok=True)
     data = {
@@ -102,37 +112,13 @@ def _write_runtime_config() -> None:
         "tools": {
             "web": {"enable": True},
             "exec": {"enable": False},
+            "mcpServers": _build_mcp_servers(),
         },
     }
     _CONFIG_PATH.write_text(
         json.dumps(data, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
-
-
-def _register_custom_tools(bot: Nanobot) -> None:
-    registry = bot._loop.tools
-    logger.info("Registered tools before custom: %s", registry.tool_names)
-    for tool_cls in (
-        GetStockOverviewTool,
-        GetStockFinancialsTool,
-        GetStockTechnicalsTool,
-        GetStockPositionTool,
-        GetStockFundFlowTool,
-    ):
-        instance = tool_cls()
-        registry.register(instance)
-        logger.info("Registered custom tool: %s", instance.name)
-
-    _register_web_tools(registry)
-
-
-def _register_web_tools(registry: Any) -> None:
-    from agent.tools.web_search import WebSearchCustomTool
-
-    search_tool = WebSearchCustomTool()
-    registry.register(search_tool)
-    logger.info("Registered custom tool: %s", search_tool.name)
 
 
 _bot_cache: dict[str, Nanobot] = {}
@@ -147,12 +133,12 @@ def build_bot(*, model: str | None = None) -> Nanobot:
     bot = Nanobot.from_config(_CONFIG_PATH, workspace=_WORKSPACE)
     if effective_model:
         bot._loop.model = effective_model
-    _register_custom_tools(bot)
     _bot_cache[effective_model] = bot
     logger.info(
-        "Nanobot created: workspace=%s model=%s base=%s",
+        "Nanobot created: workspace=%s model=%s base=%s mcp_groups=%s",
         _WORKSPACE,
         bot._loop.model,
         agent_settings.LLM_BASE_URL,
+        agent_settings.MCP_GROUPS,
     )
     return bot

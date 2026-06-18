@@ -33,6 +33,8 @@ dependencies = [
     "uvicorn[standard]>=0.27,<1.0",
     "xtquant==250516.1.1",
     "xgboost==3.2.0",
+    "mcp>=1.27,<2.0",
+    "starlette>=0.36,<1.0",
 ]
 
 [project.optional-dependencies]
@@ -50,6 +52,7 @@ xqtrader-api = "xqtrader.main:run"
 xqtrader-worker = "worker.celery_entry:run_worker"
 xqtrader-beat = "worker.celery_entry:run_beat"
 xqtrader-agent = "agent.worker:main"
+xqtrader-mcp = "mcp_server.__main__:main"
 
 [[tool.uv.index]]
 default = true
@@ -58,7 +61,7 @@ url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["xqtrader*", "agent*"]
+include = ["xqtrader*", "agent*", "mcp_server*"]
 
 [tool.ruff]
 target-version = "py310"
@@ -68,15 +71,15 @@ line-length = 120
 select = ["E", "F", "I", "N", "W", "UP"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["framework", "xqtrader", "agent"]
+known-first-party = ["framework", "xqtrader", "agent", "mcp_server"]
 
 [tool.mypy]
 python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
-packages = ["framework", "xqtrader", "agent", "skills"]
+packages = ["framework", "xqtrader", "agent", "mcp_server", "skills"]
 
 [[tool.mypy.overrides]]
-module = ["psycopg2", "psycopg.*", "xtquant.*", "langgraph.checkpoint.postgres", "nanobot.*"]
+module = ["psycopg2", "psycopg.*", "xtquant.*", "langgraph.checkpoint.postgres", "nanobot.*", "mcp.*"]
 ignore_missing_imports = true

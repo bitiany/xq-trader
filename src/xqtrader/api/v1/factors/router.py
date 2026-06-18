@@ -18,7 +18,7 @@ router = APIRouter(prefix="/factors", tags=["因子查询"])
 
 # ==================== 因子注册表 ====================
 
-@router.get("", summary="因子列表")
+@router.get("", summary="因子列表", operation_id="list_factors")
 async def list_factors(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),
@@ -42,7 +42,7 @@ async def list_factors(
     )
 
 
-@router.get("/categories", summary="因子分类聚合")
+@router.get("/categories", summary="因子分类聚合", operation_id="list_factor_categories")
 async def list_categories() -> list[dict]:
     """按 category 聚合统计，供前端筛选 chip 使用。"""
     items = await FacFactorRegistry.filter(limit=0)
@@ -52,7 +52,7 @@ async def list_categories() -> list[dict]:
     return [{"category": k, "count": v} for k, v in sorted(bucket.items())]
 
 
-@router.get("/{factor_id}", summary="因子详情")
+@router.get("/{factor_id}", summary="因子详情", operation_id="get_factor")
 async def get_factor(factor_id: str) -> dict:
     f = await FacFactorRegistry.get_or_none(factor_id=factor_id)
     if f is None:
@@ -62,7 +62,7 @@ async def get_factor(factor_id: str) -> dict:
 
 # ==================== 因子值（截面） ====================
 
-@router.get("/{factor_id}/values", summary="因子值查询（截面）")
+@router.get("/{factor_id}/values", summary="因子值查询（截面）", operation_id="get_factor_values")
 async def list_factor_values(
     factor_id: str,
     trade_date: date = Query(..., description="交易日期"),
@@ -117,7 +117,7 @@ async def get_factor_stats(
     return [r.to_dict() for r in rows]
 
 
-@router.get("/{factor_id}/stats/latest", summary="因子最新评估快照")
+@router.get("/{factor_id}/stats/latest", summary="因子最新评估快照", operation_id="get_factor_stats_latest")
 async def get_factor_stats_latest(
     factor_id: str,
     pool_id: str = Query(default="all", description="样本池"),

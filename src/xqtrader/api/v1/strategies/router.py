@@ -54,7 +54,7 @@ async def _get_binding_for_group_or_404(
 
 # ==================== 策略 CRUD ====================
 
-@router.get("", summary="策略列表")
+@router.get("", summary="策略列表", operation_id="list_strategies")
 async def list_strategies(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=500),
@@ -79,7 +79,7 @@ async def list_strategies(
     )
 
 
-@router.get("/{strategy_id}", summary="策略详情（含规则组与绑定）")
+@router.get("/{strategy_id}", summary="策略详情（含规则组与绑定）", operation_id="get_strategy")
 async def get_strategy(strategy_id: str) -> dict:
     strategy = await _get_strategy_or_404(strategy_id)
 
@@ -138,7 +138,7 @@ async def delete_strategy(strategy_id: str) -> dict:
 
 # ==================== 规则组 ====================
 
-@router.get("/{strategy_id}/rule-groups", summary="规则组列表")
+@router.get("/{strategy_id}/rule-groups", summary="规则组列表", operation_id="list_strategy_rule_groups")
 async def list_rule_groups(strategy_id: str) -> list[dict]:
     s = await _get_strategy_or_404(strategy_id)
     groups = await StrategyRuleGroup.filter(strategy_id=s.id)
@@ -171,7 +171,11 @@ async def delete_rule_group(strategy_id: str, group_id: int) -> dict:
 
 # ==================== 规则绑定 ====================
 
-@router.get("/{strategy_id}/rule-groups/{group_id}/bindings", summary="规则绑定列表")
+@router.get(
+    "/{strategy_id}/rule-groups/{group_id}/bindings",
+    summary="规则绑定列表",
+    operation_id="list_rule_group_bindings",
+)
 async def list_bindings(strategy_id: str, group_id: int) -> list[dict]:
     await _get_group_for_strategy_or_404(strategy_id, group_id)
     bindings = await StrategyRuleBinding.filter(

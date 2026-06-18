@@ -128,7 +128,7 @@ async def run_selection(req: SelectionRunRequest) -> SelectionRunResponse:
     )
 
 
-@router.get("/results", summary="查询历史选股结果（分页）")
+@router.get("/results", summary="查询历史选股结果（分页）", operation_id="list_selection_results")
 async def list_selection_results(
     strategy_id: str | None = Query(default=None, description="策略编码过滤"),
     signal_date: date | None = Query(default=None, description="信号日过滤"),
@@ -181,7 +181,7 @@ async def list_selection_results(
     return build_paginated_response(payload, total, page, page_size)
 
 
-@router.get("/results/dates", summary="查询某策略的所有信号日")
+@router.get("/results/dates", summary="查询某策略的所有信号日", operation_id="list_selection_result_dates")
 async def list_signal_dates(
     strategy_id: str | None = Query(default=None, description="策略编码过滤"),
     instance_id: int | None = Query(default=None, description="策略实例ID过滤"),
