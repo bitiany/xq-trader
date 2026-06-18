@@ -100,6 +100,7 @@ redbeat.*
 celerybeat*
 /src/agent/workspace/sessions/*
 /src/agent/workspace/.nanobot/
+/src/agent/workspace/memory/
 /src/agent/workspace/config.json
 /src/agent/workspace/extract_kline.py
 /storage/
