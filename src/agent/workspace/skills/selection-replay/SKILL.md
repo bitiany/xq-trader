@@ -24,9 +24,9 @@ keywords: 选股, 选股结果, 样本池, universe, 复盘, 候选
 
 ## 执行流程
 
-1. 若用户未指定信号日：先 `list_selection_result_dates` 取最新若干日。
-2. 用 `list_selection_results` 拉某日入选标的（按 rank 排序）。
-3. 必要时对前 3 只入选标的并行调用 `get_stock_overview` 补充实时行情。
+1. 若用户未指定信号日：先 `mcp_xq_selection_xq_list_selection_result_dates` 取最新若干日。
+2. 用 `mcp_xq_selection_xq_list_selection_results` 拉某日入选标的（按 rank 排序）。
+3. 必要时对前 3 只入选标的并行调用 `mcp_xq_stocks_xq_get_stock_overview` 补充实时行情。
 4. 输出 Markdown 表格：rank / symbol / name / score / direction / 关键因子值。
 
 ## 约束

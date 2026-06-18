@@ -25,9 +25,9 @@ keywords: 持仓, 资产, 委托, 成交, 盘点, position, asset
 
 ## 执行流程
 
-1. 用户问"账户怎么样"：先 `get_broker_asset` 再 `list_broker_positions`，输出 总资产 / 可用 / 持仓市值 / 当日盈亏。
-2. 用户问某只股票持仓：直接 `get_broker_position`，结合 `get_stock_overview` 补最新价计算浮盈浮亏。
-3. 用户问当日交易：分别调用 `list_broker_orders` 和 `list_broker_trades`，对比委托与成交差异。
+1. 用户问"账户怎么样"：先 `mcp_xq_positions_xq_get_broker_asset` 再 `mcp_xq_positions_xq_list_broker_positions`，输出 总资产 / 可用 / 持仓市值 / 当日盈亏。
+2. 用户问某只股票持仓：直接 `mcp_xq_positions_xq_get_broker_position`，结合 `mcp_xq_stocks_xq_get_stock_overview` 补最新价计算浮盈浮亏。
+3. 用户问当日交易：分别调用 `mcp_xq_positions_xq_list_broker_orders` 和 `mcp_xq_positions_xq_list_broker_trades`，对比委托与成交差异。
 4. 数据缺失或 QMT 未连接时，明确返回"行情/交易服务未连接"，不要编造。
 
 ## 约束

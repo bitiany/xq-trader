@@ -38,14 +38,14 @@ keywords: 分析, 诊断, 评估, 解读, 个股, 股票, 五步法
 ## 执行流程（五步法）
 
 ### 第一步：行业赛道分析
-**调用**：`get_stock_overview`
+**调用**：`mcp_xq_stocks_xq_get_stock_overview`
 
 要点：行业定位、生命周期、竞争格局、行业空间、政策与宏观环境。
 
 > 行业深度数据基于 overview 中的公司简介与行业标签做逻辑推演，须明确标注"基于公开信息推断"。
 
 ### 第二步：基本面分析
-**调用**：`get_stock_overview` + `get_stock_financials`（可并行）
+**调用**：`mcp_xq_stocks_xq_get_stock_overview` + `mcp_xq_stocks_xq_get_stock_financials`（可并行）
 
 要点：
 1. 商业模式与护城河
@@ -55,12 +55,12 @@ keywords: 分析, 诊断, 评估, 解读, 个股, 股票, 五步法
 5. 风险排查：商誉、股权质押、主营占比、利润与现金流背离
 
 ### 第三步：估值分析
-**调用**：复用第一步 `get_stock_overview` 的估值字段（无需重复调用）
+**调用**：复用第一步 `mcp_xq_stocks_xq_get_stock_overview` 的估值字段（无需重复调用）
 
 要点：PE / PB / PS 分位、行业均值对比、股息率、市值规模，结合行业特性综合判断。
 
 ### 第四步：技术面与资金面分析
-**调用**：先 `get_stock_kline`，再 `get_stock_fund_flow`（分步调用）
+**调用**：先 `mcp_xq_stocks_xq_get_stock_kline`，再 `mcp_xq_stocks_xq_get_stock_fund_flow`（分步调用）
 
 要点：
 1. 趋势：多/空头排列、金叉/死叉
@@ -70,7 +70,7 @@ keywords: 分析, 诊断, 评估, 解读, 个股, 股票, 五步法
 5. 关键价位：近期支撑位与压力位
 
 ### 第五步：综合评估与决策参考
-**调用顺序**：`get_stock_position`（按需，仅在用户提及持仓时）→ `web_search`（新闻）→ `get_stock_announcements` → `get_stock_diagnosis`（辅助交叉验证）
+**调用顺序**：`mcp_xq_positions_xq_get_broker_position`（按需，仅在用户提及持仓时）→ `web_search`（新闻）→ `mcp_xq_stocks_xq_get_stock_announcements` → `mcp_xq_stocks_xq_get_stock_diagnosis`（辅助交叉验证）
 
 要点：
 1. 新闻资讯与事件驱动（关键词："{股票名称} 最新消息"、"{股票名称} 公告"）

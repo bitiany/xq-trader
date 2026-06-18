@@ -26,10 +26,10 @@ keywords: 策略, 规则, rule, strategy, 规则组, 绑定
 
 ## 执行流程
 
-1. 用户给出 `strategy_id` 时，直接 `get_strategy` 获取一站式视图。
-2. 否则先 `list_strategies` 用 `keyword` 过滤候选，再让用户确认 `strategy_id`。
+1. 用户给出 `strategy_id` 时，直接 `mcp_xq_strategies_xq_get_strategy` 获取一站式视图。
+2. 否则先 `mcp_xq_strategies_xq_list_strategies` 用 `keyword` 过滤候选，再让用户确认 `strategy_id`。
 3. 解读规则组职责（截面 / 时序）、规则绑定的权重与方向。
-4. 如需要，针对绑定的规则用 `get_rule` 看表达式，再 `get_factor` 回查依赖因子。
+4. 如需要，针对绑定的规则用 `mcp_xq_strategies_xq_get_rule` 看表达式，再 `mcp_xq_factors_xq_get_factor` 回查依赖因子。
 
 ## 约束
 
