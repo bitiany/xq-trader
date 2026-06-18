@@ -1,14 +1,18 @@
 import { useEffect, useState } from 'react'
 import {
+  BarChart3,
   Check,
   ChevronRight,
   Circle,
+  DollarSign,
   FileText,
   FolderOpen,
+  Globe,
   Loader2,
   Pencil,
   Search,
   Terminal,
+  TrendingUp,
   X,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -33,6 +37,19 @@ function toolIcon(name: string) {
       return FolderOpen
     case 'grep':
       return Search
+    case 'web_search':
+    case 'web_fetch':
+      return Globe
+    case 'get_stock_overview':
+      return BarChart3
+    case 'get_stock_financials':
+      return FileText
+    case 'get_stock_technicals':
+      return TrendingUp
+    case 'get_stock_position':
+      return DollarSign
+    case 'get_stock_fund_flow':
+      return TrendingUp
     default:
       return Terminal
   }

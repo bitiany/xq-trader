@@ -78,7 +78,14 @@
         "list_dir": "浏览目录",
         "grep": "搜索",
         "notebook_edit": "编辑 Notebook",
-        "spawn": "启动子任务"
+        "spawn": "启动子任务",
+        "web_search": "网络搜索",
+        "web_fetch": "抓取网页",
+        "get_stock_overview": "个股概览",
+        "get_stock_financials": "财务数据",
+        "get_stock_technicals": "技术指标",
+        "get_stock_position": "持仓查询",
+        "get_stock_fund_flow": "资金流向"
       }
     },
     "quick": {
@@ -767,19 +774,44 @@
       "macd": "MACD",
       "kdj": "KDJ",
       "rsi": "RSI",
-      "bias": "BIAS"
+      "bias": "BIAS",
+      "adx": "ADX",
+      "boll": "布林带",
+      "chanlun": "缠论",
+      "td9": "神奇九转",
+      "fundflow": "资金博弈"
     },
     "intro": {
       "title": "公司简介"
     },
     "tabs": {
       "news": "资讯",
-      "financials": "财报",
+      "fundFlow": "资金",
+      "announcements": "公告",
+      "financials": "财务",
       "diagnosis": "诊股"
     },
     "news": {
       "placeholder": "资讯数据源接入中，敬请期待",
       "empty": "暂无资讯"
+    },
+    "announcements": {
+      "placeholder": "公告数据源接入中，敬请期待",
+      "empty": "暂无公告"
+    },
+    "fundFlow": {
+      "empty": "暂无资金流数据",
+      "tradeDate": "日期",
+      "close": "收盘价",
+      "pctChange": "涨跌幅",
+      "mainNetAmt": "主力净额",
+      "mainNetPct": "主力占比",
+      "hugeNetAmt": "超大单净额",
+      "bigNetAmt": "大单净额",
+      "midNetAmt": "中单净额",
+      "smallNetAmt": "小单净额",
+      "todayFlow": "今日资金流向",
+      "flowTrend": "资金流向趋势"
     },
     "financials": {
       "income": "利润表",
@@ -825,6 +857,9 @@
     "loading": "加载中...",
     "retry": "重试",
     "refresh": "刷新",
+    "back": "返回",
+    "aiAnalysis": "AI 分析",
+    "backtest": "回测",
     "search": "搜索",
     "edit": "编辑",
     "loadFailed": "加载失败",

@@ -77,7 +77,14 @@
         "list_dir": "List directory",
         "grep": "Search",
         "notebook_edit": "Edit notebook",
-        "spawn": "Spawn subtask"
+        "spawn": "Spawn subtask",
+        "web_search": "Web search",
+        "web_fetch": "Fetch page",
+        "get_stock_overview": "Stock overview",
+        "get_stock_financials": "Financials",
+        "get_stock_technicals": "Technicals",
+        "get_stock_position": "Position",
+        "get_stock_fund_flow": "Fund flow"
       }
     },
     "quick": {

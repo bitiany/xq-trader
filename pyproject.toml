@@ -10,6 +10,7 @@ dependencies = [
     "celery[redis]>=5.4,<6.0",
     "cryptography>=42.0,<45.0",
     "fastapi>=0.109,<1.0",
+    "httpx>=0.27,<1.0",
     "jsonpath-ng>=1.6,<2.0",
     "jsonschema>=4.20,<5.0",
     "langchain==1.3.2",
@@ -48,6 +49,7 @@ dev = [
 xqtrader-api = "xqtrader.main:run"
 xqtrader-worker = "worker.celery_entry:run_worker"
 xqtrader-beat = "worker.celery_entry:run_beat"
+xqtrader-agent = "agent.worker:main"
 
 [[tool.uv.index]]
 default = true
@@ -56,7 +58,7 @@ url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["xqtrader*"]
+include = ["xqtrader*", "agent*"]
 
 [tool.ruff]
 target-version = "py310"
@@ -66,15 +68,15 @@ line-length = 120
 select = ["E", "F", "I", "N", "W", "UP"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["framework", "xqtrader"]
+known-first-party = ["framework", "xqtrader", "agent"]
 
 [tool.mypy]
 python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
-packages = ["framework", "xqtrader", "skills"]
+packages = ["framework", "xqtrader", "agent", "skills"]
 
 [[tool.mypy.overrides]]
-module = ["psycopg2", "psycopg.*", "xtquant.*", "langgraph.checkpoint.postgres"]
+module = ["psycopg2", "psycopg.*", "xtquant.*", "langgraph.checkpoint.postgres", "nanobot.*"]
 ignore_missing_imports = true

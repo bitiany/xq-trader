@@ -1,21 +1,25 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import {
+  fetchStockChanlun,
   fetchStockKline,
-  type IndicatorKind,
+  type ChanlunResponse,
+  type MainIndicator,
+  type SubIndicator,
   type KlineBarItem,
-  type StockKlineResponse,
 } from '@/api/stock'
-import { resolveMaOverlays, resolveOverlays, type OverlaySeries } from '@/utils/klineIndicators'
 
-export function useStockKline(symbol: string, indicator: IndicatorKind) {
+export function useStockKline(symbol: string, mainIndicator: MainIndicator, subIndicator: SubIndicator) {
   const [bars, setBars] = useState<KlineBarItem[]>([])
-  const [apiOverlays, setApiOverlays] = useState<Record<string, OverlaySeries>>({})
-  const [apiMaOverlays, setApiMaOverlays] = useState<OverlaySeries>({})
+  const [apiOverlays, setApiOverlays] = useState<Record<string, Record<string, Array<number | null>>>>({})
+  const [apiMaOverlays, setApiMaOverlays] = useState<Record<string, Array<number | null>>>({})
+  const [chanlun, setChanlun] = useState<ChanlunResponse | null>(null)
+  const [chanlunLoading, setChanlunLoading] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const loadedSymbolRef = useRef<string>('')
+  const chanlunLoadedRef = useRef<string>('')
   const loadingRef = useRef(false)
 
   const loadBars = useCallback(async (sym: string) => {
@@ -26,7 +30,7 @@ export function useStockKline(symbol: string, indicator: IndicatorKind) {
     setLoading(true)
     setError(null)
     try {
-      const response = await fetchStockKline(sym, 'ma')
+      const response = await fetchStockKline(sym)
       setBars(response.bars)
       setApiOverlays(response.overlays ?? {})
       setApiMaOverlays(response.ma_overlays ?? {})
@@ -44,6 +48,7 @@ export function useStockKline(symbol: string, indicator: IndicatorKind) {
       setBars([])
       setApiOverlays({})
       setApiMaOverlays({})
+      setChanlun(null)
       setLoading(false)
       return
     }
@@ -53,9 +58,45 @@ export function useStockKline(symbol: string, indicator: IndicatorKind) {
     void loadBars(symbol)
   }, [symbol, loadBars])
 
-  const indicatorOverlays = apiOverlays[indicator] ?? {}
-  const overlays = resolveOverlays(bars, indicator, indicatorOverlays)
-  const maOverlays = resolveMaOverlays(bars, apiMaOverlays)
+  useEffect(() => {
+    if (mainIndicator !== 'chanlun' || !symbol || chanlunLoadedRef.current === symbol) {
+      setChanlunLoading(false)
+      return
+    }
+    let cancelled = false
+    setChanlunLoading(true)
+    fetchStockChanlun(symbol)
+      .then((data) => {
+        if (!cancelled) {
+          setChanlun(data)
+          chanlunLoadedRef.current = symbol
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          console.error('[useStockKline] 缠论数据加载失败:', err)
+          setChanlun(null)
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setChanlunLoading(false)
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [mainIndicator, symbol])
 
-  return { bars, overlays, maOverlays, loading, error, reload: () => void loadBars(symbol) }
+  const maOverlays = useMemo(() => apiMaOverlays, [apiMaOverlays])
+  const allOverlays = useMemo(() => {
+    return Object.fromEntries(
+      (['ma', 'macd', 'kdj', 'rsi', 'bias', 'adx', 'boll', 'td9'] as const).map((kind) => [
+        kind,
+        kind === 'ma' ? maOverlays : (apiOverlays[kind] ?? {}),
+      ]),
+    )
+  }, [apiOverlays, maOverlays])
+
+  return { bars, maOverlays, allOverlays, chanlun, chanlunLoading, loading, error, reload: () => void loadBars(symbol) }
 }

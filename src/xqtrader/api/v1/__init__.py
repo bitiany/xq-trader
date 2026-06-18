@@ -3,6 +3,7 @@
 from fastapi import APIRouter
 
 from framework.config.settings import settings
+from xqtrader.api.v1.agent.agent import router as agent_router
 from xqtrader.api.v1.broker import router as broker_router
 from xqtrader.api.v1.data import router as data_router
 from xqtrader.api.v1.factors import router as factors_router
@@ -11,6 +12,7 @@ from xqtrader.api.v1.rules import router as rules_router
 from xqtrader.api.v1.scheduler import router as scheduler_router
 from xqtrader.api.v1.security import router as security_router
 from xqtrader.api.v1.selection import router as selection_router
+from xqtrader.api.v1.stocks import router as stocks_router
 from xqtrader.api.v1.strategies import router as strategies_router
 from xqtrader.api.v1.universe import router as universe_router
 from xqtrader.api.v1.watermark import router as watermark_router
@@ -31,3 +33,6 @@ router.include_router(rules_router)
 router.include_router(factors_router)
 router.include_router(universe_router)
 router.include_router(selection_router)
+router.include_router(stocks_router)
+# AI Agent
+router.include_router(agent_router, prefix="/agent", tags=["agent"])

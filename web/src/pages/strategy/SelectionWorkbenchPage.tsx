@@ -40,10 +40,32 @@ import { AsyncSection } from '@/components/common/AsyncSection'
 import { useRequest } from '@/hooks/useRequest'
 
 const DEFAULT_TOP_N = 50
+const SELECTION_WORKBENCH_STATE_KEY = 'xqtrader.selectionWorkbench.state'
+
+interface SelectionWorkbenchState {
+  strategyId?: string
+  signalDate: string
+  universeType: UniverseType
+  universeParam?: string
+  customSymbols: string
+  topN: number
+  result: SelectionRunResponse | null
+}
 
 interface IndustryAggItem {
   industry: string
   count: number
+}
+
+function loadSelectionWorkbenchState(): SelectionWorkbenchState | null {
+  const raw = sessionStorage.getItem(SELECTION_WORKBENCH_STATE_KEY)
+  if (!raw) return null
+  try {
+    return JSON.parse(raw) as SelectionWorkbenchState
+  } catch {
+    sessionStorage.removeItem(SELECTION_WORKBENCH_STATE_KEY)
+    return null
+  }
 }
 
 function getScoreColor(score: number, min: number, max: number): string {
@@ -430,16 +452,17 @@ function IndustryDistributionChart({ data, loading }: IndustryDistributionChartP
 
 export function SelectionWorkbenchPage() {
   const { t } = useTranslation()
-  const [strategyId, setStrategyId] = useState<string | undefined>(undefined)
-  const [signalDate, setSignalDate] = useState<Dayjs>(dayjs())
-  const [universeType, setUniverseType] = useState<UniverseType>('index')
-  const [universeParam, setUniverseParam] = useState<string | undefined>('idx_300')
-  const [customSymbols, setCustomSymbols] = useState('')
-  const [topN, setTopN] = useState<number>(DEFAULT_TOP_N)
-  const [result, setResult] = useState<SelectionRunResponse | null>(null)
+  const restoredState = useMemo(() => loadSelectionWorkbenchState(), [])
+  const [strategyId, setStrategyId] = useState<string | undefined>(restoredState?.strategyId)
+  const [signalDate, setSignalDate] = useState<Dayjs>(restoredState?.signalDate ? dayjs(restoredState.signalDate) : dayjs())
+  const [universeType, setUniverseType] = useState<UniverseType>(restoredState?.universeType ?? 'index')
+  const [universeParam, setUniverseParam] = useState<string | undefined>(restoredState?.universeParam ?? 'idx_300')
+  const [customSymbols, setCustomSymbols] = useState(restoredState?.customSymbols ?? '')
+  const [topN, setTopN] = useState<number>(restoredState?.topN ?? DEFAULT_TOP_N)
+  const [result, setResult] = useState<SelectionRunResponse | null>(restoredState?.result ?? null)
   const [loading, setLoading] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
-  const hasInitializedSignalDateRef = useRef(false)
+  const hasInitializedSignalDateRef = useRef(Boolean(restoredState?.signalDate))
 
   const { data: latestTradeDate } = useRequest(() => fetchLatestTradeDate())
   const { data: factorsPage } = useRequest(() => fetchFactors({ page_size: 200 }))
@@ -467,6 +490,19 @@ export function SelectionWorkbenchPage() {
     hasInitializedSignalDateRef.current = true
     queueMicrotask(() => setSignalDate(dayjs(latestTradeDate.latest_trade_date)))
   }, [latestTradeDate])
+
+  useEffect(() => {
+    const state: SelectionWorkbenchState = {
+      strategyId,
+      signalDate: signalDate.format('YYYY-MM-DD'),
+      universeType,
+      universeParam,
+      customSymbols,
+      topN,
+      result,
+    }
+    sessionStorage.setItem(SELECTION_WORKBENCH_STATE_KEY, JSON.stringify(state))
+  }, [customSymbols, result, signalDate, strategyId, topN, universeParam, universeType])
 
   const factorNameMap = useMemo(() => {
     const map: Record<string, string> = { ...(result?.factor_labels ?? {}) }

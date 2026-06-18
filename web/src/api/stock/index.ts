@@ -1,7 +1,8 @@
 import { request } from '@/api/client'
 import type { ApiPageResult } from '@/api/types'
 
-export type IndicatorKind = 'ma' | 'macd' | 'kdj' | 'rsi' | 'bias'
+export type MainIndicator = 'ma' | 'boll' | 'chanlun'
+export type SubIndicator = 'macd' | 'kdj' | 'rsi' | 'bias' | 'adx' | 'fundflow'
 
 export interface StockTagItem {
   tag_key: string
@@ -87,7 +88,6 @@ export interface KlineBarItem {
 export interface StockKlineResponse {
   symbol: string
   bars: KlineBarItem[]
-  indicator: IndicatorKind
   overlays: Record<string, Record<string, Array<number | null>>>
   ma_overlays: Record<string, Array<number | null>>
 }
@@ -105,6 +105,33 @@ export interface StockNewsResponse {
   symbol: string
   items: StockNewsItem[]
   placeholder: boolean
+}
+
+export type StockAnnouncementsResponse = StockNewsResponse
+
+export interface StockFundFlowItem {
+  trade_date: string
+  close: number | null
+  pct_chg: number | null
+  main_net_amt: number | null
+  main_net_pct: number | null
+  huge_net_amt: number | null
+  huge_net_pct: number | null
+  huge_net_inflow_pct: number | null
+  big_net_amt: number | null
+  big_net_pct: number | null
+  big_net_inflow_pct: number | null
+  mid_net_amt: number | null
+  mid_net_pct: number | null
+  mid_net_inflow_pct: number | null
+  small_net_amt: number | null
+  small_net_pct: number | null
+  small_net_inflow_pct: number | null
+}
+
+export interface StockFundFlowResponse {
+  symbol: string
+  items: StockFundFlowItem[]
 }
 
 export interface FinancialReportSummary {
@@ -135,10 +162,8 @@ export async function fetchStockOverview(symbol: string): Promise<StockOverviewR
   return request.get<StockOverviewResponse>(`/stocks/${encodeURIComponent(symbol)}`)
 }
 
-export async function fetchStockKline(symbol: string, indicator: IndicatorKind = 'ma'): Promise<StockKlineResponse> {
-  return request.get<StockKlineResponse>(`/stocks/${encodeURIComponent(symbol)}/kline`, {
-    params: { indicator },
-  })
+export async function fetchStockKline(symbol: string): Promise<StockKlineResponse> {
+  return request.get<StockKlineResponse>(`/stocks/${encodeURIComponent(symbol)}/kline`)
 }
 
 export async function fetchStockKlineBars(symbol: string): Promise<KlineBarItem[]> {
@@ -147,6 +172,16 @@ export async function fetchStockKlineBars(symbol: string): Promise<KlineBarItem[
 
 export async function fetchStockNews(symbol: string): Promise<StockNewsResponse> {
   return request.get<StockNewsResponse>(`/stocks/${encodeURIComponent(symbol)}/news`)
+}
+
+export async function fetchStockAnnouncements(symbol: string): Promise<StockAnnouncementsResponse> {
+  return request.get<StockAnnouncementsResponse>(`/stocks/${encodeURIComponent(symbol)}/announcements`)
+}
+
+export async function fetchStockFundFlow(symbol: string, limit = 120): Promise<StockFundFlowResponse> {
+  return request.get<StockFundFlowResponse>(`/stocks/${encodeURIComponent(symbol)}/fund-flow`, {
+    params: { limit },
+  })
 }
 
 export async function fetchStockFinancials(symbol: string): Promise<StockFinancialsResponse> {
@@ -206,6 +241,7 @@ export interface ChanlunStroke {
   end_date: string
   end_price: number
   direction: 'up' | 'down'
+  is_sure: boolean
 }
 
 export interface ChanlunPivot {
@@ -216,6 +252,7 @@ export interface ChanlunPivot {
   zg: number
   zd: number
   zz: number
+  is_sure: boolean
 }
 
 export interface ChanlunResponse {

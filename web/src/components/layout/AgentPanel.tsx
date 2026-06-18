@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Bot, ChevronDown, GripVertical, Send, Sparkles, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import Markdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { useAgentStore } from '@/stores/agentStore'
 import { useLayoutStore } from '@/stores/layoutStore'
 import { useLocaleStore } from '@/stores/localeStore'
@@ -144,8 +146,8 @@ export function AgentPanel() {
                 <div className="agent-panel__avatar">
                   <Sparkles size={12} />
                 </div>
-                <div className="agent-panel__bubble">
-                  {msg.content}
+                <div className="agent-panel__bubble agent-panel__bubble--md">
+                  <Markdown remarkPlugins={[remarkGfm]}>{msg.content}</Markdown>
                   {msg.streaming ? (
                     <span className="agent-panel__cursor">▍</span>
                   ) : null}

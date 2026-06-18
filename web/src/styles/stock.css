@@ -7,28 +7,19 @@
   position: relative;
 }
 
-.stock-page__back {
-  position: absolute;
-  top: 0;
-  left: -36px;
+.stock-page__topbar {
   display: flex;
+  justify-content: flex-end;
   align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--bg-card);
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  transition: all 0.15s ease;
-  z-index: 10;
+  height: 36px;
+  padding: 0 4px;
+  flex-shrink: 0;
 }
 
-.stock-page__back:hover {
-  background: var(--bg-hover);
-  color: var(--color-text-primary);
-  border-color: var(--color-text-secondary);
+.stock-page__actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 
 .stock-header {
@@ -145,28 +136,79 @@
 
 .stock-chart-wrap {
   position: relative;
-  min-height: 480px;
+  min-height: 540px;
+}
+
+.stock-chart__bar-info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-height: 22px;
+  padding: 2px 8px 8px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.stock-chart__indicator-toggle {
+  position: absolute;
+  top: 8px;
+  right: 56px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  opacity: 0.85;
+  transition: opacity 0.15s ease;
+}
+
+.stock-chart__indicator-toggle:hover {
+  opacity: 1;
+}
+
+.stock-chart__td9-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.stock-chart__td9-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  user-select: none;
 }
 
 .stock-chart {
   width: 100%;
-  height: 480px;
+  height: 520px;
 }
 
-.stock-page__chart-toolbar {
+.stock-chart__chart-area {
+  position: relative;
+}
+
+.stock-chart__sub-info {
+  position: absolute;
+  left: 60px;
+  top: 78%;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
   gap: 12px;
-  margin-bottom: 8px;
-  flex-wrap: wrap;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  z-index: 10;
+  pointer-events: none;
+}
+
+.stock-chart__sub-label {
+  color: var(--text-secondary);
+  font-weight: 600;
 }
 
 .stock-chart--empty {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 480px;
+  height: 520px;
   color: var(--text-muted);
 }
 
@@ -184,6 +226,29 @@
 
 .stock-panel {
   padding: 16px;
+}
+
+.stock-fundflow-charts {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.stock-fundflow-pie {
+  flex: 0 0 320px;
+  min-width: 280px;
+}
+
+.stock-fundflow-line {
+  flex: 1;
+  min-width: 0;
+}
+
+.stock-fundflow-section-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
 }
 
 .stock-financials__block + .stock-financials__block {
