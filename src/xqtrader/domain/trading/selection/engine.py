@@ -249,25 +249,29 @@ class SelectionEngine:
             )
         }
 
-        # 11. 构建选股结果（含因子快照）
+        # 11. 构建选股结果（含因子快照）；趋势策略排除空头标的
         results: dict[str, SelectionScore] = {}
         for symbol in final_score.index:
             score = float(final_score.loc[symbol])
-            if bool(final_pass.loc[symbol]):
-                factor_snapshot = self._extract_factor_snapshot(
-                    symbol, cross_section_df, factor_ids,
-                )
-                results[symbol] = SelectionScore(
-                    symbol=symbol,
-                    score=score,
-                    direction=self._infer_direction(factor_snapshot),
-                    confidence=score,
-                    detail={
-                        "strategy_id": strategy_id,
-                        "signal_date": str(signal_date),
-                        "factor_values": factor_snapshot,
-                    },
-                )
+            if not bool(final_pass.loc[symbol]):
+                continue
+            factor_snapshot = self._extract_factor_snapshot(
+                symbol, cross_section_df, factor_ids,
+            )
+            direction = self._infer_direction(factor_snapshot)
+            if direction == "short":
+                continue
+            results[symbol] = SelectionScore(
+                symbol=symbol,
+                score=score,
+                direction=direction,
+                confidence=score,
+                detail={
+                    "strategy_id": strategy_id,
+                    "signal_date": str(signal_date),
+                    "factor_values": factor_snapshot,
+                },
+            )
 
         # 12. 落库
         await self._persist_results(strategy_id, signal_date, results)
