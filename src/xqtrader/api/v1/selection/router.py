@@ -16,7 +16,6 @@ from xqtrader.domain.factor.models.factor_registry import FacFactorRegistry
 from xqtrader.domain.market.models.candlestick import CandlestickDaily
 from xqtrader.domain.security.models import Security
 from xqtrader.domain.trading.models.decision import SelectionResult
-from xqtrader.domain.trading.models.strategy import Strategy
 from xqtrader.domain.trading.rules.base import (
     CustomUniverse,
     FullMarketUniverse,
@@ -138,7 +137,7 @@ async def list_selection_results(
 ) -> dict:
     """按 strategy_id / signal_date / instance_id 查询历史选股结果。
 
-    研究域选股 instance_id=0；指定 strategy_id 时会先解析为 instance_id 集合。
+    研究域选股 instance_id=0；指定 strategy_id 时直接按 strategy_id 过滤。
     """
     skip, limit = paginate(page, page_size)
 
@@ -147,12 +146,8 @@ async def list_selection_results(
         filters["signal_date"] = signal_date
     if instance_id is not None:
         filters["instance_id"] = instance_id
-    elif strategy_id is not None:
-        # strategy_id 仅在研究域有意义（instance_id=0），实例化场景需直接传 instance_id
-        strategy = await Strategy.get_or_none(strategy_id=strategy_id)
-        if strategy is None:
-            return build_paginated_response([], 0, page, page_size)
-        filters["instance_id"] = 0
+    if strategy_id is not None:
+        filters["strategy_id"] = strategy_id
 
     items = await SelectionResult.filter(
         skip=skip,
@@ -173,9 +168,8 @@ async def list_selection_results(
     for r in items:
         d = r.to_dict()
         d["name"] = sec_map.get(r.symbol, "")
-        # 提取因子快照便于前端展示
-        if isinstance(d.get("factor_values"), dict):
-            d["factor_values_flat"] = d["factor_values"].get("factor_values", {})
+        # factor_values 列直接存储因子值快照
+        d["factor_values_flat"] = d.get("factor_values") or {}
         payload.append(d)
 
     return build_paginated_response(payload, total, page, page_size)
@@ -190,11 +184,8 @@ async def list_signal_dates(
     filters: dict = {}
     if instance_id is not None:
         filters["instance_id"] = instance_id
-    elif strategy_id is not None:
-        strategy = await Strategy.get_or_none(strategy_id=strategy_id)
-        if strategy is None:
-            return []
-        filters["instance_id"] = 0
+    if strategy_id is not None:
+        filters["strategy_id"] = strategy_id
 
     rows = await SelectionResult.filter(
         order_by=desc(SelectionResult.signal_date),

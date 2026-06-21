@@ -2,7 +2,7 @@
 
 from datetime import date
 
-from sqlalchemy import Date, Float, Integer, String
+from sqlalchemy import Date, Float, Integer, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -18,6 +18,9 @@ class SelectionResult(AuditedBase):
     __tablename__ = "td_selection_result"
 
     instance_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True, comment="策略实例ID")
+    strategy_id: Mapped[str] = mapped_column(
+        String(64), nullable=False, index=True, comment="策略编码 → td_strategy.strategy_id",
+    )
     workflow_run_id: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="决策流 Run ID")
     signal_date: Mapped[date] = mapped_column(Date, nullable=False, comment="信号日")
     symbol: Mapped[str] = mapped_column(String(16), nullable=False, comment="证券代码")
@@ -26,7 +29,13 @@ class SelectionResult(AuditedBase):
     factor_values: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default={}, comment="因子值快照")
     node_id: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="工作流节点ID")
 
-    __table_args__ = ({"comment": "截面选股结果"},)
+    __table_args__ = (
+        UniqueConstraint(
+            "instance_id", "strategy_id", "signal_date", "symbol",
+            name="uq_selection_result_instance_strategy_date_symbol",
+        ),
+        {"comment": "截面选股结果"},
+    )
 
 
 class TradingSignal(AuditedBase):

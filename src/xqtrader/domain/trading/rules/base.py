@@ -71,9 +71,23 @@ class RulePlugin(ABC):
 class UniverseProvider(ABC):
     """候选标的提供者 — 可插拔的标的范围抽象"""
 
-    @abstractmethod
+    def __init__(self) -> None:
+        self._cached_symbols: list[str] | None = None
+
+    @property
+    def instance_id(self) -> int:
+        """策略实例 ID — 研究域默认 0，实盘域由子类覆盖"""
+        return 0
+
     async def get_symbols(self) -> list[str]:
-        """获取候选标的列表"""
+        """获取候选标的列表（带缓存，避免重复 DB 查询）"""
+        if self._cached_symbols is None:
+            self._cached_symbols = await self._load_symbols()
+        return self._cached_symbols
+
+    @abstractmethod
+    async def _load_symbols(self) -> list[str]:
+        """加载候选标的列表（由子类实现）"""
 
     @abstractmethod
     def describe(self) -> str:
@@ -84,9 +98,10 @@ class IndexUniverse(UniverseProvider):
     """指数成分股候选池"""
 
     def __init__(self, pool_id: str) -> None:
+        super().__init__()
         self.pool_id = pool_id
 
-    async def get_symbols(self) -> list[str]:
+    async def _load_symbols(self) -> list[str]:
         from xqtrader.domain.factor.services.cross_section_reader import CrossSectionReader
 
         reader = CrossSectionReader()
@@ -100,25 +115,30 @@ class WatchlistUniverse(UniverseProvider):
     """自选池候选池 — 从 trading schema 的 td_watchlist_item 读取"""
 
     def __init__(self, instance_id: int) -> None:
-        self.instance_id = instance_id
+        super().__init__()
+        self._instance_id = instance_id
 
-    async def get_symbols(self) -> list[str]:
+    @property
+    def instance_id(self) -> int:
+        return self._instance_id
+
+    async def _load_symbols(self) -> list[str]:
         from xqtrader.domain.trading.models.watchlist import Watchlist, WatchlistItem
 
-        wl = await Watchlist.get_or_none(instance_id=self.instance_id)
+        wl = await Watchlist.get_or_none(instance_id=self._instance_id)
         if not wl:
             return []
         items = await WatchlistItem.filter(watchlist_id=wl.id, is_enabled=1)
         return [item.symbol for item in items]
 
     def describe(self) -> str:
-        return f"WatchlistUniverse(instance_id={self.instance_id})"
+        return f"WatchlistUniverse(instance_id={self._instance_id})"
 
 
 class FullMarketUniverse(UniverseProvider):
     """全市场候选池"""
 
-    async def get_symbols(self) -> list[str]:
+    async def _load_symbols(self) -> list[str]:
         from xqtrader.domain.factor.services.cross_section_reader import CrossSectionReader
 
         reader = CrossSectionReader()
@@ -132,9 +152,10 @@ class CustomUniverse(UniverseProvider):
     """自定义标的列表候选池"""
 
     def __init__(self, symbols: list[str]) -> None:
+        super().__init__()
         self._symbols = symbols
 
-    async def get_symbols(self) -> list[str]:
+    async def _load_symbols(self) -> list[str]:
         return self._symbols
 
     def describe(self) -> str:

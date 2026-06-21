@@ -9,8 +9,6 @@ from xqtrader.domain.factor.services.cross_section_reader import is_risk_warning
 from xqtrader.domain.trading.rules.base import (
     CustomUniverse,
     RuleContext,
-    RuleResult,
-    SelectionScore,
 )
 from xqtrader.domain.trading.rules.plugins.multi_factor_resonance import (
     MultiFactorResonancePlugin,
@@ -305,11 +303,12 @@ class TestSelectionEngineCrossSection:
         }
         combination = WeightedScoreCombination()
         weights = {"r1": 0.6, "r2": 0.4}
-        combined = engine._combine_cross_section(
+        combined_scores, combined_directions = engine._combine_cross_section(
             rule_results, combination, weights, {"threshold": 0.5},
         )
-        assert isinstance(combined, pd.Series)
+        assert isinstance(combined_scores, pd.Series)
+        assert isinstance(combined_directions, pd.Series)
         # A: (0.6*0.8 + 0.4*0.4)/1.0 = 0.64
-        assert abs(combined.loc["A"] - 0.64) < 0.01
+        assert abs(combined_scores.loc["A"] - 0.64) < 0.01
         # B: (0.6*0.6 + 0.4*0.9)/1.0 = 0.72
-        assert abs(combined.loc["B"] - 0.72) < 0.01
+        assert abs(combined_scores.loc["B"] - 0.72) < 0.01

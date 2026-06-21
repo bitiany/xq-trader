@@ -34,7 +34,8 @@ class ExpressionRule:
         self._ast: ASTNode | None = None
         self._evaluator = ExpressionEvaluator()
 
-    def _get_ast(self) -> ASTNode:
+    def get_ast(self) -> ASTNode:
+        """获取表达式 AST（带缓存）"""
         if self._ast is None:
             self._ast = parse_expression(self.expression)
         return self._ast
@@ -42,7 +43,7 @@ class ExpressionRule:
     async def evaluate(self, context: RuleContext) -> RuleResult:
         """求值表达式规则"""
         try:
-            ast = self._get_ast()
+            ast = self.get_ast()
             result = self._evaluator.evaluate(
                 ast=ast,
                 factor_values=context.factor_values,

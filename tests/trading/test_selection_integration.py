@@ -117,12 +117,10 @@ class TestSelectionEngineWithRealData:
         records = await SelectionResult.filter(signal_date=self.SIGNAL_DATE)
         assert len(records) > 0
 
-        # 验证因子快照已保存
+        # 验证因子快照已保存（factor_values 列直接存储因子值字典）
         for record in records:
             factor_values = record.factor_values or {}
-            assert "factor_values" in factor_values
-            snapshot = factor_values["factor_values"]
-            assert isinstance(snapshot, dict)
+            assert isinstance(factor_values, dict)
 
     @pytest.mark.asyncio(loop_scope="session")
     async def test_nonexistent_strategy_raises(self, app_with_datasource):
