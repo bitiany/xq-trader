@@ -1,8 +1,8 @@
-from framework.dal.timescale import timescale
 from sqlalchemy import Date, Float, PrimaryKeyConstraint, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from framework.dal.base import Base
+from framework.dal.timescale import timescale
 
 
 @timescale(

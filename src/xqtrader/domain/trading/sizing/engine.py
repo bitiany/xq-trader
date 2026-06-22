@@ -11,8 +11,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 import pandas as pd
 
 from framework.commons.logger import get_logger

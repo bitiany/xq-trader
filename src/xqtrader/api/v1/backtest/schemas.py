@@ -66,3 +66,22 @@ class BacktestRunResponse(BaseModel):
     )
     html_report_path: str | None = Field(default=None, description="HTML 报告路径")
     elapsed_ms: int = Field(..., description="耗时毫秒")
+
+
+class StrategyInfoResponse(BaseModel):
+    """策略信息响应。"""
+
+    strategy_id: str
+    name: str
+    description: str
+    mode: str = "builtin"
+    params_schema: dict[str, Any] = Field(default_factory=dict)
+
+
+class SizerInfoResponse(BaseModel):
+    """仓位策略信息响应。"""
+
+    sizer_id: str
+    name: str
+    description: str
+    params_schema: dict[str, Any] = Field(default_factory=dict)

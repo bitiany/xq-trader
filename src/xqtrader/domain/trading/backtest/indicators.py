@@ -19,8 +19,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, cast
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -70,11 +71,17 @@ class IndicatorSpec:
 _OUTPUT_COLUMNS_REGISTRY: dict[str, Callable[[dict[str, Any]], list[str]]] = {}
 
 
-def _register_output_columns(name: str) -> Callable[[Callable[[dict[str, Any]], list[str]]], Callable[[dict[str, Any]], list[str]]]:
+def _register_output_columns(
+    name: str,
+) -> Callable[[Callable[[dict[str, Any]], list[str]]], Callable[[dict[str, Any]], list[str]]]:
     """装饰器：注册指标默认输出列名生成函数。"""
-    def decorator(fn: Callable[[dict[str, Any]], list[str]]) -> Callable[[dict[str, Any]], list[str]]:
+
+    def decorator(
+        fn: Callable[[dict[str, Any]], list[str]],
+    ) -> Callable[[dict[str, Any]], list[str]]:
         _OUTPUT_COLUMNS_REGISTRY[name] = fn
         return fn
+
     return decorator
 
 

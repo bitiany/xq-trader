@@ -1,12 +1,12 @@
-﻿import { useEffect, useRef } from 'react'
-import { TrendingUp } from 'lucide-react'
+import { useEffect, useRef } from 'react'
+import { BarChart3 } from 'lucide-react'
 import * as echarts from 'echarts'
 
-export interface EquityCurveChartProps {
+export interface DailyReturnsChartProps {
   data: { date: string; value: number }[]
 }
 
-export function EquityCurveChart({ data }: EquityCurveChartProps) {
+export function DailyReturnsChart({ data }: DailyReturnsChartProps) {
   const chartRef = useRef<HTMLDivElement>(null)
   const chartInstance = useRef<ReturnType<typeof echarts.init> | null>(null)
 
@@ -20,13 +20,18 @@ export function EquityCurveChart({ data }: EquityCurveChartProps) {
 
     chart.setOption({
       backgroundColor: 'transparent',
-      tooltip: { trigger: 'axis' },
-      legend: {
-        data: ['净值'],
-        top: 0,
-        textStyle: { color: '#94a3b8', fontSize: 11 },
+      tooltip: {
+        trigger: 'axis',
+        formatter: (params: unknown) => {
+          const p = Array.isArray(params) ? params[0] : params
+          const d = (p as { name?: string; value?: number }).name ?? ''
+          const v = (p as { name?: string; value?: number }).value
+          if (v == null) return d
+          const pct = (v * 100).toFixed(2)
+          return `${d}<br/>日收益率: ${pct}%`
+        },
       },
-      grid: { left: 50, right: 50, top: 30, bottom: 24 },
+      grid: { left: 50, right: 20, top: 10, bottom: 24 },
       xAxis: {
         type: 'category',
         data: dates,
@@ -35,28 +40,23 @@ export function EquityCurveChart({ data }: EquityCurveChartProps) {
       },
       yAxis: {
         type: 'value',
-        name: '净值',
-        axisLabel: { fontSize: 10, color: '#94a3b8' },
+        axisLabel: {
+          fontSize: 10,
+          color: '#94a3b8',
+          formatter: (v: number) => `${(v * 100).toFixed(1)}%`,
+        },
         splitLine: { lineStyle: { color: '#2a3340' } },
       },
       series: [
         {
-          name: '净值',
-          type: 'line',
-          data: values,
-          smooth: true,
-          lineStyle: { color: '#38bdf8', width: 2 },
-          itemStyle: { color: '#38bdf8' },
-          areaStyle: {
-            color: {
-              type: 'linear',
-              x: 0, y: 0, x2: 0, y2: 1,
-              colorStops: [
-                { offset: 0, color: 'rgba(56,189,248,0.25)' },
-                { offset: 1, color: 'rgba(56,189,248,0.02)' },
-              ],
+          type: 'bar',
+          data: values.map((v) => ({
+            value: v,
+            itemStyle: {
+              color: v >= 0 ? '#ef4444' : '#22c55e',
             },
-          },
+          })),
+          barMaxWidth: 4,
         },
       ],
     })
@@ -72,11 +72,10 @@ export function EquityCurveChart({ data }: EquityCurveChartProps) {
   if (data.length === 0) {
     return (
       <div className="backtest-page__chart-empty">
-        <TrendingUp size={32} style={{ color: 'var(--text-muted)' }} />
-        <span>暂无净值数据</span>
+        <BarChart3 size={32} style={{ color: 'var(--text-muted)' }} />
+        <span>暂无收益率数据</span>
       </div>
     )
   }
-
   return <div ref={chartRef} style={{ width: '100%', height: '100%' }} />
 }

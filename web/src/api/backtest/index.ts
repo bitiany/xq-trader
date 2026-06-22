@@ -1,4 +1,4 @@
-import { request } from '@/api/client'
+﻿import { request } from '@/api/client'
 import type { StockTagItem } from '@/api/stock'
 
 export interface BacktestStrategyInfo {
@@ -173,4 +173,42 @@ export async function fetchBacktestStrategies(): Promise<BacktestStrategyInfo[]>
 
 export async function fetchBacktestSizers(): Promise<BacktestSizerInfo[]> {
   return request.get<BacktestSizerInfo[]>('/backtest/sizers/list')
+}
+
+// ---- Simple (synchronous) backtest API ----
+
+export interface SimpleBacktestRequest {
+  strategy_id: string
+  symbols: string[]
+  start_date: string
+  end_date: string
+  initial_capital?: number
+  commission_rate?: number
+  slippage?: number
+  indicator_specs?: { name: string; params: Record<string, unknown>; output_columns?: string[] | null }[]
+  lookback_days?: number
+  generate_report?: boolean
+  rf?: number
+}
+
+export interface SimpleBacktestResponse {
+  strategy_id: string
+  start_date: string
+  end_date: string
+  initial_capital: number
+  final_value: number
+  total_return: number
+  annual_return: number
+  max_drawdown: number
+  sharpe_ratio: number
+  total_trades: number
+  metrics: Record<string, unknown>
+  equity_curve: { date: string; value: number }[]
+  daily_returns: { date: string; value: number }[]
+  html_report_path: string | null
+  elapsed_ms: number
+}
+
+export async function runSimpleBacktest(payload: SimpleBacktestRequest): Promise<SimpleBacktestResponse> {
+  return request.post<SimpleBacktestResponse>('/backtest/run', payload)
 }

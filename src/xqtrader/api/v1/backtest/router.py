@@ -14,6 +14,8 @@ from xqtrader.api.v1.backtest.schemas import (
     BacktestRunRequest,
     BacktestRunResponse,
     IndicatorSpecRequest,
+    SizerInfoResponse,
+    StrategyInfoResponse,
 )
 from xqtrader.domain.trading.backtest import (
     BacktestConfig,
@@ -23,6 +25,8 @@ from xqtrader.domain.trading.backtest import (
     parse_indicator_specs,
 )
 from xqtrader.domain.trading.backtest.constants import REPORT_DIR
+from xqtrader.domain.trading.models.strategy import Strategy
+from xqtrader.domain.trading.sizing.registry import get_default_registry
 
 router = APIRouter(prefix="/backtest", tags=["回测"])
 logger = get_logger(__name__)
@@ -137,3 +141,34 @@ async def run_backtest(req: BacktestRunRequest) -> BacktestRunResponse:
         html_report_path=html_path,
         elapsed_ms=elapsed_ms,
     )
+
+
+@router.get("/strategies/list", summary="获取策略列表", operation_id="list_backtest_strategies")
+async def list_strategies() -> list[StrategyInfoResponse]:
+    """获取可用于回测的策略列表。"""
+    strategies = await Strategy.all()
+    return [
+        StrategyInfoResponse(
+            strategy_id=s.strategy_id,
+            name=s.name,
+            description=s.description or "",
+            mode="builtin",
+            params_schema={},
+        )
+        for s in strategies
+    ]
+
+
+@router.get("/sizers/list", summary="获取仓位策略列表", operation_id="list_backtest_sizers")
+async def list_sizers() -> list[SizerInfoResponse]:
+    """获取可用的仓位管理策略列表。"""
+    registry = get_default_registry()
+    return [
+        SizerInfoResponse(
+            sizer_id=str(info["strategy_name"]),
+            name=str(info["strategy_name"]),
+            description=str(info["type"]),
+            params_schema=info.get("config_schema") or {},
+        )
+        for info in registry.list_strategies()
+    ]

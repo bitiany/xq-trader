@@ -4,6 +4,9 @@ export type { KLineChartProps } from './KLineChart'
 export { EquityCurveChart } from './EquityCurveChart'
 export type { EquityCurveChartProps } from './EquityCurveChart'
 
+export { DailyReturnsChart } from './DailyReturnsChart'
+export type { DailyReturnsChartProps } from './DailyReturnsChart'
+
 export { PerformanceGrid } from './PerformanceGrid'
 export type { PerformanceGridProps } from './PerformanceGrid'
 

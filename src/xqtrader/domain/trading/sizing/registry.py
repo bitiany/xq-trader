@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from framework.commons.logger import get_logger
 
 from .base import PositionSizingStrategy
@@ -34,7 +36,7 @@ class PositionSizingRegistry:
         """检查策略是否存在。"""
         return strategy_name in self._strategies
 
-    def list_strategies(self) -> list[dict[str, object]]:
+    def list_strategies(self) -> list[dict[str, Any]]:
         """列出所有已注册策略。"""
         return [
             {
