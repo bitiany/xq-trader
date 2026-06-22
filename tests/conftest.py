@@ -16,14 +16,11 @@ SRC_DIR = str(Path(__file__).parent.parent / "src")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-# 自动发现 tests/ 下的所有子目录，加入 sys.path
-# 注意：不将 tests/ 本身加入 sys.path，避免 tests/framework 与 src/framework 包名冲突
+# 将 tests/ 目录加入 sys.path，使 tests.backtest.xxx 模块路径可被解析
 _TESTS_DIR = Path(__file__).parent
-for _subdir in _TESTS_DIR.iterdir():
-    if _subdir.is_dir() and (_subdir / "__init__.py").exists() is False:
-        _subdir_str = str(_subdir)
-        if _subdir_str not in sys.path:
-            sys.path.insert(0, _subdir_str)
+_TESTS_DIR_STR = str(_TESTS_DIR)
+if _TESTS_DIR_STR not in sys.path:
+    sys.path.insert(0, _TESTS_DIR_STR)
 
 
 # ==================== 公共 Fixture ====================
