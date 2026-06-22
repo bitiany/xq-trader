@@ -26,6 +26,7 @@ dependencies = [
     "pyyaml>=6.0,<7.0",
     "redis>=5.0,<6.0",
     "backtrader>=1.9,<2.0",
+    "quantstats>=0.0.62,<1.0",
     "sqlalchemy>=2.0,<3.0",
     "ta-lib==0.6.8",
     "typing_extensions>=4.0,<5.0",
@@ -81,5 +82,5 @@ disallow_untyped_defs = true
 packages = ["framework", "xqtrader", "agent", "mcp_server", "skills"]
 
 [[tool.mypy.overrides]]
-module = ["psycopg2", "psycopg.*", "xtquant.*", "langgraph.checkpoint.postgres", "nanobot.*", "mcp.*"]
+module = ["psycopg2", "psycopg.*", "xtquant.*", "langgraph.checkpoint.postgres", "nanobot.*", "mcp.*", "backtrader", "quantstats", "quantstats.*"]
 ignore_missing_imports = true

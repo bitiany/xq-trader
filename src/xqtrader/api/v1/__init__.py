@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from framework.config.settings import settings
 from xqtrader.api.v1.agent.agent import router as agent_router
+from xqtrader.api.v1.backtest import router as backtest_router
 from xqtrader.api.v1.broker import router as broker_router
 from xqtrader.api.v1.data import router as data_router
 from xqtrader.api.v1.factors import router as factors_router
@@ -34,5 +35,7 @@ router.include_router(factors_router)
 router.include_router(universe_router)
 router.include_router(selection_router)
 router.include_router(stocks_router)
+# 回测
+router.include_router(backtest_router)
 # AI Agent
 router.include_router(agent_router, prefix="/agent", tags=["agent"])

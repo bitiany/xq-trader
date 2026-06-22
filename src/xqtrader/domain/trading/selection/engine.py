@@ -20,6 +20,7 @@ from ..rules.combination.ic_weighted import ICWeightedCombination
 from ..rules.combination.weighted_score import WeightedScoreCombination
 from ..rules.combination.weighted_vote import WeightedVoteCombination
 from ..rules.expression.evaluator import ExpressionEvaluator
+from ..rules.loader import RuleLoader
 from ..rules.registry import ExpressionRule, RuleRegistry
 
 logger = get_logger(__name__)
@@ -192,7 +193,7 @@ class SelectionEngine:
             return {}
 
         # 8. 注册规则（批量从 DB 加载）
-        await self._ensure_rules_registered(all_bindings)
+        await RuleLoader.ensure_registered(self._rule_registry, all_bindings)
 
         # 9. 逐绑定执行截面评估
         # 以 binding.id 为键，避免同一 rule_id 在多 group 中以不同 config_override 出现时结果被覆盖
@@ -398,7 +399,7 @@ class SelectionEngine:
                 for col, value in cross_section_df.loc[symbol].items()
                 if pd.notna(value)
             }
-            result = await rule.evaluate(RuleContext(
+            result = rule.evaluate(RuleContext(
                 symbol=symbol,
                 signal_date=signal_date,
                 factor_values=factor_values,
@@ -727,48 +728,6 @@ class SelectionEngine:
         df = pd.DataFrame(rows)
         df = df.groupby("symbol").agg("first").reset_index()
         return df.set_index("symbol")
-
-    async def _ensure_rules_registered(self, bindings: list[StrategyRuleBinding]) -> None:
-        """确保规则已注册到内存注册表（批量查询，避免 N+1）"""
-        # 收集未注册的 rule_id
-        missing_rule_ids = list({
-            b.rule_id for b in bindings if not self._rule_registry.has(b.rule_id)
-        })
-        if not missing_rule_ids:
-            return
-
-        rule_models = await RuleRegistryModel.filter(rule_id__in=missing_rule_ids)
-        found_ids = {r.rule_id for r in rule_models}
-
-        for rule_id in missing_rule_ids:
-            if rule_id not in found_ids:
-                logger.warning(f"规则未找到: {rule_id}")
-
-        for rule_model in rule_models:
-            if rule_model.type == "expression":
-                self._rule_registry.register_expression(
-                    rule_id=rule_model.rule_id,
-                    name=rule_model.name,
-                    category=rule_model.category,
-                    expression=rule_model.expression or "",
-                    signal_mapping=rule_model.signal_mapping or {},
-                    default_config=rule_model.default_config or {},
-                )
-            elif rule_model.type == "spi" and rule_model.spi_class:
-                self._load_spi_plugin(rule_model.spi_class)
-
-    def _load_spi_plugin(self, spi_class_path: str) -> None:
-        """动态加载 SPI 插件"""
-        import importlib
-
-        try:
-            module_path, class_name = spi_class_path.rsplit(".", 1)
-            module = importlib.import_module(module_path)
-            plugin_class = getattr(module, class_name)
-            plugin = plugin_class()
-            self._rule_registry.register_plugin(plugin)
-        except (ImportError, AttributeError) as e:
-            logger.error(f"SPI 插件加载失败: {spi_class_path} error={e}", exc_info=True)
 
     @transactional(bind_key="trading")
     async def _persist_results(

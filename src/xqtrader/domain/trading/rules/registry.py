@@ -12,6 +12,21 @@ from .expression.parser import ASTNode, parse_expression
 
 logger = get_logger(__name__)
 
+# 方向名称归一化映射 — 将非标准方向名映射为系统标准名
+_DIRECTION_ALIASES: dict[str, str] = {
+    "bull": "long",
+    "bear": "short",
+    "buy": "long",
+    "sell": "short",
+    "up": "long",
+    "down": "short",
+}
+
+
+def _normalize_direction(direction: str) -> str:
+    """将非标准方向名归一化为 long/short/neutral。"""
+    return _DIRECTION_ALIASES.get(direction.lower(), direction.lower())
+
 
 class ExpressionRule:
     """表达式规则 — 声明式规则，通过表达式字符串定义逻辑"""
@@ -40,8 +55,8 @@ class ExpressionRule:
             self._ast = parse_expression(self.expression)
         return self._ast
 
-    async def evaluate(self, context: RuleContext) -> RuleResult:
-        """求值表达式规则"""
+    def evaluate(self, context: RuleContext) -> RuleResult:
+        """求值表达式规则（同步纯计算，支持 backtrader next() 与决策流共用）"""
         try:
             ast = self.get_ast()
             result = self._evaluator.evaluate(
@@ -65,21 +80,28 @@ class ExpressionRule:
             )
 
         # 时序模式：result 是 bool 或 float
-        passed = bool(result) if isinstance(result, (bool, int)) else True
+        passed = bool(result) if isinstance(result, (bool, int, float)) else True
         score = float(result) if isinstance(result, (int, float)) else (1.0 if passed else 0.0)
 
         # 信号映射
+        # 支持两种格式:
+        #   1. {"true": {"direction": "long", "confidence": 0.8}, "false": {...}}
+        #   2. {"pass": "bull", "fail": "neutral"} — 简写格式，值为方向字符串
         direction = "neutral"
         confidence = score
         if self.signal_mapping:
-            if passed and "true" in self.signal_mapping:
-                mapping = self.signal_mapping["true"]
-                direction = mapping.get("direction", "long")
-                confidence = mapping.get("confidence", score)
-            elif not passed and "false" in self.signal_mapping:
-                mapping = self.signal_mapping["false"]
-                direction = mapping.get("direction", "neutral")
-                confidence = mapping.get("confidence", 0.0)
+            if passed:
+                mapping = self.signal_mapping.get("true") or self.signal_mapping.get("pass")
+            else:
+                mapping = self.signal_mapping.get("false") or self.signal_mapping.get("fail")
+
+            if mapping is not None:
+                if isinstance(mapping, dict):
+                    direction = mapping.get("direction", "long" if passed else "neutral")
+                    confidence = mapping.get("confidence", score if passed else 0.0)
+                elif isinstance(mapping, str):
+                    direction = _normalize_direction(mapping)
+                    confidence = score if passed else 0.0
 
         return RuleResult(
             rule_id=self.rule_id,

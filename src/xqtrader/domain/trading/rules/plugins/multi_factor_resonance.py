@@ -55,8 +55,8 @@ class MultiFactorResonancePlugin(RulePlugin):
     # 最低共振维度数
     MIN_RESONANCE_DIMS = 3
 
-    async def evaluate(self, context: RuleContext) -> RuleResult:
-        """执行多因子共振评估"""
+    def evaluate(self, context: RuleContext) -> RuleResult:
+        """执行多因子共振评估（同步纯计算）"""
         config = {
             "min_resonance_dims": self.MIN_RESONANCE_DIMS,
             "dimension_weights": self.DIMENSION_WEIGHTS,

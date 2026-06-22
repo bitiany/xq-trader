@@ -62,8 +62,8 @@ class RulePlugin(ABC):
     factor_ids: list[str] = []
 
     @abstractmethod
-    async def evaluate(self, context: RuleContext) -> RuleResult:
-        """执行规则评估，返回 RuleResult"""
+    def evaluate(self, context: RuleContext) -> RuleResult:
+        """执行规则评估，返回 RuleResult（同步纯计算，支持 backtrader 与决策流共用）"""
 
 
 # ==================== UniverseProvider ====================

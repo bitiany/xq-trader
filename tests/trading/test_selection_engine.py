@@ -115,8 +115,7 @@ class TestRuleRegistry:
 class TestExpressionRuleEvaluate:
     """ExpressionRule.evaluate 测试"""
 
-    @pytest.mark.asyncio(loop_scope="session")
-    async def test_evaluate_true(self):
+    def test_evaluate_true(self):
         registry = RuleRegistry()
         registry.register_expression(
             rule_id="roe_filter", name="ROE过滤",
@@ -128,12 +127,11 @@ class TestExpressionRuleEvaluate:
             signal_date=date.today(),
             factor_values={"roe": 15.0},
         )
-        result = await rule.evaluate(ctx)
+        result = rule.evaluate(ctx)
         assert result.passed is True
         assert result.rule_id == "roe_filter"
 
-    @pytest.mark.asyncio(loop_scope="session")
-    async def test_evaluate_false(self):
+    def test_evaluate_false(self):
         registry = RuleRegistry()
         registry.register_expression(
             rule_id="roe_filter", name="ROE过滤",
@@ -145,11 +143,10 @@ class TestExpressionRuleEvaluate:
             signal_date=date.today(),
             factor_values={"roe": 10.0},
         )
-        result = await rule.evaluate(ctx)
+        result = rule.evaluate(ctx)
         assert result.passed is False
 
-    @pytest.mark.asyncio(loop_scope="session")
-    async def test_evaluate_and_expression(self):
+    def test_evaluate_and_expression(self):
         registry = RuleRegistry()
         registry.register_expression(
             rule_id="value_quality", name="价值质量",
@@ -162,11 +159,10 @@ class TestExpressionRuleEvaluate:
             signal_date=date.today(),
             factor_values={"roe": 15.0, "pe_ttm": 20.0},
         )
-        result = await rule.evaluate(ctx)
+        result = rule.evaluate(ctx)
         assert result.passed is True
 
-    @pytest.mark.asyncio(loop_scope="session")
-    async def test_evaluate_missing_factor_returns_failed(self):
+    def test_evaluate_missing_factor_returns_failed(self):
         registry = RuleRegistry()
         registry.register_expression(
             rule_id="missing_factor", name="缺失因子",
@@ -178,7 +174,7 @@ class TestExpressionRuleEvaluate:
             signal_date=date.today(),
             factor_values={"roe": 15.0},
         )
-        result = await rule.evaluate(ctx)
+        result = rule.evaluate(ctx)
         assert result.passed is False
         assert "error" in result.detail
 
@@ -186,8 +182,7 @@ class TestExpressionRuleEvaluate:
 class TestMultiFactorResonancePlugin:
     """多因子共振 SPI 插件测试"""
 
-    @pytest.mark.asyncio(loop_scope="session")
-    async def test_evaluate_single_all_dims_pass(self):
+    def test_evaluate_single_all_dims_pass(self):
         plugin = MultiFactorResonancePlugin()
         ctx = RuleContext(
             symbol="600519.SH",
@@ -201,13 +196,12 @@ class TestMultiFactorResonancePlugin:
                 "boll_position": 0.5,
             },
         )
-        result = await plugin.evaluate(ctx)
+        result = plugin.evaluate(ctx)
         assert result.passed is True
         assert result.direction == "long"
         assert result.confidence > 0
 
-    @pytest.mark.asyncio(loop_scope="session")
-    async def test_evaluate_single_few_dims(self):
+    def test_evaluate_single_few_dims(self):
         plugin = MultiFactorResonancePlugin()
         ctx = RuleContext(
             symbol="000001.SZ",
@@ -221,11 +215,10 @@ class TestMultiFactorResonancePlugin:
                 "boll_position": 0.95,  # 技术面维度失败
             },
         )
-        result = await plugin.evaluate(ctx)
+        result = plugin.evaluate(ctx)
         assert result.passed is False
 
-    @pytest.mark.asyncio(loop_scope="session")
-    async def test_evaluate_cross_section(self):
+    def test_evaluate_cross_section(self):
         plugin = MultiFactorResonancePlugin()
         df = pd.DataFrame(
             {
@@ -243,7 +236,7 @@ class TestMultiFactorResonancePlugin:
             signal_date=date.today(),
             cross_section_df=df,
         )
-        result = await plugin.evaluate(ctx)
+        result = plugin.evaluate(ctx)
         assert result.rule_id == "cs_multi_factor_resonance"
         # 600519.SH 各维度都较好，应通过
         assert result.passed is True
