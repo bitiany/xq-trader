@@ -11,11 +11,15 @@
 因为 backtrader 不记录信号触发原因。
 """
 
+import logging
+
 import pandas as pd
 
 import backtrader as bt
 
 from .backtrader_ext import XqTraderStrategy
+
+logger = logging.getLogger(__name__)
 
 
 def add_analyzers(cerebro: bt.Cerebro):
@@ -85,25 +89,28 @@ def extract_performance(strat: XqTraderStrategy, initial_cash: float) -> dict:
 def print_performance(perf: dict, strategy_name: str = ""):
     """打印绩效指标"""
     header = f"  回测绩效报告 — {strategy_name}" if strategy_name else "  回测绩效报告"
-    print("\n" + "=" * 70)
-    print(header)
-    print("=" * 70)
-    print(f"  初始资金:       {perf['initial_cash']:>14,.2f}")
-    print(f"  最终资金:       {perf['final_value']:>14,.2f}")
-    print(f"  总收益率:       {perf['total_return']:>14}")
-    print(f"  日均收益率:     {perf['avg_daily_return']:>14}")
-    print(f"  交易次数:       {perf['num_trades']:>14}")
-    print(f"  盈利次数:       {perf['win_trades']:>14}")
-    print(f"  亏损次数:       {perf['loss_trades']:>14}")
-    print(f"  胜率:           {perf['win_rate']:>14}")
-    print(f"  盈亏比:         {str(perf['profit_loss_ratio']):>14}")
-    print(f"  最大单笔盈利:   {perf['max_win']:>14,.2f}")
-    print(f"  最大单笔亏损:   {perf['max_loss']:>14,.2f}")
-    print(f"  最大回撤:       {perf['max_drawdown']:>14}")
-    print(f"  最大回撤持续:   {perf['max_dd_length']:>14} 天")
-    print(f"  夏普比率:       {str(perf['sharpe_ratio']):>14}")
-    print(f"  SQN:            {str(perf['sqn']):>14}")
-    print("=" * 70)
+    lines = [
+        "=" * 70,
+        header,
+        "=" * 70,
+        f"  初始资金:       {perf['initial_cash']:>14,.2f}",
+        f"  最终资金:       {perf['final_value']:>14,.2f}",
+        f"  总收益率:       {perf['total_return']:>14}",
+        f"  日均收益率:     {perf['avg_daily_return']:>14}",
+        f"  交易次数:       {perf['num_trades']:>14}",
+        f"  盈利次数:       {perf['win_trades']:>14}",
+        f"  亏损次数:       {perf['loss_trades']:>14}",
+        f"  胜率:           {perf['win_rate']:>14}",
+        f"  盈亏比:         {str(perf['profit_loss_ratio']):>14}",
+        f"  最大单笔盈利:   {perf['max_win']:>14,.2f}",
+        f"  最大单笔亏损:   {perf['max_loss']:>14,.2f}",
+        f"  最大回撤:       {perf['max_drawdown']:>14}",
+        f"  最大回撤持续:   {perf['max_dd_length']:>14} 天",
+        f"  夏普比率:       {str(perf['sharpe_ratio']):>14}",
+        f"  SQN:            {str(perf['sqn']):>14}",
+        "=" * 70,
+    ]
+    print("\n".join(lines))
 
 
 def print_trade_records(strat: XqTraderStrategy):
@@ -114,7 +121,7 @@ def print_trade_records(strat: XqTraderStrategy):
     """
     records = strat.trade_records
     if not records:
-        print("\n  无交易记录")
+        logger.info("  无交易记录")
         return
 
     rows = []
@@ -131,8 +138,11 @@ def print_trade_records(strat: XqTraderStrategy):
             "信号依据": r["reason"],
         })
     df = pd.DataFrame(rows)
-    print("\n" + "=" * 70)
-    print("  交易记录明细")
-    print("=" * 70)
-    print(df.to_string(index=False))
-    print("=" * 70)
+    lines = [
+        "=" * 70,
+        "  交易记录明细",
+        "=" * 70,
+        df.to_string(index=False),
+        "=" * 70,
+    ]
+    print("\n".join(lines))

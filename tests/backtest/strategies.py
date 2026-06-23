@@ -1,6 +1,6 @@
 """策略配置实例 — 预定义的策略配置"""
 
-from .core import RuleConfig, StrategyConfig
+from .core import FusionConfig, RuleConfig, RuleGroupConfig, StrategyConfig
 from .sizer import PositionConfig
 
 # ──────────────────────────────────────────────
@@ -82,4 +82,263 @@ RSI_STRATEGY = StrategyConfig(
             sell_expr="rsi > 70",
         ),
     ],
+)
+
+
+# ══════════════════════════════════════════════
+# 多规则融合策略
+# ══════════════════════════════════════════════
+
+# ──────────────────────────────────────────────
+# 场景一: RSI + BIAS AND 融合（单组双规则）
+# ──────────────────────────────────────────────
+
+RSI_BIAS_AND_STRATEGY = StrategyConfig(
+    strategy_id="rsi_bias_and",
+    name="RSI+BIAS AND融合策略",
+    groups=[
+        RuleGroupConfig(
+            group_id="reversal",
+            name="反转组",
+            rules=[
+                RuleConfig(
+                    rule_id="rsi_obos",
+                    rule_type="expression",
+                    factor_ids=["rsi"],
+                    buy_expr="rsi < 35",
+                    sell_expr="rsi > 65",
+                ),
+                RuleConfig(
+                    rule_id="bias_reversal",
+                    rule_type="expression",
+                    factor_ids=["bias"],
+                    buy_expr="bias < -3",
+                    sell_expr="bias > 3",
+                ),
+            ],
+            fusion=FusionConfig(method="and"),
+        ),
+    ],
+)
+
+
+# ──────────────────────────────────────────────
+# 场景一变体: RSI + BIAS 加权评分融合
+# ──────────────────────────────────────────────
+
+RSI_BIAS_WEIGHTED_STRATEGY = StrategyConfig(
+    strategy_id="rsi_bias_weighted",
+    name="RSI+BIAS 加权评分策略",
+    groups=[
+        RuleGroupConfig(
+            group_id="reversal",
+            name="反转组",
+            rules=[
+                RuleConfig(
+                    rule_id="rsi_obos",
+                    rule_type="expression",
+                    factor_ids=["rsi"],
+                    buy_expr="rsi < 35",
+                    sell_expr="rsi > 65",
+                ),
+                RuleConfig(
+                    rule_id="bias_reversal",
+                    rule_type="expression",
+                    factor_ids=["bias"],
+                    buy_expr="bias < -3",
+                    sell_expr="bias > 3",
+                ),
+            ],
+            fusion=FusionConfig(
+                method="weighted_score",
+                weights={"rsi_obos": 0.6, "bias_reversal": 0.4},
+                buy_threshold=0.3,
+                sell_threshold=0.3,
+            ),
+        ),
+    ],
+)
+
+
+# ──────────────────────────────────────────────
+# 场景一变体: MACD + RSI 加权投票融合
+# ──────────────────────────────────────────────
+
+MACD_RSI_VOTE_STRATEGY = StrategyConfig(
+    strategy_id="macd_rsi_vote",
+    name="MACD+RSI 加权投票策略",
+    groups=[
+        RuleGroupConfig(
+            group_id="mixed",
+            name="混合组",
+            rules=[
+                RuleConfig(
+                    rule_id="macd_cross",
+                    rule_type="plugin",
+                    plugin_class="tests.backtest.plugins.macd.MACDPlugin",
+                    factor_ids=["macd", "signal", "hist", "hist_slope", "hist_area"],
+                    prev_factor_ids=["hist", "hist_area"],
+                ),
+                RuleConfig(
+                    rule_id="rsi_obos",
+                    rule_type="expression",
+                    factor_ids=["rsi"],
+                    buy_expr="rsi < 35",
+                    sell_expr="rsi > 65",
+                ),
+            ],
+            fusion=FusionConfig(
+                method="weighted_vote",
+                weights={"macd_cross": 0.6, "rsi_obos": 0.4},
+                buy_threshold=0.5,
+                sell_threshold=0.5,
+            ),
+        ),
+    ],
+)
+
+
+# ──────────────────────────────────────────────
+# 场景一变体: RSI + BIAS + MON_5D IC 加权融合
+# ──────────────────────────────────────────────
+
+IC_WEIGHTED_STRATEGY = StrategyConfig(
+    strategy_id="ic_weighted",
+    name="IC加权融合策略",
+    groups=[
+        RuleGroupConfig(
+            group_id="ic_group",
+            name="IC加权组",
+            rules=[
+                RuleConfig(
+                    rule_id="rsi_obos",
+                    rule_type="expression",
+                    factor_ids=["rsi"],
+                    buy_expr="rsi < 35",
+                    sell_expr="rsi > 65",
+                ),
+                RuleConfig(
+                    rule_id="bias_reversal",
+                    rule_type="expression",
+                    factor_ids=["bias"],
+                    buy_expr="bias < -3",
+                    sell_expr="bias > 3",
+                ),
+                RuleConfig(
+                    rule_id="mon_5d",
+                    rule_type="expression",
+                    factor_ids=["mon_5d"],
+                    buy_expr="mon_5d > 0.02",
+                    sell_expr="mon_5d < -0.02",
+                ),
+            ],
+            fusion=FusionConfig(
+                method="ic_weighted",
+                weights={"rsi_obos": 0.05, "bias_reversal": 0.03, "mon_5d": 0.04},
+                buy_threshold=0.02,
+                sell_threshold=0.02,
+            ),
+        ),
+    ],
+)
+
+
+# ──────────────────────────────────────────────
+# 场景二: 多规则组嵌套（反转组 + 动量组，组间 OR 融合）
+# ──────────────────────────────────────────────
+
+MULTI_GROUP_STRATEGY = StrategyConfig(
+    strategy_id="multi_group",
+    name="多规则组嵌套策略(反转+动量)",
+    groups=[
+        RuleGroupConfig(
+            group_id="reversal_group",
+            name="反转组(RSI+BIAS)",
+            rules=[
+                RuleConfig(
+                    rule_id="rsi_obos",
+                    rule_type="expression",
+                    factor_ids=["rsi"],
+                    buy_expr="rsi < 35",
+                    sell_expr="rsi > 65",
+                ),
+                RuleConfig(
+                    rule_id="bias_reversal",
+                    rule_type="expression",
+                    factor_ids=["bias"],
+                    buy_expr="bias < -3",
+                    sell_expr="bias > 3",
+                ),
+            ],
+            fusion=FusionConfig(method="and"),
+        ),
+        RuleGroupConfig(
+            group_id="momentum_group",
+            name="动量组(MON_5D)",
+            rules=[
+                RuleConfig(
+                    rule_id="mon_5d",
+                    rule_type="expression",
+                    factor_ids=["mon_5d"],
+                    buy_expr="mon_5d > 0.03",
+                    sell_expr="mon_5d < -0.03",
+                ),
+            ],
+            fusion=FusionConfig(method="or"),
+        ),
+    ],
+    group_fusion=FusionConfig(method="or"),
+)
+
+
+# ──────────────────────────────────────────────
+# 场景二变体: 多规则组嵌套（反转组 + 动量组，组间加权投票）
+# ──────────────────────────────────────────────
+
+MULTI_GROUP_VOTE_STRATEGY = StrategyConfig(
+    strategy_id="multi_group_vote",
+    name="多规则组嵌套策略(组间加权投票)",
+    groups=[
+        RuleGroupConfig(
+            group_id="reversal_group",
+            name="反转组(RSI+BIAS)",
+            rules=[
+                RuleConfig(
+                    rule_id="rsi_obos",
+                    rule_type="expression",
+                    factor_ids=["rsi"],
+                    buy_expr="rsi < 35",
+                    sell_expr="rsi > 65",
+                ),
+                RuleConfig(
+                    rule_id="bias_reversal",
+                    rule_type="expression",
+                    factor_ids=["bias"],
+                    buy_expr="bias < -3",
+                    sell_expr="bias > 3",
+                ),
+            ],
+            fusion=FusionConfig(method="and"),
+        ),
+        RuleGroupConfig(
+            group_id="momentum_group",
+            name="动量组(MON_5D)",
+            rules=[
+                RuleConfig(
+                    rule_id="mon_5d",
+                    rule_type="expression",
+                    factor_ids=["mon_5d"],
+                    buy_expr="mon_5d > 0.02",
+                    sell_expr="mon_5d < -0.02",
+                ),
+            ],
+            fusion=FusionConfig(method="or"),
+        ),
+    ],
+    group_fusion=FusionConfig(
+        method="weighted_vote",
+        weights={"reversal_group": 0.6, "momentum_group": 0.4},
+        buy_threshold=0.35,
+        sell_threshold=0.35,
+    ),
 )

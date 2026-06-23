@@ -4,12 +4,17 @@
 支持两种规则类型:
   - expression: 使用内置 ExpressionPlugin
   - plugin: 动态加载自定义 RulePlugin 子类
+
+支持两种配置方式:
+  1. 直接 rules（向后兼容）: 单一规则列表，引擎自动创建隐式规则组（OR 融合）
+  2. groups + group_fusion: 多规则组，组内各自融合，组间再用 group_fusion 融合
 """
 
 import importlib
 import logging
 
-from .core import RuleConfig, RuleContext, RuleResult, StrategyConfig, RulePlugin
+from .core import RuleConfig, RuleContext, RuleGroupConfig, RulePlugin, RuleResult, StrategyConfig
+from .fusion import FusionEngine
 from .plugins.expression import ExpressionPlugin
 
 logger = logging.getLogger(__name__)
@@ -37,46 +42,79 @@ class SignalEngine:
     流程:
       1. 获取策略配置（StrategyConfig）
       2. 为每条 RuleConfig 创建对应的 RulePlugin 实例
-      3. 执行时遍历所有插件，聚合结果（任一规则触发即产生信号）
+      3. 执行时遍历所有插件，通过 FusionEngine 融合结果
+
+    支持分层组合:
+      - 组内: 各规则结果通过 group.fusion 融合
+      - 组间: 各组结果通过 strategy_config.group_fusion 融合
     """
 
     def __init__(self, strategy_config: StrategyConfig):
         self._config = strategy_config
-        self._plugins: list[RulePlugin] = []
-        self._init_plugins()
+        self._fusion_engine = FusionEngine()
+        self._groups: list[tuple[RuleGroupConfig, list[RulePlugin]]] = []
+        self._init_groups()
 
-    def _init_plugins(self):
-        """根据策略配置创建规则插件实例"""
-        for rule_cfg in self._config.rules:
+    def _init_groups(self):
+        """根据策略配置创建规则组和插件实例"""
+        if self._config.groups:
+            for group_cfg in self._config.groups:
+                plugins = self._create_plugins(group_cfg.rules)
+                self._groups.append((group_cfg, plugins))
+        elif self._config.rules:
+            # 向后兼容: 无 groups 时，将 rules 包装为隐式规则组（OR 融合）
+            implicit_group = RuleGroupConfig(
+                group_id="default",
+                name="默认组",
+                rules=self._config.rules,
+            )
+            plugins = self._create_plugins(self._config.rules)
+            self._groups.append((implicit_group, plugins))
+
+    @staticmethod
+    def _create_plugins(rule_configs: list[RuleConfig]) -> list[RulePlugin]:
+        """为规则配置列表创建对应的插件实例"""
+        plugins: list[RulePlugin] = []
+        for rule_cfg in rule_configs:
             if rule_cfg.rule_type == "expression":
-                self._plugins.append(ExpressionPlugin(rule_cfg))
+                plugins.append(ExpressionPlugin(rule_cfg))
             elif rule_cfg.rule_type == "plugin":
                 cls = _load_plugin_class(rule_cfg.plugin_class)
-                self._plugins.append(cls())
+                plugins.append(cls())
             else:
-                logger.warning(f"未知规则类型: {rule_cfg.rule_type}")
+                logger.warning(f"未知规则类型: {rule_cfg.rule_type}, rule_id={rule_cfg.rule_id}")
+        return plugins
 
     def execute(self, context: RuleContext) -> RuleResult:
-        """执行所有规则插件，返回聚合结果
+        """执行所有规则插件，返回融合后的结果
 
-        聚合策略: 任一规则触发 buy 则 buy，任一触发 sell 则 sell，
-        优先 buy（同时触发时买入优先）
+        流程:
+          1. 单组: 组内规则执行 → 组内融合 → 返回
+          2. 多组: 各组内融合 → 组间融合 → 返回
         """
-        buy_result = None
-        sell_result = None
+        if not self._groups:
+            return RuleResult(
+                rule_id=self._config.strategy_id,
+                direction="neutral",
+                reason="无规则配置",
+            )
 
-        for plugin in self._plugins:
-            result = plugin.evaluate(context)
-            if result.direction == "buy" and buy_result is None:
-                buy_result = result
-            elif result.direction == "sell" and sell_result is None:
-                sell_result = result
+        # 单组: 直接返回组内融合结果
+        if len(self._groups) == 1:
+            group_cfg, plugins = self._groups[0]
+            results = [p.evaluate(context) for p in plugins]
+            return self._fusion_engine.fuse(results, group_cfg.fusion)
 
-        if buy_result:
-            return buy_result
-        if sell_result:
-            return sell_result
-        return RuleResult(rule_id=self._config.strategy_id, direction="neutral", reason="无信号")
+        # 多组: 先组内融合，再组间融合
+        group_results: list[RuleResult] = []
+        for group_cfg, plugins in self._groups:
+            results = [p.evaluate(context) for p in plugins]
+            group_result = self._fusion_engine.fuse(results, group_cfg.fusion)
+            # 用 group_id 标识组级结果，供组间融合的 weights 引用
+            group_result.rule_id = group_cfg.group_id
+            group_results.append(group_result)
+
+        return self._fusion_engine.fuse(group_results, self._config.group_fusion)
 
     @property
     def config(self) -> StrategyConfig:

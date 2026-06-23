@@ -12,6 +12,7 @@ import logging
 from .context import PositionContext, PositionResult
 from .plugin import PositionPlugin
 from .config import PositionConfig
+from .utils import round_to_lot
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +77,7 @@ class SizerEngine:
             # 无插件时默认 95% 可用资金
             cash = context.available_cash
             price = context.current_price
-            size = int(cash * 0.95 / price / 100) * 100
+            size = round_to_lot(cash * 0.95 / price)
             return PositionResult(
                 size=size,
                 reason=f"默认仓位: 95%可用资金, 仓位={size}股",

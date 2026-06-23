@@ -68,23 +68,75 @@ class RuleConfig:
 
 
 @dataclass
+class FusionConfig:
+    """融合配置 — 定义规则组内或组间的信号融合方式
+
+    支持五种融合方式:
+      - and: 所有规则通过且方向一致才产生信号
+      - or: 任一规则触发即产生信号（buy 优先）
+      - weighted_score: 加权评分，score × direction 加权求和后与阈值比较
+      - weighted_vote: 加权投票，方向投票加权求和后与阈值比较
+      - ic_weighted: IC 加权，用历史 IC 值作为权重加权评分
+
+    weights 的 key 为 rule_id（或 group_id），value 为权重值。
+    对于 ic_weighted，weights 的 value 为该规则的历史 IC 值。
+    """
+
+    method: str = "or"  # and | or | weighted_score | weighted_vote | ic_weighted
+    weights: dict[str, float] = field(default_factory=dict)
+    buy_threshold: float = 0.5
+    sell_threshold: float = 0.5
+
+
+@dataclass
+class RuleGroupConfig:
+    """规则组配置 — 一组规则 + 组内融合方式
+
+    规则组是分层组合的基本单元:
+      - 组内规则通过 FusionConfig.fusion 融合，产生组级信号
+      - 多个组之间通过 StrategyConfig.group_fusion 融合，产生最终信号
+    """
+
+    group_id: str
+    name: str = ""
+    rules: list[RuleConfig] = field(default_factory=list)
+    fusion: FusionConfig = field(default_factory=FusionConfig)
+
+
+@dataclass
 class StrategyConfig:
-    """策略配置 — 一个策略包含多条规则和一个仓位配置"""
+    """策略配置 — 一个策略包含规则组列表和组间融合配置
+
+    支持两种配置方式:
+      1. 直接 rules（向后兼容）: 单一规则列表，引擎自动创建隐式规则组（OR 融合）
+      2. groups + group_fusion: 多规则组，组内各自融合，组间再用 group_fusion 融合
+    """
 
     strategy_id: str
     name: str
     rules: list[RuleConfig] = field(default_factory=list)
+    groups: list[RuleGroupConfig] = field(default_factory=list)
+    group_fusion: FusionConfig = field(default_factory=FusionConfig)
     position_config: PositionConfig | None = None
 
     def get_all_factor_ids(self) -> list[str]:
         """获取策略所有规则和仓位插件所需的因子（去重）"""
         seen = set()
         result = []
-        for rule in self.rules:
+
+        def _collect(rule: RuleConfig):
             for fid in rule.factor_ids:
                 if fid not in seen:
                     seen.add(fid)
                     result.append(fid)
+
+        # 优先从 groups 收集，其次从 rules 收集
+        for group in self.groups:
+            for rule in group.rules:
+                _collect(rule)
+        for rule in self.rules:
+            _collect(rule)
+
         if self.position_config:
             for fid in self.position_config.factor_ids:
                 if fid not in seen:
@@ -96,11 +148,18 @@ class StrategyConfig:
         """获取策略所有规则中需要前值的因子（去重）"""
         seen = set()
         result = []
-        for rule in self.rules:
+
+        def _collect(rule: RuleConfig):
             for fid in rule.prev_factor_ids:
                 if fid not in seen:
                     seen.add(fid)
                     result.append(fid)
+
+        for group in self.groups:
+            for rule in group.rules:
+                _collect(rule)
+        for rule in self.rules:
+            _collect(rule)
         return result
 
 

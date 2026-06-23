@@ -17,6 +17,7 @@
 
 from ..plugin import PositionPlugin
 from ..context import PositionContext, PositionResult
+from ..utils import round_to_lot
 
 
 class KellyPositionPlugin(PositionPlugin):
@@ -42,7 +43,7 @@ class KellyPositionPlugin(PositionPlugin):
         # 交易次数不足，使用默认比例
         if len(trades) < self.min_trades:
             pct = self.default_pct
-            size = int(cash * pct / price / 100) * 100
+            size = round_to_lot(cash * pct / price)
             return PositionResult(
                 size=size,
                 reason=f"凯利仓位(默认): 交易次数{len(trades)}<{self.min_trades}, "
@@ -51,7 +52,7 @@ class KellyPositionPlugin(PositionPlugin):
 
         # 计算胜率和盈亏比
         wins = [t for t in trades if t.get("pnl", 0) > 0]
-        losses = [t for t in trades if t.get("pnl", 0) <= 0]
+        losses = [t for t in trades if t.get("pnl", 0) < 0]
         win_rate = len(wins) / len(trades)
 
         avg_win = sum(t["pnl"] for t in wins) / len(wins) if wins else 0
@@ -66,7 +67,7 @@ class KellyPositionPlugin(PositionPlugin):
         actual_pct = kelly_pct * self.kelly_fraction
         actual_pct = min(actual_pct, self.max_pct)
 
-        size = int(cash * actual_pct / price / 100) * 100
+        size = round_to_lot(cash * actual_pct / price)
         return PositionResult(
             size=size,
             reason=f"凯利仓位: 胜率={win_rate:.2%}, 盈亏比={win_loss_ratio:.2f}, "

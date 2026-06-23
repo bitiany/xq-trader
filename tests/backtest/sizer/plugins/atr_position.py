@@ -18,6 +18,7 @@
 
 from ..plugin import PositionPlugin
 from ..context import PositionContext, PositionResult
+from ..utils import round_to_lot
 
 
 class ATRPositionPlugin(PositionPlugin):
@@ -41,7 +42,7 @@ class ATRPositionPlugin(PositionPlugin):
 
         if atr is None or atr <= 0:
             # ATR 数据不可用，回退到固定比例
-            size = int(cash * 0.2 / price / 100) * 100
+            size = round_to_lot(cash * 0.2 / price)
             return PositionResult(
                 size=size,
                 reason=f"ATR仓位(回退): ATR数据不可用, 使用默认20%比例, 仓位={size}股",
@@ -61,7 +62,7 @@ class ATRPositionPlugin(PositionPlugin):
         raw_size = min(raw_size, max_size_by_cash)
 
         # 按手数取整
-        size = int(raw_size / 100) * 100
+        size = round_to_lot(raw_size)
 
         return PositionResult(
             size=size,

@@ -7,7 +7,11 @@ import pandas as pd
 
 from xqtrader.domain.security.models import Security
 from xqtrader.domain.market.models.candlestick import CandlestickDaily
-from .strategies import MACD_STRATEGY, MACD_KELLY_STRATEGY, MACD_ATR_STRATEGY, RSI_STRATEGY
+from .strategies import (
+    MACD_STRATEGY, MACD_KELLY_STRATEGY, MACD_ATR_STRATEGY, RSI_STRATEGY,
+    RSI_BIAS_AND_STRATEGY, RSI_BIAS_WEIGHTED_STRATEGY, MACD_RSI_VOTE_STRATEGY,
+    IC_WEIGHTED_STRATEGY, MULTI_GROUP_STRATEGY, MULTI_GROUP_VOTE_STRATEGY,
+)
 from .runner import run_backtest
 
 DEFAULT_SYMBOL = "603993.SH"
@@ -50,6 +54,13 @@ async def ohlcv_df(app_with_datasource):
     # RSI 指标
     df["rsi"] = ta.RSI(df.close, timeperiod=14)
 
+    # BIAS 乖离率: (close - MA6) / MA6 * 100
+    ma6 = df.close.rolling(6).mean()
+    df["bias"] = (df.close - ma6) / ma6 * 100
+
+    # MON_5D 5日动量: close / close.shift(5) - 1
+    df["mon_5d"] = df.close / df.close.shift(5) - 1
+
     # ATR 指标
     df["atr"] = ta.ATR(df.high, df.low, df.close, timeperiod=14)
 
@@ -58,12 +69,6 @@ async def ohlcv_df(app_with_datasource):
     mask = (df["trade_date"] >= START_DATE) & (df["trade_date"] <= END_DATE)
     df = df.loc[mask].reset_index(drop=True)
     return df
-
-
-@pytest.mark.asyncio(loop_scope="session")
-async def test_ohlcv_factors(ohlcv_df):
-    print(ohlcv_df.iloc[-5:])
-
 
 # ──────────────────────────────────────────────
 # 回测测试用例
@@ -107,3 +112,68 @@ async def test_rsi_strategy(app_with_datasource, ohlcv_df):
         symbol=DEFAULT_SYMBOL, start_date=START_DATE, end_date=END_DATE,
     )
     print(f"RSI 策略交易次数: {perf['num_trades']}")
+
+
+# ──────────────────────────────────────────────
+# 多规则融合测试用例
+# ──────────────────────────────────────────────
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_rsi_bias_and_strategy(app_with_datasource, ohlcv_df):
+    """场景一: RSI + BIAS AND 融合 — 两个因子同时满足才产生信号"""
+    perf = run_backtest(
+        ohlcv_df, RSI_BIAS_AND_STRATEGY,
+        symbol=DEFAULT_SYMBOL, start_date=START_DATE, end_date=END_DATE,
+    )
+    # AND 融合比单规则更严格，交易次数应较少
+    print(f"RSI+BIAS AND 策略交易次数: {perf['num_trades']}")
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_rsi_bias_weighted_strategy(app_with_datasource, ohlcv_df):
+    """场景一变体: RSI + BIAS 加权评分融合 — score 加权求和后与阈值比较"""
+    perf = run_backtest(
+        ohlcv_df, RSI_BIAS_WEIGHTED_STRATEGY,
+        symbol=DEFAULT_SYMBOL, start_date=START_DATE, end_date=END_DATE,
+    )
+    print(f"RSI+BIAS 加权评分策略交易次数: {perf['num_trades']}")
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_macd_rsi_vote_strategy(app_with_datasource, ohlcv_df):
+    """场景一变体: MACD + RSI 加权投票融合 — plugin + expression 混合规则"""
+    perf = run_backtest(
+        ohlcv_df, MACD_RSI_VOTE_STRATEGY,
+        symbol=DEFAULT_SYMBOL, start_date=START_DATE, end_date=END_DATE,
+    )
+    assert perf["num_trades"] > 0, "MACD+RSI 投票策略应产生交易"
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_ic_weighted_strategy(app_with_datasource, ohlcv_df):
+    """场景一变体: RSI + BIAS + MON_5D IC 加权融合 — 三因子 IC 加权"""
+    perf = run_backtest(
+        ohlcv_df, IC_WEIGHTED_STRATEGY,
+        symbol=DEFAULT_SYMBOL, start_date=START_DATE, end_date=END_DATE,
+    )
+    print(f"IC 加权策略交易次数: {perf['num_trades']}")
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_multi_group_strategy(app_with_datasource, ohlcv_df):
+    """场景二: 多规则组嵌套 — 反转组(RSI+BIAS AND) + 动量组(MON_5D)，组间 OR"""
+    perf = run_backtest(
+        ohlcv_df, MULTI_GROUP_STRATEGY,
+        symbol=DEFAULT_SYMBOL, start_date=START_DATE, end_date=END_DATE,
+    )
+    print(f"多规则组(OR)策略交易次数: {perf['num_trades']}")
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_multi_group_vote_strategy(app_with_datasource, ohlcv_df):
+    """场景二变体: 多规则组嵌套 — 反转组 + 动量组，组间加权投票"""
+    perf = run_backtest(
+        ohlcv_df, MULTI_GROUP_VOTE_STRATEGY,
+        symbol=DEFAULT_SYMBOL, start_date=START_DATE, end_date=END_DATE,
+    )
+    print(f"多规则组(加权投票)策略交易次数: {perf['num_trades']}")

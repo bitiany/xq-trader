@@ -174,10 +174,9 @@ class XqTraderStrategy(bt.Strategy):
 
         # 根据信号方向执行交易
         if result.direction == "buy" and not self.position:
-            # 不指定 size，由 PluginSizer 自动计算
-            self.buy()
-            # 获取 Sizer 计算的实际 size
-            size = self.sizer.getsizing(self.data, isbuy=True)
+            # buy() 不指定 size，由 PluginSizer 自动计算；返回的 order 已包含实际 size
+            order = self.buy()
+            size = abs(order.size) if order.size else 0
             self._pending_buy = {
                 "date": current_date,
                 "price": close,

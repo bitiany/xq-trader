@@ -8,12 +8,16 @@
   - 函数: abs(hist) > 0.1, max(rsi_6, rsi_14) > 70
 """
 
+import ast
+import logging
 import math
 
 from ..core import RuleConfig, RuleContext, RuleResult, RulePlugin
 
+logger = logging.getLogger(__name__)
+
 # 安全的表达式求值环境
-_SAFE_BUILTINS = {
+_SAFE_FUNCS = {
     "abs": abs,
     "max": max,
     "min": min,
@@ -21,19 +25,45 @@ _SAFE_BUILTINS = {
     "int": int,
     "float": float,
     "bool": bool,
-    "True": True,
-    "False": False,
     "math": math,
     "nan": float("nan"),
     "inf": float("inf"),
 }
 
+# 允许的 AST 节点类型（白名单）
+_ALLOWED_AST_NODES = (
+    ast.Expression, ast.BoolOp, ast.BinOp, ast.UnaryOp, ast.Compare,
+    ast.Name, ast.Constant, ast.And, ast.Or, ast.Not,
+    ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Mod, ast.Pow,
+    ast.Lt, ast.Gt, ast.LtE, ast.GtE, ast.Eq, ast.NotEq,
+    ast.USub, ast.UAdd, ast.Load,
+)
+
+
+class _SafeExprValidator(ast.NodeVisitor):
+    """验证表达式 AST 是否只包含安全节点，阻止代码注入"""
+
+    def visit_Call(self, node: ast.Call):
+        """仅允许调用 _SAFE_FUNCS 中的函数"""
+        if not isinstance(node.func, ast.Name) or node.func.id not in _SAFE_FUNCS:
+            raise ValueError(f"不允许的函数调用: {ast.dump(node.func, include_attributes=False)}")
+        self.generic_visit(node)
+
+    def generic_visit(self, node: ast.AST):
+        if not isinstance(node, _ALLOWED_AST_NODES):
+            raise ValueError(f"不允许的表达式节点: {type(node).__name__}")
+        super().generic_visit(node)
+
 
 def _safe_eval(expr: str, namespace: dict[str, float]) -> bool:
-    """安全地求值表达式，仅允许因子名、数值和基本运算"""
+    """安全地求值表达式，通过 AST 白名单阻止代码注入"""
     try:
-        return bool(eval(expr, {"__builtins__": _SAFE_BUILTINS}, namespace))
-    except Exception:
+        tree = ast.parse(expr, mode="eval")
+        _SafeExprValidator().visit(tree)
+        full_ns = {**_SAFE_FUNCS, **namespace}
+        return bool(eval(compile(tree, "<expr>", "eval"), {"__builtins__": {}}, full_ns))
+    except Exception as e:
+        logger.warning(f"表达式求值失败: expr='{expr}', error={e}")
         return False
 
 

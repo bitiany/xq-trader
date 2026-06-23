@@ -14,6 +14,7 @@ from .context import PositionContext, PositionResult
 from .plugin import PositionPlugin
 from .config import PositionConfig
 from .engine import SizerEngine
+from .utils import round_to_lot
 
 __all__ = [
     "PositionContext",
@@ -21,4 +22,5 @@ __all__ = [
     "PositionPlugin",
     "PositionConfig",
     "SizerEngine",
+    "round_to_lot",
 ]
