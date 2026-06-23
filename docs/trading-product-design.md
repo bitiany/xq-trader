@@ -1,6 +1,6 @@
 # xq-trader 交易模块前端产品设计
 
-> **更新**: 2026-06-09
+> **更新**: 2026-06-23
 > **关联**: [trading-system-design.md](./trading-system-design.md)（后端架构）、[factor-architecture.md](./factor-architecture.md)（因子管线）
 
 ---
@@ -446,29 +446,46 @@ flowchart TD
 
 ---
 
-## 九、文件结构（前端目标）
+## 九、文件结构（前端当前状态）
 
 ```
 web/src/
-├── pages/trading/
-│   ├── LiveTradingPage.tsx
-│   ├── PaperTradingPage.tsx
-│   ├── OrdersPage.tsx
-│   ├── RiskPage.tsx
-│   ├── WorkflowMonitorPage.tsx
-│   └── components/
-│       ├── AccountKpiCards.tsx
-│       ├── PositionTable.tsx
-│       ├── PnlCalendar.tsx
-│       ├── PreOrderApprovalDrawer.tsx
-│       ├── StrategyInstanceCard.tsx
-│       ├── PositionSizingForm.tsx
-│       ├── WorkflowRunSteps.tsx
-│       └── OrderFlowTable.tsx
-├── api/trading/
-│   └── index.ts
-├── styles/trading.css          # 交易页专用，引用 themes.css 变量
-└── config/navigation.ts        # 扩展 NAV_ITEMS
+├── pages/
+│   ├── backtest/                        # ✅ 已实现
+│   │   ├── BacktestPage.tsx
+│   │   └── components/
+│   │       ├── BasicConfigPanel.tsx      # 基础配置面板
+│   │       ├── BuiltinStrategyPicker.tsx # 内置策略选择器
+│   │       ├── EquityCurveChart.tsx      # 净值曲线图
+│   │       ├── PerformanceGrid.tsx       # 绩效指标网格
+│   │       ├── TradeListTable.tsx        # 交易记录表
+│   │       └── PositionListTable.tsx     # 持仓快照表
+│   ├── trading/                         # 🔧 骨架已搭建
+│   │   ├── LiveCockpitPage.tsx          # 实盘驾驶舱
+│   │   ├── types.ts                     # 交易域类型定义
+│   │   └── components/
+│   │       ├── AccountKpiCards.tsx       # KPI 四卡
+│   │       ├── CockpitDashboard.tsx      # 驾驶舱仪表盘
+│   │       ├── OrderFlowTab.tsx          # 委托成交 Tab
+│   │       ├── PnlCalendar.tsx           # 收益日历
+│   │       ├── PositionPnLTab.tsx        # 持仓收益 Tab
+│   │       ├── PositionSizingConfigDrawer.tsx  # 仓位配置抽屉
+│   │       ├── PreOrderApprovalDrawer.tsx      # 预订单审批抽屉
+│   │       ├── RiskSidePanel.tsx         # 风控侧边栏
+│   │       ├── SignalApprovalTab.tsx     # 信号审批 Tab
+│   │       ├── SingleApprovalPopover.tsx # 单条审批气泡
+│   │       ├── WatchlistStrategyTab.tsx  # 自选策略 Tab
+│   │       └── WorkflowRunTab.tsx        # 工作流 Tab
+│   │   # ⏳ 待实现: PaperTradingPage, OrdersPage, RiskPage, WorkflowMonitorPage
+│   ├── strategy/                        # ✅ 已实现
+│   └── stock/                           # ✅ 已实现
+├── api/
+│   └── backtest/index.ts                # ✅ 回测 API 类型
+│   # ⏳ 待实现: api/trading/index.ts
+├── components/stock/
+│   └── StockKlineChart.tsx              # ✅ K线组件（支持 tradeMarkers 交易标记叠加）
+└── hooks/
+    └── useStockKline.ts                 # ✅ K线数据 hook
 ```
 
 ---

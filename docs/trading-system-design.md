@@ -1,6 +1,6 @@
 # xq-trader 交易系统 — 完整架构与交互设计
 
-> **更新**: 2026-06-11
+> **更新**: 2026-06-23
 > **定位**: A 股量化私募轻量级交易终端
 > **前置**: [factor-architecture.md](./factor-architecture.md)（因子管线）
 
@@ -1374,120 +1374,86 @@ sequenceDiagram
 ### 后端
 
 ```
-src/xqtrader/
-├── domain/trading/
-│   ├── models/
-│   │   ├── account.py              # trading_account, account_snapshot
-│   │   ├── strategy_instance.py    # strategy_instance
-│   │   ├── watchlist.py            # watchlist, watchlist_item
-│   │   ├── paper_session.py        # paper_session
-│   │   ├── signal.py               # selection_result, trading_signal, signal_fusion_result
-│   │   ├── position_sizing.py      # position_sizing_result
-│   │   ├── pre_order.py            # pre_order
-│   │   ├── order.py                # order, order_event
-│   │   ├── trade.py                # trade
-│   │   ├── position.py             # position_snapshot
-│   │   └── risk.py                 # risk_rule, risk_event
-│   └── services/
-│       ├── account_service.py
-│       ├── strategy_instance_service.py
-│       ├── approval_service.py
-│       └── reconciliation_service.py
-├── trading/
-│   ├── tools/                      # Workflow Tool 节点
-│   │   ├── load_portfolio_context.py
-│   │   ├── cross_section_select.py
-│   │   ├── symbol_signal.py
-│   │   ├── signal_fusion.py
-│   │   ├── position_sizing.py
-│   │   ├── order_intent_generator.py
-│   │   ├── risk_gateway.py
-│   │   ├── load_approved_pre_orders.py
-│   │   ├── pre_trade_risk_check.py
-│   │   ├── broker_submit.py
-│   │   └── order_confirm.py
-│   ├── sizing/                     # PositionSizingTool + SizingStrategy 插件
-│   │   ├── strategies/
-│   │   │   ├── equal_weight.py
-│   │   │   ├── signal_weight.py
-│   │   │   ├── inverse_volatility.py
-│   │   │   ├── volatility_target.py
-│   │   │   ├── atr_risk.py
-│   │   │   ├── kelly_fraction.py
-│   │   │   ├── fixed_fraction.py
-│   │   │   └── max_position_cap.py
-│   │   ├── registry.py
-│   │   └── portfolio_constraints.py
-│   ├── oms/
-│   │   ├── order_manager.py        # OMS 核心
-│   │   └── state_machine.py        # 订单状态机
-│   ├── risk/
-│   │   ├── risk_gateway.py         # 事前风控
-│   │   ├── intraday_monitor.py     # 事中风控
-│   │   ├── kill_switch.py          # 紧急全平
-│   │   └── rules/                  # 风控规则插件
-│   ├── execution/
-│   │   └── execution_engine.py     # ExecutionEngine
-│   ├── paper/
-│   │   ├── paper_engine.py         # 模拟盘引擎
-│   │   └── paper_matcher.py        # 模拟撮合
-│   ├── monitor/
-│   │   ├── position_sync.py        # PositionSyncService
-│   │   ├── order_confirm.py        # OrderConfirmService
-│   │   └── reconciliation.py       # ReconciliationService
-│   └── runner/
-│       ├── decision_runner.py      # Celery Beat → trading_decision
-│       └── execution_runner.py     # Celery Beat → trading_execution
-├── broker/
-│   ├── adapters/
-│   │   ├── base.py                 # BrokerAdapter Protocol
-│   │   ├── qmt_adapter.py          # QmtBrokerAdapter
-│   │   ├── simulated_adapter.py    # SimulatedBrokerAdapter
-│   │   └── backtest_adapter.py     # BacktestBrokerAdapter
-│   └── services/                   # 现有 QMT 服务
-└── api/v1/trading/
-    ├── router.py
-    ├── accounts.py
-    ├── instances.py
-    ├── watchlists.py
-    ├── pre_orders.py
-    ├── approval.py
-    ├── orders.py
-    ├── positions.py
-    └── risk.py
+src/xqtrader/domain/trading/
+├── backtest/                            # ✅ 回测引擎（已实现）
+│   ├── core.py                          # RuleContext, RuleResult, RuleConfig, StrategyConfig, RulePlugin ABC
+│   ├── engine.py                        # SignalEngine — 规则评估 + 融合
+│   ├── runner.py                        # run_backtest — 数据准备 + cerebro 运行
+│   ├── service.py                       # BacktestService — API 入口 + 数据加载 + 内置因子计算
+│   ├── performance.py                   # 绩效指标提取
+│   ├── backtrader_ext.py                # Backtrader 适配层
+│   ├── fusion/                          # 信号融合策略
+│   │   ├── base.py, and_or.py, weighted.py, ic_weighted.py
+│   ├── plugins/                         # SPI 规则插件
+│   │   ├── macd.py, expression.py
+│   └── sizer/                           # 仓位管理
+│       ├── engine.py, config.py, context.py, plugin.py
+│       └── plugins/atr_position.py, kelly.py
+├── rules/                               # ✅ 规则引擎（已实现）
+│   ├── base.py                          # RulePlugin ABC
+│   ├── expression/                      # 表达式引擎 (lexer, parser, evaluator, operators)
+│   └── plugins/multi_factor_resonance.py
+├── selection/                           # ✅ 截面选股引擎（已实现）
+│   └── engine.py
+├── loaders/                             # ✅ 策略配置加载器（已实现）
+│   └── strategy_loader.py              # StrategyConfigLoader — DB → StrategyConfig
+├── models/                              # ✅ 数据模型（已实现）
+│   ├── account.py                       # trading_account, account_snapshot
+│   ├── strategy.py                      # td_strategy (单表 JSONB)
+│   ├── rule.py                          # td_rule_registry (单表 JSONB)
+│   ├── backtest.py                      # td_backtest_run, td_backtest_result
+│   ├── instance.py                      # strategy_instance
+│   ├── watchlist.py                     # watchlist, watchlist_item
+│   ├── order.py                         # order, order_event
+│   ├── position.py                      # position_snapshot
+│   ├── risk.py                          # risk_rule, risk_event
+│   └── decision.py                      # pre_order, decision
+├── broker.py                            # 🔧 Broker 适配层骨架
+├── enums.py                             # ✅ 所有枚举定义
+│
+│   # ──── 以下模块待实现 ────
+│   # services/                          # ⏳ account_service, approval_service, reconciliation_service
+│   # oms/                               # ⏳ OMS 订单管理 + 状态机
+│   # risk/                              # ⏳ 事前/事中/事后风控 + Kill Switch
+│   # execution/                         # ⏳ ExecutionEngine
+│   # paper/                             # ⏳ 模拟盘引擎 + 撮合
+│   # monitor/                           # ⏳ 持仓同步 + 订单确认 + 对账
+
+src/xqtrader/api/v1/
+├── backtest/                            # ✅ 回测 API (router.py, schemas.py)
+├── strategies/                          # ✅ 策略管理 API
+├── rules/                               # ✅ 规则管理 API
+├── selection/                           # ✅ 截面选股 API
+├── broker/                              # ✅ Broker 连接 API
+│   # ──── 以下 API 待实现 ────
+│   # trading/                           # ⏳ 交易域 API (accounts, instances, pre_orders, approval, orders, positions, risk)
 
 flow/
-├── trading_decision.json           # 决策流定义
-└── trading_execution.json          # 执行流定义
+├── trading_decision.json                # ⏳ 决策流定义
+└── trading_execution.json               # ⏳ 执行流定义
 ```
 
 ### 前端
 
 ```
 web/src/
-├── pages/trading/
-│   ├── TradingCockpitPage.tsx       # 一站式驾驶舱（实盘/模拟盘共用）
-│   └── components/
-│       ├── CockpitDashboard.tsx     # 驾驶舱（KPI + 风险卡 + WF 状态）
-│       ├── RiskStatusBar.tsx        # 常驻风险状态卡
-│       ├── WorkflowStatusLine.tsx   # Workflow 状态行
-│       ├── AccountKpiCards.tsx      # KPI 四卡
-│       ├── WatchlistPanel.tsx       # 自选股池
-│       ├── StrategyInstanceCard.tsx # 策略实例卡片
-│       ├── StockConfigPanel.tsx     # 个股策略配置面板
-│       ├── PositionTable.tsx        # 持仓表（含目标/实际/偏离）
-│       ├── PnlCalendar.tsx          # 收益日历
-│       ├── EquityCurve.tsx          # 收益曲线
-│       ├── PreOrderApproval.tsx     # 信号审批面板
-│       ├── OrderFlowTable.tsx       # 订单/成交表
-│       ├── RiskDetailPanel.tsx      # 风控详情面板
-│       ├── KillSwitchButton.tsx     # 紧急全平按钮
-│       ├── WorkflowRunSteps.tsx     # 工作流步骤
-│       └── PromoteModal.tsx         # Paper → Live 晋升确认
-├── api/trading/
-│   └── index.ts
-├── styles/trading.css
-└── config/navigation.ts            # 扩展 NAV_ITEMS
+├── pages/
+│   ├── backtest/                        # ✅ 回测页（已实现）
+│   │   ├── BacktestPage.tsx
+│   │   └── components/                  # BasicConfigPanel, BuiltinStrategyPicker, EquityCurveChart,
+│   │                                    # PerformanceGrid, TradeListTable, PositionListTable
+│   ├── trading/                         # 🔧 交易页（骨架已搭建）
+│   │   ├── LiveCockpitPage.tsx          # 实盘驾驶舱
+│   │   └── components/                  # AccountKpiCards, CockpitDashboard, PreOrderApprovalDrawer,
+│   │                                    # PositionPnLTab, SignalApprovalTab, OrderFlowTab, ...
+│   │   # ⏳ PaperTradingPage, OrdersPage, RiskPage, WorkflowMonitorPage 待实现
+│   ├── strategy/                        # ✅ 策略管理页
+│   └── stock/                           # ✅ 个股详情页
+├── api/
+│   ├── backtest/index.ts                # ✅ 回测 API 类型
+│   └── trading/                         # ⏳ 交易 API 类型待实现
+└── components/stock/
+    └── StockKlineChart.tsx              # ✅ K线组件（支持交易标记叠加）
 ```
 
 ---

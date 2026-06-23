@@ -1,6 +1,6 @@
 # xq-trader 因子→规则→策略 架构设计
 
-> **更新**: 2026-06-11
+> **更新**: 2026-06-23
 > **前置**: [factor-architecture.md](./factor-architecture.md)（因子系统）、[trading-system-design.md](./trading-system-design.md)（交易系统）
 > **参考**: Qlib Pipeline / WorldQuant BRAIN / Zipline Pipeline API / Quantopian Factor-Classifier-Filter
 
@@ -149,17 +149,19 @@ class RulePlugin(ABC):
 
     rule_id: str           # 规则唯一标识
     name: str              # 规则名称
-    category: str          # cross_section / time_series
-    factors: list[str]     # 依赖因子列表
+    factor_ids: list[str]  # 依赖因子列表
+    prev_factor_ids: list[str]  # 需要前一日值的因子（引擎自动注入 {factor}_prev）
 
     @abstractmethod
-    def evaluate(self, ctx: RuleContext) -> RuleSignal:
-        """评估规则，返回信号。"""
+    def evaluate(self, ctx: RuleContext) -> RuleResult:
+        """评估规则，返回结果。"""
 
     def get_config_schema(self) -> dict:
         """返回配置参数 JSON Schema（前端动态渲染表单）。"""
         return {}
 ```
+
+> **设计说明**: 文档早期版本使用 `factors` 属性名，实现中改为 `factor_ids` 以与 `RuleConfig.factor_ids` 保持一致。`category` 属性不再由插件类声明，改为由 `td_rule_registry.category` DB 字段管理。新增 `prev_factor_ids` 支持前值因子自动注入。
 
 **RuleContext**：
 
@@ -167,54 +169,67 @@ class RulePlugin(ABC):
 @dataclass
 class RuleContext:
     """规则执行上下文。"""
-    symbol: str                    # 当前标的
-    trade_date: date               # 当前交易日
-    factor_values: dict[str, float]  # 因子值 {factor_id: value}
-    signal_values: dict[str, Any]    # 信号值 {signal_id: value}
-    kline_df: DataFrame | None      # K线数据（SPI 插件可能需要）
-    config: dict                    # 规则配置参数
+    symbol: str                       # 当前标的
+    signal_date: date                 # 信号日（对应文档早期版本的 trade_date）
+    factor_values: dict[str, float | None]  # 因子值 {factor_id: value}，含前值 {fid}_prev
+    factor_series: dict[str, pd.Series]     # 因子时序数据（可选，规则可访问历史窗口）
+    cross_section_df: pd.DataFrame | None   # 同日多标的截面数据（截面选股专用）
+    config: dict                      # 规则配置参数
 ```
 
-**RuleSignal**：
+**RuleResult**：
 
 ```python
 @dataclass
-class RuleSignal:
-    """规则产出的信号。"""
-    direction: str         # BUY / SELL / NEUTRAL
-    confidence: float      # 置信度 0.0 ~ 1.0
-    reason: str            # 信号原因（审计用）
-    detail: dict | None    # 信号详情（如 MACD 值、金叉位置等）
+class RuleResult:
+    """规则执行结果。"""
+    rule_id: str         # 规则编码
+    passed: bool         # 是否触发
+    score: float         # 得分（强度），范围 [0, 1]
+    direction: str       # 方向 — 时序: buy/sell/neutral；截面: bullish/bearish/neutral
+    confidence: float    # 置信度 [0, 1]
+    reason: str          # 触发原因文本
+    detail: dict         # 详细诊断数据（因子值快照等）
 ```
 
-**SPI 插件示例 — MACD 金叉死叉**：
+> **设计说明**: 文档早期版本使用 `RuleSignal`（direction=BUY/SELL/NEUTRAL 大写），实现中统一为 `RuleResult`（direction=buy/sell/neutral 小写），并新增 `passed` 和 `score` 字段以支持截面选股评分场景。`RuleContext.trade_date` 重命名为 `signal_date` 以与交易系统 `signal_date` 语义对齐。
+
+**SPI 插件示例 — MACD 柱扩张/金叉死叉**：
 
 ```python
-class MACDCrossRule(RulePlugin):
-    rule_id = "macd_cross"
-    name = "MACD 金叉死叉"
-    category = "time_series"
-    factors = ["macd_hist_ratio", "macd_hist_delta"]
+class MACDPlugin(RulePlugin):
+    rule_id = "macd_expansion"
+    name = "MACD柱扩张+金叉死叉"
+    factor_ids = ["macd", "signal", "hist", "hist_slope", "hist_area"]
+    prev_factor_ids = ["hist", "hist_area"]  # 引擎自动注入 hist_prev, hist_area_prev
 
-    def evaluate(self, ctx: RuleContext) -> RuleSignal:
-        hist = ctx.factor_values.get("macd_hist_ratio")
-        hist_prev = ctx.kline_df["macd_hist_ratio"].iloc[-2] if ctx.kline_df is not None else None
+    def evaluate(self, ctx: RuleContext) -> RuleResult:
+        hist = ctx.factor_values.get("hist")
+        hist_prev = ctx.factor_values.get("hist_prev")
+        hist_slope = ctx.factor_values.get("hist_slope")
+        hist_area = ctx.factor_values.get("hist_area")
+        hist_area_prev = ctx.factor_values.get("hist_area_prev")
 
-        if hist is None or hist_prev is None:
-            return RuleSignal(NEUTRAL, 0.0, "数据不足")
+        # 金叉：hist 由负转正
+        if hist_prev is not None and hist is not None:
+            if hist_prev <= 0 and hist > 0:
+                return RuleResult(rule_id=self.rule_id, passed=True, direction="buy",
+                    confidence=0.7, reason=f"金叉买入: hist由正转负 ...")
 
-        # 金叉：前一日 MACD 柱 < 0，当日 MACD 柱 >= 0
-        if hist_prev < 0 and hist >= 0:
-            strength = min(abs(hist - hist_prev) / 0.02, 1.0)  # 归一化
-            return RuleSignal(BUY, strength, f"MACD金叉 hist={hist:.4f}")
+        # 红柱扩张买入
+        if hist and hist_slope and hist_slope > 0 and hist_area and hist_area_prev:
+            if hist_area > hist_area_prev:
+                return RuleResult(rule_id=self.rule_id, passed=True, direction="buy",
+                    confidence=0.7, reason=f"红柱扩张买入: ...")
 
-        # 死叉：前一日 MACD 柱 > 0，当日 MACD 柱 <= 0
-        if hist_prev > 0 and hist <= 0:
-            strength = min(abs(hist - hist_prev) / 0.02, 1.0)
-            return RuleSignal(SELL, strength, f"MACD死叉 hist={hist:.4f}")
+        # 绿柱扩张卖出 / 死叉卖出（类似逻辑）
+        # ...
 
-        return RuleSignal(NEUTRAL, 0.0, "无交叉信号")
+        return RuleResult(rule_id=self.rule_id, passed=False, direction="neutral",
+            score=0.0, reason="OR: 无信号")
 ```
+
+> **设计说明**: 实际实现中 MACD 插件使用 `prev_factor_ids` 声明需要前值的因子，引擎在每 bar 自动注入 `{factor}_prev` 键值对（如 `hist_prev`、`hist_area_prev`），插件无需自行访问历史 K 线数据。
 
 **SPI 插件示例 — 布林带规则**：
 
@@ -231,24 +246,28 @@ class BollingerBandRule(RulePlugin):
             "overbought_threshold": {"type": "number", "default": 0.9, "title": "超买阈值"},
         }
 
-    def evaluate(self, ctx: RuleContext) -> RuleSignal:
+    def evaluate(self, ctx: RuleContext) -> RuleResult:
         pos = ctx.factor_values.get("boll_position")
         width = ctx.factor_values.get("boll_width")
         oversold = ctx.config.get("oversold_threshold", 0.1)
         overbought = ctx.config.get("overbought_threshold", 0.9)
 
         if pos is None:
-            return RuleSignal(NEUTRAL, 0.0, "数据不足")
+            return RuleResult(rule_id=self.rule_id, passed=False, direction="neutral",
+                score=0.0, reason="数据不足")
 
         if pos < oversold:
             conf = min((oversold - pos) / oversold, 1.0)
-            return RuleSignal(BUY, conf, f"布林带超卖 pos={pos:.2f}")
+            return RuleResult(rule_id=self.rule_id, passed=True, direction="buy",
+                confidence=conf, reason=f"布林带超卖 pos={pos:.2f}")
 
         if pos > overbought:
             conf = min((pos - overbought) / (1 - overbought), 1.0)
-            return RuleSignal(SELL, conf, f"布林带超买 pos={pos:.2f}")
+            return RuleResult(rule_id=self.rule_id, passed=True, direction="sell",
+                confidence=conf, reason=f"布林带超买 pos={pos:.2f}")
 
-        return RuleSignal(NEUTRAL, 0.0, "布林带中性区间")
+        return RuleResult(rule_id=self.rule_id, passed=False, direction="neutral",
+            score=0.0, reason="布林带中性区间")
 ```
 
 ### 3.4 规则类别
@@ -320,37 +339,36 @@ flowchart TD
 
 ### 4.2 策略配置
 
+策略配置存储在 `td_strategy.config` JSONB 字段中，采用内嵌结构而非关系表：
+
 ```json
 {
   "strategy_id": "alpha_rebalance_01",
   "name": "Alpha 再平衡策略",
-  "cross_section_rules": {
-    "rules": [
-      {"rule_id": "r_roe_filter", "weight": 0.3, "config": {"threshold": 5}},
-      {"rule_id": "r_momentum_rank", "weight": 0.4, "config": {"top_pct": 0.3}},
-      {"rule_id": "r_volatility_filter", "weight": 0.3, "config": {"max_vol": 0.3}}
+  "strategy_type": "timing",
+  "config": {
+    "groups": [
+      {
+        "group_id": "macd_group",
+        "name": "MACD信号组",
+        "rules": [
+          {"rule_id": "ts_macd_cross", "weight": 0.5, "params": {}},
+          {"rule_id": "ts_rsi_signal", "weight": 0.5, "params": {"oversold": 30, "overbought": 70}}
+        ],
+        "fusion": {"method": "weighted_vote", "buy_threshold": 0.5, "sell_threshold": 0.5}
+      }
     ],
-    "combination": "weighted_score",
-    "min_score": 0.5,
-    "max_stocks": 20
-  },
-  "time_series_rules": {
-    "rules": [
-      {"rule_id": "macd_cross", "weight": 0.3, "config": {}},
-      {"rule_id": "bollinger_band", "weight": 0.3, "config": {"oversold_threshold": 0.1}},
-      {"rule_id": "rsi_signal", "weight": 0.2, "config": {"oversold": 30, "overbought": 70}},
-      {"rule_id": "chan_buy_signal", "weight": 0.2, "config": {}}
-    ],
-    "combination": "weighted_vote",
-    "buy_threshold": 0.5,
-    "sell_threshold": -0.5
-  },
-  "position_sizing": {
-    "strategy": "atr_risk",
-    "params": {"atr_period": 14, "risk_budget_pct": 0.02}
+    "group_fusion": {"method": "or"},
+    "position_config": {
+      "plugin_class": "xqtrader.domain.trading.backtest.sizer.plugins.atr_position.ATRPositionPlugin",
+      "params": {"atr_period": 14, "risk_budget_pct": 0.02},
+      "factor_ids": []
+    }
   }
 }
 ```
+
+> **设计决策**: 文档早期版本定义了 `strategy_rule_group` + `strategy_rule_binding` 两张关系表，实现中改为 `td_strategy.config` JSONB 内嵌 `groups[].rules[]`。理由：(1) 规则组与绑定是策略的私有配置，无需独立查询；(2) JSONB 内嵌减少 JOIN 开销；(3) 策略加载时一次性读取，无需多次查询。规则定义仍通过 `rule_id` 引用 `td_rule_registry`，避免规则配置重复。
 
 ### 4.3 规则组合方式
 
@@ -573,64 +591,33 @@ class SymbolSignalTool:
 
 ```mermaid
 erDiagram
-    STRATEGY ||--o{ STRATEGY_RULE_GROUP : "1:N"
-    STRATEGY_RULE_GROUP ||--o{ STRATEGY_RULE_BINDING : "1:N"
-    RULE_REGISTRY ||--o{ STRATEGY_RULE_BINDING : "1:1"
-    RULE_REGISTRY ||--o{ RULE_FACTOR_DEP : "1:N"
-    FAC_FACTOR_REGISTRY ||--o{ RULE_FACTOR_DEP : "1:1"
+    STRATEGY ||--o{ STRATEGY : "config.groups[].rules[] 内嵌"
+    RULE_REGISTRY ||--o{ STRATEGY : "rule_id 引用"
+    FAC_FACTOR_REGISTRY ||--o{ RULE_REGISTRY : "factors 引用"
     STRATEGY ||--o{ STRATEGY_INSTANCE : "1:N"
 
     STRATEGY {
         uuid id PK
         string strategy_id UK
         string name
-        string description
-        json cross_section_config
-        json time_series_config
-        json position_sizing_config
-        json risk_overrides
+        string strategy_type
+        json config
         string status
-    }
-
-    STRATEGY_RULE_GROUP {
-        uuid id PK
-        uuid strategy_id FK
-        string group_type
-        string combination_method
-        json combination_params
-        float threshold
-    }
-
-    STRATEGY_RULE_BINDING {
-        uuid id PK
-        uuid group_id FK
-        string rule_id FK
-        float weight
-        json config_override
-        int sort_order
     }
 
     RULE_REGISTRY {
         string rule_id PK
         string name
         string category
-        string type
-        text expression
-        string spi_class
+        string rule_type
+        json definition
         json factors
-        json signal_mapping
-        json config_schema
-        json default_config
+        boolean is_builtin
         string status
     }
-
-    RULE_FACTOR_DEP {
-        uuid id PK
-        string rule_id FK
-        string factor_id FK
-        string usage
-    }
 ```
+
+> **设计决策**: 文档早期版本定义了 `strategy_rule_group` + `strategy_rule_binding` + `rule_factor_dep` 三张关系表，实现中简化为 `td_strategy.config` JSONB 内嵌 + `td_rule_registry` 单表。`rule_factor_dep` 由 `td_rule_registry.factors` JSONB 数组替代。
 
 ### 6.2 表定义
 
@@ -642,34 +629,14 @@ erDiagram
 | strategy_id | String(64) unique | 策略编码 |
 | name | String(128) | 策略名称 |
 | description | Text | 策略说明 |
-| cross_section_config | JSON | 截面选股规则组配置 |
-| time_series_config | JSON | 时序信号规则组配置 |
-| position_sizing_config | JSON | 仓位管理配置 |
-| risk_overrides | JSON | 风控规则覆盖 |
-| universe_pool | String(16) | 默认样本池 |
+| strategy_type | Enum | `selection`（截面选股）/ `timing`（时序回测） |
+| config | JSONB | 策略主配置（groups + group_fusion + 类型特有配置） |
 | status | Enum | `draft` / `active` / `deprecated` |
 
-#### strategy_rule_group（规则组）
+**config JSONB 结构**（按 strategy_type 不同）：
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| id | UUID PK | |
-| strategy_id | UUID FK | 所属策略 |
-| group_type | Enum | `cross_section` / `time_series` |
-| combination_method | Enum | `and` / `or` / `weighted_score` / `weighted_vote` / `ic_weighted` |
-| combination_params | JSON | 组合参数（如 buy_threshold, sell_threshold） |
-| threshold | Float | 通过阈值 |
-
-#### strategy_rule_binding（规则-策略绑定）
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| id | UUID PK | |
-| group_id | UUID FK | 所属规则组 |
-| rule_id | String(64) FK → rule_registry | 规则 ID |
-| weight | Float | 权重（0-1，加权组合时使用） |
-| config_override | JSON | 覆盖默认配置 |
-| sort_order | Integer | 排序 |
+- `selection`: `{groups, group_fusion, top_n}`
+- `timing`: `{groups, group_fusion, position_config}`
 
 #### rule_registry（规则注册表）
 
@@ -677,26 +644,19 @@ erDiagram
 |------|------|------|
 | rule_id | String(64) PK | 规则唯一标识 |
 | name | String(128) | 规则名称 |
-| category | Enum | `cross_section` / `time_series` / `both` |
-| type | Enum | `expression` / `spi` |
-| expression | Text | 表达式（type=expression） |
-| spi_class | String(256) | SPI 类路径（type=spi） |
-| factors | JSON | 依赖因子 `["roe", "rsi_14"]` |
-| signal_mapping | JSON | 信号映射（表达式规则） |
-| config_schema | JSON | 参数 JSON Schema |
-| default_config | JSON | 默认配置 |
 | description | Text | 规则说明 |
+| category | Enum | `selection` / `timing` / `both` |
+| rule_type | Enum | `expression` / `plugin` |
+| definition | JSONB | 规则定义（按 rule_type 不同） |
+| factors | JSONB | 依赖因子 `["pe", "roe"]` |
 | is_builtin | Boolean | 是否内置 |
 | status | Enum | `active` / `deprecated` |
 
-#### rule_factor_dep（规则-因子依赖）
+**definition JSONB 结构**：
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| id | UUID PK | |
-| rule_id | String(64) FK | 规则 ID |
-| factor_id | String(32) FK | 因子 ID |
-| usage | String | 用途说明（如"阈值判断"、"交叉检测"） |
+- `rule_type=expression, category=timing`: `{"buy_expr": "rsi < 30", "sell_expr": "rsi > 70", "prev_factors": []}`
+- `rule_type=expression, category=selection`: `{"bullish_expr": "...", "bearish_expr": "...", "score_expr": "..."}`
+- `rule_type=plugin`: `{"plugin_class": "...", "default_params": {...}}`
 
 ---
 
@@ -820,44 +780,50 @@ def cross_above_series(self, series_a, series_b):
 ## 九、目录结构
 
 ```
-src/xqtrader/
-├── trading/
-│   ├── rules/                           # 规则引擎
-│   │   ├── __init__.py
-│   │   ├── base.py                      # RulePlugin ABC + RuleContext + RuleSignal
-│   │   ├── registry.py                  # RuleRegistry 注册表
-│   │   ├── expression/                  # 表达式规则引擎
-│   │   │   ├── __init__.py
-│   │   │   ├── lexer.py                 # 词法分析
-│   │   │   ├── parser.py                # 语法分析
-│   │   │   ├── evaluator.py             # 求值器
-│   │   │   └── operators.py             # 内置算子 (rank, delta, cross_above...)
-│   │   ├── combination/                 # 规则组合
-│   │   │   ├── __init__.py
-│   │   │   ├── base.py                  # CombinationStrategy ABC
-│   │   │   ├── and_or.py                # AND/OR 逻辑组合
-│   │   │   ├── weighted_score.py        # 加权评分
-│   │   │   ├── weighted_vote.py         # 加权投票
-│   │   │   └── ic_weighted.py           # IC 加权
-│   │   └── plugins/                     # SPI 插件规则
-│   │       ├── __init__.py
-│   │       ├── macd_cross.py            # MACD 金叉死叉
-│   │       ├── kdj_cross.py             # KDJ 金叉死叉
-│   │       ├── bollinger_band.py        # 布林带规则
-│   │       ├── chan_signal.py           # 缠论信号规则
-│   │       ├── cdl_pattern.py           # K线形态规则
-│   │       └── volume_break.py          # 放量突破
-│   ├── strategy/                        # 策略引擎
-│   │   ├── __init__.py
-│   │   ├── engine.py                    # StrategyEngine 策略执行
-│   │   └── fusion.py                    # SignalFusion 信号融合
+src/xqtrader/domain/trading/
+├── backtest/                            # 回测引擎
+│   ├── core.py                          # RuleContext, RuleResult, RuleConfig, RuleGroupConfig,
+│   │                                    # StrategyConfig, FusionConfig, RulePlugin ABC
+│   ├── engine.py                        # SignalEngine — 规则评估 + 融合
+│   ├── runner.py                        # run_backtest — 数据准备 + cerebro 运行
+│   ├── service.py                       # BacktestService — API 入口 + 数据加载 + 内置因子计算
+│   ├── performance.py                   # 绩效指标提取
+│   ├── backtrader_ext.py                # Backtrader 适配层 (XqTraderStrategy, PluginSizer, create_factor_datafeed)
+│   ├── fusion/                          # 信号融合策略
+│   │   ├── base.py                      # FusionStrategy ABC
+│   │   ├── and_or.py                    # AND/OR 逻辑组合
+│   │   ├── weighted.py                  # 加权评分 + 加权投票
+│   │   └── ic_weighted.py              # IC 加权
+│   ├── plugins/                         # SPI 规则插件
+│   │   ├── macd.py                      # MACD 柱扩张 + 金叉死叉
+│   │   └── expression.py               # 表达式规则求值器
+│   └── sizer/                           # 仓位管理
+│       ├── engine.py                    # SizerEngine
+│       ├── config.py                    # PositionConfig
+│       ├── context.py                   # PositionContext
+│       ├── plugin.py                    # PositionPlugin ABC
+│       └── plugins/
+│           ├── atr_position.py          # ATR 风险定仓
+│           └── kelly.py                 # 凯利分数
+├── rules/                               # 规则引擎（截面选股 + 通用表达式）
+│   ├── base.py                          # RulePlugin ABC (旧版，待迁移)
+│   ├── expression/                      # 表达式引擎
+│   │   ├── lexer.py                     # 词法分析
+│   │   ├── parser.py                    # 语法分析
+│   │   ├── evaluator.py                 # 求值器
+│   │   └── operators.py                 # 内置算子
+│   └── plugins/
+│       └── multi_factor_resonance.py    # 多因子共振插件
+├── selection/                           # 截面选股引擎
+│   └── engine.py
+├── loaders/
+│   └── strategy_loader.py              # StrategyConfigLoader — DB Strategy → StrategyConfig
+├── models/
+│   ├── strategy.py                      # td_strategy (单表 JSONB)
+│   ├── rule.py                          # td_rule_registry (单表 JSONB)
+│   ├── backtest.py                      # td_backtest_run, td_backtest_result
 │   └── ...
-├── domain/trading/
-│   ├── models/
-│   │   ├── strategy.py                  # strategy, strategy_rule_group, strategy_rule_binding
-│   │   ├── rule.py                      # rule_registry, rule_factor_dep
-│   │   └── ...
-│   └── ...
+└── enums.py                             # 所有枚举定义
 ```
 
 ---
@@ -990,7 +956,56 @@ flowchart TD
 
 ---
 
-## 十二、业界参考
+## 十二、回测引擎内置技术因子
+
+回测引擎在加载数据时，可按需从 OHLCV 计算常用技术因子，无需依赖 `fac_factor_value` 表的预存数据。
+
+### 12.1 内置因子列表
+
+| 因子 ID | 计算方式 | 依赖 | 说明 |
+|---------|---------|------|------|
+| `macd` | TA-Lib MACD fast=12 slow=26 signal=9 | close | MACD 线 |
+| `signal` | TA-Lib MACD | close | Signal 线 |
+| `hist` | `2 * (MACD - Signal)` | close | MACD 柱（国内主流机构实现） |
+| `hist_slope` | `hist - hist.shift(5)` | hist | 柱斜率（5日变化） |
+| `hist_area` | `hist.rolling(5).apply(calc_area)` | hist | 柱面积（5日积分） |
+| `rsi` | TA-Lib RSI timeperiod=14 | close | RSI 相对强弱 |
+| `bias` | `(close - MA6) / MA6 * 100` | close | 乖离率 |
+| `mon_5d` | `close / close.shift(5) - 1` | close | 5日动量 |
+
+### 12.2 预热期处理
+
+EMA 类指标（MACD/RSI）需要约 33 个 bar 的历史数据才能产生有效值。`BacktestService._load_data` 在加载 OHLCV 时向前扩展 120 个交易日作为预热期，计算完所有因子后截取到目标日期范围。
+
+### 12.3 列名冲突防护
+
+当 `fac_factor_value` 表中存在与内置因子同名的列（如 `macd`）时，`_load_data` 通过 `_get_builtin_factor_ids()` 识别内置因子集合，在 DB 查询时排除内置因子，避免 `df.merge()` 产生 `_x/_y` 后缀。内置因子在 merge 之后计算，覆盖缺失值。
+
+### 12.4 StrategyConfigLoader
+
+`StrategyConfigLoader` 负责将 DB `td_strategy` 的 JSONB 配置转换为内存 `StrategyConfig` 对象：
+
+```mermaid
+flowchart TD
+    DB[td_strategy.config JSONB] --> SCL[StrategyConfigLoader.load]
+    DB2[td_rule_registry] --> SCL
+    SCL --> SC[StrategyConfig 内存对象]
+    SC --> SE[SignalEngine]
+    SC --> SZE[SizerEngine]
+
+    SCL -->|rule_type=plugin| GPI[_get_plugin_prev_factor_ids]
+    GPI -->|动态导入插件类| PC[PluginClass.prev_factor_ids]
+    PC -->|合并到| RC[RuleConfig.prev_factor_ids]
+```
+
+关键逻辑：
+- 批量加载 `rule_id` 引用的 `RuleRegistry` 记录
+- 合并 rule 默认 `definition` + 策略中的覆盖参数
+- 对 plugin 类型规则，通过 `_get_plugin_prev_factor_ids` 从插件类读取 `prev_factor_ids` 类属性并合并
+
+---
+
+## 十三、业界参考
 
 | 平台 | 借鉴点 | xq-trader 对应 |
 |------|--------|---------------|

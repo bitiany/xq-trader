@@ -45,22 +45,23 @@ export interface SimpleBacktestRequest {
 }
 
 export interface BacktestSymbolMetrics {
-  total_return?: number | string
-  annual_return?: number | string
-  annualized_return?: number | string
-  avg_daily_return?: number | string
-  max_drawdown?: number | string
-  sharpe_ratio?: number | string
-  total_trades?: number | string
-  num_trades?: number | string
-  win_rate?: number | string
+  total_return?: number
+  annual_return?: number
+  annualized_return?: number
+  avg_daily_return?: number
+  max_drawdown?: number
+  sharpe_ratio?: number
+  total_trades?: number
+  num_trades?: number
+  win_rate?: number
+  profit_loss_ratio?: number
+  sqn?: number
   final_value?: number
   initial_cash?: number
   equity_curve?: { date: string; value: number }[]
   trades?: TradeRecord[]
   positions?: PositionRecord[]
   ohlcv?: { date: string; open: number; close: number; high: number; low: number; volume: number }[]
-  [key: string]: unknown
 }
 
 export interface SimpleBacktestResponse {
