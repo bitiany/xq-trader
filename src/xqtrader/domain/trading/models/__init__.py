@@ -1,13 +1,14 @@
 """交易域 ORM 模型 — 统一导出"""
 
 from .account import AccountSnapshot, TradingAccount
+from .backtest import BacktestResult, BacktestRun
 from .decision import PositionSizingResult, SelectionResult, SignalFusionResult, TradingSignal
 from .instance import PaperSession, StrategyInstance
 from .order import Order, OrderEvent, PreOrder, Trade
 from .position import PositionSnapshot
 from .risk import RiskEvent, RiskRule
-from .rule import RuleFactorDep, RuleRegistry
-from .strategy import Strategy, StrategyRuleBinding, StrategyRuleGroup
+from .rule import RuleRegistry
+from .strategy import Strategy
 from .watchlist import Watchlist, WatchlistItem
 
 __all__ = [
@@ -35,11 +36,11 @@ __all__ = [
     # 风控
     "RiskRule",
     "RiskEvent",
-    # 规则引擎
+    # 规则注册表
     "RuleRegistry",
-    "RuleFactorDep",
-    # 策略引擎
+    # 策略
     "Strategy",
-    "StrategyRuleGroup",
-    "StrategyRuleBinding",
+    # 回测运行 & 结果
+    "BacktestRun",
+    "BacktestResult",
 ]

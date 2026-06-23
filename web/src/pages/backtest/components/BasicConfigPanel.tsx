@@ -1,4 +1,4 @@
-﻿import { Card, DatePicker, InputNumber, Space } from 'antd'
+import { Card, DatePicker, InputNumber, Space } from 'antd'
 import { Wallet, Settings2 } from 'lucide-react'
 import type { BacktestConfig } from '../types'
 
@@ -40,18 +40,6 @@ export function BasicConfigPanel({ symbol, config, onConfigChange }: BasicConfig
               precision={4}
               value={config.commissionRate}
               onChange={(v) => onConfigChange('commissionRate', v ?? 0.0003)}
-            />
-          </div>
-          <div className="backtest-page__config-item">
-            <label>滑点</label>
-            <InputNumber
-              style={{ width: '100%' }}
-              min={0}
-              max={0.01}
-              step={0.0001}
-              precision={4}
-              value={config.slippage}
-              onChange={(v) => onConfigChange('slippage', v ?? 0)}
             />
           </div>
         </div>

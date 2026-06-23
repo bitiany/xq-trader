@@ -466,7 +466,7 @@ export function SelectionWorkbenchPage() {
 
   const { data: latestTradeDate } = useRequest(() => fetchLatestTradeDate())
   const { data: factorsPage } = useRequest(() => fetchFactors({ page_size: 200 }))
-  const { data: strategiesPage } = useRequest(() => fetchStrategies({ status: 'active', page_size: 200 }))
+  const { data: strategiesPage } = useRequest(() => fetchStrategies({ status: 'active', strategy_type: 'selection', page_size: 200 }))
   const { data: poolsData } = useRequest(() => fetchPools(true))
 
   const strategies = useMemo(
@@ -638,7 +638,15 @@ export function SelectionWorkbenchPage() {
         title: t('strategy.direction'),
         dataIndex: 'direction',
         width: 90,
-        render: (dir: string | null) => (dir ? <Tag color={dir === 'long' ? 'red' : 'green'}>{getDirectionLabel(dir, t)}</Tag> : '—'),
+        render: (dir: string | null) => {
+          if (!dir) return '—'
+          const color = dir === 'long' || dir === 'bullish'
+            ? 'red'
+            : dir === 'neutral'
+              ? 'default'
+              : 'green'
+          return <Tag color={color}>{getDirectionLabel(dir, t)}</Tag>
+        },
       },
       {
         title: t('strategy.confidence'),

@@ -34,8 +34,7 @@ router.include_router(rules_router)
 router.include_router(factors_router)
 router.include_router(universe_router)
 router.include_router(selection_router)
-router.include_router(stocks_router)
-# 回测
 router.include_router(backtest_router)
+router.include_router(stocks_router)
 # AI Agent
 router.include_router(agent_router, prefix="/agent", tags=["agent"])

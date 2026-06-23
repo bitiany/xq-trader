@@ -12,7 +12,6 @@ from framework.commons.exceptions import BusinessException
 from framework.commons.logger import get_logger
 from framework.commons.pagination import build_paginated_response, paginate
 from xqtrader.api.v1.selection.schemas import SelectionRunRequest, SelectionRunResponse
-from xqtrader.domain.factor.models.factor_registry import FacFactorRegistry
 from xqtrader.domain.market.models.candlestick import CandlestickDaily
 from xqtrader.domain.security.models import Security
 from xqtrader.domain.trading.models.decision import SelectionResult
@@ -60,7 +59,7 @@ async def run_selection(req: SelectionRunRequest) -> SelectionRunResponse:
 
     # 按得分倒序排列，取 Top N
     sorted_items = sorted(
-        results.items(), key=lambda x: x[1].score, reverse=True,
+        results.items(), key=lambda x: x[1]["score"], reverse=True,
     )[: req.top_n]
 
     # 加载证券名称、行业、截面行情（批量一次查询，避免前端 N 次单查）
@@ -85,19 +84,7 @@ async def run_selection(req: SelectionRunRequest) -> SelectionRunResponse:
             for q in quotes
         }
 
-    factor_ids = sorted({
-        fid
-        for _, score in sorted_items
-        for fid in score.detail.get("factor_values", {})
-    })
-    factor_labels: dict[str, str] = {}
-    if factor_ids:
-        factors = await FacFactorRegistry.filter(factor_id__in=factor_ids)
-        factor_labels = {
-            f.factor_id: f.display_name or f.factor_id
-            for f in factors
-        }
-
+    factor_values = engine.last_diagnostics.get("factor_values", {})
     items = [
         {
             "rank": idx + 1,
@@ -106,10 +93,10 @@ async def run_selection(req: SelectionRunRequest) -> SelectionRunResponse:
             "industry": sec_info.get(symbol, {}).get("industry", ""),
             "close": quote_info.get(symbol, {}).get("close"),
             "pct_chg": quote_info.get(symbol, {}).get("pct_chg"),
-            "score": round(score.score, 4),
-            "direction": score.direction,
-            "confidence": round(score.confidence, 4),
-            "factor_values": score.detail.get("factor_values", {}),
+            "score": round(score["score"], 4),
+            "direction": score["direction"],
+            "confidence": round(score["confidence"], 4),
+            "factor_values": factor_values.get(symbol, {}),
         }
         for idx, (symbol, score) in enumerate(sorted_items)
     ]
@@ -122,7 +109,6 @@ async def run_selection(req: SelectionRunRequest) -> SelectionRunResponse:
         selected_count=len(results),
         elapsed_ms=elapsed_ms,
         items=items,
-        factor_labels=factor_labels,
         filter_steps=engine.last_diagnostics.get("filter_steps", []),
     )
 

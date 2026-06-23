@@ -5,6 +5,13 @@ import { useTranslation } from 'react-i18next'
 
 import type { ChanlunPivot, ChanlunResponse, ChanlunStroke, MainIndicator, SubIndicator, KlineBarItem, StockFundFlowItem } from '@/api/stock'
 
+export interface StockKlineTradeMarker {
+  date: string
+  direction: 'buy' | 'sell'
+  price: number
+  quantity?: number
+}
+
 interface StockKlineChartProps {
   bars: KlineBarItem[]
   mainIndicator: MainIndicator
@@ -17,6 +24,7 @@ interface StockKlineChartProps {
   maOverlays?: Record<string, Array<number | null>>
   chanlun?: ChanlunResponse
   fundFlowItems?: StockFundFlowItem[]
+  tradeMarkers?: StockKlineTradeMarker[]
   loading?: boolean
 }
 
@@ -43,6 +51,26 @@ function calcInitialZoom(barCount: number): { start: number; end: number } {
     return { start: 0, end: 100 }
   }
   return { start: ((barCount - VISIBLE_WINDOW) / barCount) * 100, end: 100 }
+}
+
+function calcTradeZoom(bars: KlineBarItem[], markers: StockKlineTradeMarker[]): { start: number; end: number } | null {
+  if (bars.length === 0 || markers.length === 0) return null
+  const dateIndexMap = new Map<string, number>()
+  bars.forEach((bar, index) => dateIndexMap.set(bar.trade_date.slice(0, 10), index))
+  const indexes = markers
+    .map((marker) => dateIndexMap.get(marker.date.slice(0, 10)))
+    .filter((index): index is number => index != null)
+  if (indexes.length === 0) return null
+
+  const first = Math.min(...indexes)
+  const last = Math.max(...indexes)
+  const halfWindow = Math.floor(VISIBLE_WINDOW / 2)
+  const startIndex = Math.max(0, Math.min(first - halfWindow, bars.length - VISIBLE_WINDOW))
+  const endIndex = Math.min(bars.length - 1, Math.max(last + halfWindow, startIndex + VISIBLE_WINDOW))
+  return {
+    start: (startIndex / bars.length) * 100,
+    end: ((endIndex + 1) / bars.length) * 100,
+  }
 }
 
 function buildStrokeSeries(
@@ -86,6 +114,50 @@ function buildStrokeSeries(
       ],
     },
     z: 5,
+  } as echarts.SeriesOption
+}
+
+function buildTradeMarkerSeries(
+  bars: KlineBarItem[],
+  markers: StockKlineTradeMarker[],
+): echarts.SeriesOption | null {
+  if (markers.length === 0) return null
+  const dateIndexMap = new Map<string, number>()
+  bars.forEach((bar, index) => dateIndexMap.set(bar.trade_date.slice(0, 10), index))
+  const data = markers
+    .map((marker) => {
+      const index = dateIndexMap.get(marker.date.slice(0, 10))
+      if (index == null) return null
+      const bar = bars[index]
+      return {
+        name: marker.direction === 'buy' ? '买入' : '卖出',
+        value: [bar.trade_date, marker.price, marker.direction === 'buy' ? '买' : '卖'],
+        symbol: marker.direction === 'buy' ? 'triangle' : 'pin',
+        symbolRotate: marker.direction === 'buy' ? 0 : 180,
+        symbolSize: marker.direction === 'buy' ? 16 : 20,
+        symbolOffset: marker.direction === 'buy' ? [0, 16] : [0, -18],
+        itemStyle: { color: marker.direction === 'buy' ? '#ef5350' : '#26a69a' },
+        label: {
+          show: true,
+          formatter: marker.direction === 'buy' ? '买' : '卖',
+          color: '#ffffff',
+          fontSize: 10,
+          fontWeight: 700,
+        },
+        tooltip: {
+          formatter: () => `${marker.direction === 'buy' ? '买入' : '卖出'}<br/>日期：${marker.date}<br/>价格：${marker.price.toFixed(2)}${marker.quantity != null ? `<br/>数量：${marker.quantity}` : ''}`,
+        },
+      }
+    })
+    .filter((item): item is NonNullable<typeof item> => item != null)
+  if (data.length === 0) return null
+  return {
+    name: '交易信号',
+    type: 'scatter',
+    xAxisIndex: 0,
+    yAxisIndex: 0,
+    data,
+    z: 8,
   } as echarts.SeriesOption
 }
 
@@ -262,26 +334,26 @@ export function StockKlineChart({
   maOverlays = {},
   chanlun,
   fundFlowItems,
+  tradeMarkers = [],
   loading = false,
 }: StockKlineChartProps) {
   const { t } = useTranslation()
   const containerRef = useRef<HTMLDivElement | null>(null)
   const chartRef = useRef<echarts.ECharts | null>(null)
-  const [currentIndex, setCurrentIndex] = useState<number | null>(null)
+  const zoomStateRef = useRef<{ start: number; end: number } | null>(null)
   const [showTd9, setShowTd9] = useState(false)
   const hasBars = bars.length > 0
-  const initialZoom = useMemo(() => calcInitialZoom(bars.length), [bars.length])
+  const barsKey = `${bars[0]?.trade_date ?? ''}-${bars[bars.length - 1]?.trade_date ?? ''}-${bars.length}`
+  const markersKey = tradeMarkers.map((marker) => `${marker.date}:${marker.direction}:${marker.price}`).join('|')
+  const initialZoom = useMemo(() => calcTradeZoom(bars, tradeMarkers) ?? calcInitialZoom(bars.length), [bars, tradeMarkers])
+  const zoomSourceKey = `${barsKey}-${markersKey}`
+  const zoomSourceKeyRef = useRef('')
+  const [currentPoint, setCurrentPoint] = useState<{ barsKey: string; index: number } | null>(null)
+  const currentIndex = currentPoint?.barsKey === barsKey ? currentPoint.index : null
   const safeIndex = currentIndex != null && currentIndex >= 0 && currentIndex < bars.length ? currentIndex : bars.length - 1
   const currentBar = hasBars ? bars[safeIndex] : undefined
-  // 跟踪 dataZoom 状态，切换指标时保持窗口位置
-  const zoomStateRef = useRef<{ start: number; end: number } | null>(null)
 
   const mainMa = maOverlays
-
-  // bars 变化时重置 currentIndex，避免切换股票后指向旧位置
-  useEffect(() => {
-    setCurrentIndex(null)
-  }, [bars])
 
   const currentSubValues = useMemo(() => {
     if (!hasBars) return null
@@ -330,6 +402,10 @@ export function StockKlineChart({
   const pivotSeries = useMemo(
     () => (chanlun && chanlun.pivots.length > 0 ? buildPivotMarkAreas(bars, chanlun.pivots) : null),
     [bars, chanlun],
+  )
+  const tradeMarkerSeries = useMemo(
+    () => buildTradeMarkerSeries(bars, tradeMarkers),
+    [bars, tradeMarkers],
   )
 
   const option = useMemo(() => {
@@ -432,6 +508,7 @@ export function StockKlineChart({
     // 主图指标：缠论（笔和中枢）
     if (pivotSeries && mainIndicator === 'chanlun') series.push(pivotSeries)
     if (strokeSeries && mainIndicator === 'chanlun') series.push(strokeSeries)
+    if (tradeMarkerSeries) series.push(tradeMarkerSeries)
 
     // 成交量（始终在 grid[1]）
     series.push({
@@ -514,7 +591,6 @@ export function StockKlineChart({
       }
     }
 
-    const zoomRange = zoomStateRef.current ?? initialZoom
     const xAxisIndex = Array.from({ length: grids.length }, (_, i) => i)
     return {
       animation: false,
@@ -537,12 +613,12 @@ export function StockKlineChart({
       xAxis,
       yAxis,
       dataZoom: [
-        { type: 'inside', xAxisIndex, ...zoomRange },
-        { type: 'slider', bottom: 4, height: 20, xAxisIndex, ...zoomRange },
+        { type: 'inside', xAxisIndex, ...initialZoom },
+        { type: 'slider', bottom: 4, height: 20, xAxisIndex, ...initialZoom },
       ],
       series,
     }
-  }, [allOverlays, bars, fundFlowItems, hasBars, mainIndicator, subIndicator, initialZoom, mainMa, pivotSeries, showTd9, strokeSeries, t])
+  }, [allOverlays, bars, fundFlowItems, hasBars, mainIndicator, subIndicator, initialZoom, mainMa, pivotSeries, showTd9, strokeSeries, t, tradeMarkerSeries])
 
   const resizeCleanupRef = useRef<(() => void) | null>(null)
 
@@ -575,13 +651,27 @@ export function StockKlineChart({
 
     // Apply option if available
     if (option) {
+      if (zoomSourceKeyRef.current !== zoomSourceKey) {
+        zoomSourceKeyRef.current = zoomSourceKey
+        zoomStateRef.current = null
+      }
       // Preserve dataZoom state
       const currentOption = chart.getOption()
       const dz = currentOption?.dataZoom as Array<{ start?: number; end?: number }> | undefined
+      const preservedZoom = zoomStateRef.current
+      const nextOption = preservedZoom
+        ? {
+          ...option,
+          dataZoom: [
+            { type: 'inside', xAxisIndex: [0, 1, 2], ...preservedZoom },
+            { type: 'slider', bottom: 4, height: 20, xAxisIndex: [0, 1, 2], ...preservedZoom },
+          ],
+        }
+        : option
       if (dz && dz.length > 0 && dz[0].start != null) {
         zoomStateRef.current = { start: dz[0].start, end: dz[0].end }
       }
-      chart.setOption(option, true)
+      chart.setOption(nextOption, true)
       chart.resize()
     }
 
@@ -591,7 +681,7 @@ export function StockKlineChart({
       const axisInfo = event.axesInfo?.find((item) => item.axisDim === 'x' && item.axisIndex === 0)
       const index = Number(axisInfo?.value)
       if (Number.isInteger(index) && index >= 0 && index < bars.length) {
-        setCurrentIndex(index)
+        setCurrentPoint({ barsKey, index })
       }
     }
     // DataZoom state handler
@@ -604,7 +694,7 @@ export function StockKlineChart({
     }
     // 鼠标离开图表时重置 currentIndex，恢复显示最新数据
     const handleGlobalOut = () => {
-      setCurrentIndex(null)
+      setCurrentPoint(null)
     }
     chart.off('updateAxisPointer')
     chart.on('updateAxisPointer', handleAxisPointer)
@@ -618,7 +708,7 @@ export function StockKlineChart({
       chart.off('globalout')
       chart.off('datazoom')
     }
-  }, [hasBars, option])
+  }, [bars.length, barsKey, hasBars, option, zoomSourceKey])
 
   // Unmount cleanup: dispose chart and resize observer
   useEffect(() => {

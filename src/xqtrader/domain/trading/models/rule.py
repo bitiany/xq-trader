@@ -1,52 +1,61 @@
-"""规则引擎 — 规则注册表 & 规则-因子依赖"""
+"""规则注册表 — 单表 JSONB 配置
 
-from sqlalchemy import Boolean, Integer, String, Text
+规则定义集中在 RuleRegistry.definition JSONB 字段中，按 rule_type 不同:
+
+definition JSONB 结构:
+  rule_type = "expression" + category = "timing":
+    {"buy_expr": "rsi < 30", "sell_expr": "rsi > 70", "prev_factors": []}
+
+  rule_type = "expression" + category = "selection":
+    {"bullish_expr": "pe < 20 and roe > 0.15",
+     "bearish_expr": "pe > 80 or roe < 0",
+     "score_expr": "rank(-pe) * 0.5 + rank(roe) * 0.5"}
+
+  rule_type = "plugin":
+    {"plugin_class": "xqtrader.domain.trading.backtest.plugins.macd.MACDPlugin",
+     "default_params": {"fast": 12, "slow": 26}}
+"""
+
+from sqlalchemy import Boolean, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from framework.dal.base import AuditedBase, Base
+from framework.dal.base import AuditedBase
 
 from ..enums import RuleCategory, RuleStatus, RuleType
 
 
 class RuleRegistry(AuditedBase):
-    """规则注册表 — 表达式规则与 SPI 插件规则的统一注册"""
+    """规则注册表 — 表达式规则与 SPI 插件规则的统一注册
+
+    与 Strategy 解耦: Strategy.config 通过 rule_id 引用本表，
+    避免规则配置在多个策略中重复定义。
+    """
 
     __bind_key__ = "trading"
     __tablename__ = "td_rule_registry"
 
     rule_id: Mapped[str] = mapped_column(
-        String(64), unique=True, nullable=False, comment="规则唯一标识",
+        String(64), unique=True, nullable=False, comment="规则编码（业务唯一标识）",
     )
     name: Mapped[str] = mapped_column(String(128), nullable=False, comment="规则名称")
-    category: Mapped[str] = mapped_column(
-        String(20), nullable=False, default=RuleCategory.BOTH,
-        comment="类别: cross_section/time_series/both",
-    )
-    type: Mapped[str] = mapped_column(
-        String(16), nullable=False, default=RuleType.EXPRESSION,
-        comment="类型: expression/spi",
-    )
-    expression: Mapped[str | None] = mapped_column(
-        Text, nullable=True, comment="表达式字符串(type=expression)",
-    )
-    spi_class: Mapped[str | None] = mapped_column(
-        String(256), nullable=True, comment="SPI插件类路径(type=spi)",
-    )
-    factors: Mapped[dict | None] = mapped_column(
-        JSONB, nullable=True, default=[], comment="依赖因子列表",
-    )
-    signal_mapping: Mapped[dict | None] = mapped_column(
-        JSONB, nullable=True, default={}, comment="信号映射配置",
-    )
-    config_schema: Mapped[dict | None] = mapped_column(
-        JSONB, nullable=True, default={}, comment="参数JSON Schema",
-    )
-    default_config: Mapped[dict | None] = mapped_column(
-        JSONB, nullable=True, default={}, comment="默认配置参数",
-    )
     description: Mapped[str | None] = mapped_column(
         Text, nullable=True, default="", comment="规则说明",
+    )
+    category: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=RuleCategory.BOTH,
+        comment="类别: selection(仅截面) / timing(仅时序) / both(均可)",
+    )
+    rule_type: Mapped[str] = mapped_column(
+        String(16), nullable=False, default=RuleType.EXPRESSION,
+        comment="类型: expression(表达式) / plugin(SPI 插件)",
+    )
+    definition: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, default=dict,
+        comment="规则定义（按 rule_type 不同：buy/sell/bullish/bearish 表达式或 plugin_class）",
+    )
+    factors: Mapped[list | None] = mapped_column(
+        JSONB, nullable=True, default=list, comment="依赖因子列表 ['pe', 'roe']",
     )
     is_builtin: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, comment="是否内置规则",
@@ -57,26 +66,3 @@ class RuleRegistry(AuditedBase):
     )
 
     __table_args__ = ({"comment": "规则注册表"},)
-
-
-class RuleFactorDep(Base):
-    """规则-因子依赖 — 记录规则与因子注册表的关联"""
-
-    __bind_key__ = "trading"
-    __tablename__ = "td_rule_factor_dep"
-
-    id: Mapped[int] = mapped_column(
-        Integer, primary_key=True, autoincrement=True, comment="PK",
-    )
-    rule_id: Mapped[str] = mapped_column(
-        String(64), nullable=False, index=True, comment="规则ID",
-    )
-    factor_id: Mapped[str] = mapped_column(
-        String(32), nullable=False, index=True,
-        comment="因子ID → fac_factor_registry",
-    )
-    usage: Mapped[str | None] = mapped_column(
-        String(64), nullable=True, default="", comment="用途说明",
-    )
-
-    __table_args__ = ({"comment": "规则-因子依赖"},)

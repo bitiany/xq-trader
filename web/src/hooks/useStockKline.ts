@@ -9,7 +9,7 @@ import {
   type KlineBarItem,
 } from '@/api/stock'
 
-export function useStockKline(symbol: string, mainIndicator: MainIndicator, subIndicator: SubIndicator) {
+export function useStockKline(symbol: string, mainIndicator: MainIndicator, _subIndicator: SubIndicator) {
   const [bars, setBars] = useState<KlineBarItem[]>([])
   const [apiOverlays, setApiOverlays] = useState<Record<string, Record<string, Array<number | null>>>>({})
   const [apiMaOverlays, setApiMaOverlays] = useState<Record<string, Array<number | null>>>({})
@@ -45,6 +45,7 @@ export function useStockKline(symbol: string, mainIndicator: MainIndicator, subI
 
   useEffect(() => {
     if (!symbol) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setBars([])
       setApiOverlays({})
       setApiMaOverlays({})

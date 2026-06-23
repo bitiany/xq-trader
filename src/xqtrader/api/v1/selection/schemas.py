@@ -34,6 +34,6 @@ class SelectionRunResponse(BaseModel):
     universe_size: int = Field(..., description="样本池标的数量")
     selected_count: int = Field(..., description="入选标的数量")
     elapsed_ms: int = Field(..., description="耗时毫秒")
-    items: list[dict] = Field(..., description="选股结果列表，按得分降序")
-    factor_labels: dict[str, str] = Field(default_factory=dict, description="因子ID到中文名称映射")
+    items: list[dict] = Field(..., description="选股结果列表，按得分倒序")
+    factor_labels: dict[str, str] = Field(default_factory=dict, description="因子显示名称映射")
     filter_steps: list[dict] = Field(default_factory=list, description="规则筛选统计步骤")

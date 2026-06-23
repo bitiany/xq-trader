@@ -1,212 +1,73 @@
-﻿import { request } from '@/api/client'
-import type { StockTagItem } from '@/api/stock'
+import { request } from '@/api/client'
+import type { Strategy } from '@/api/strategy'
 
-export interface BacktestStrategyInfo {
-  strategy_id: string
-  name: string
-  description: string
-  mode: string
-  params_schema: Record<string, unknown>
-}
+export type BacktestStrategyInfo = Strategy
 
-export interface BacktestSizerInfo {
-  sizer_id: string
-  name: string
-  description: string
-  params_schema: Record<string, unknown>
-}
-
-export interface BacktestRunRequest {
-  workspace_id: string
-  symbols: string[]
-  strategy_id: string
-  strategy_mode: string
-  strategy_params: Record<string, unknown>
-  sizer_id: string
-  sizer_params: Record<string, unknown>
-  start_date: string | null
-  end_date: string | null
-  benchmark: string
-  initial_capital?: number
-  commission_rate?: number
-  stamp_tax_rate?: number
-  screening_execute_id?: string | null
-}
-
-export interface BacktestPerformance {
-  execute_id: string
-  total_return: number
-  annualized_return: number | null
-  benchmark_total_return: number | null
-  alpha: number | null
-  beta: number | null
-  sharpe_ratio: number | null
-  sortino_ratio: number | null
-  calmar_ratio: number | null
-  max_drawdown: number | null
-  max_drawdown_duration: number | null
-  volatility: number | null
-  win_rate: number | null
-  profit_loss_ratio: number | null
-  total_trades: number | null
-  profitable_trades: number | null
-  losing_trades: number | null
-  avg_holding_days: number | null
-  turnover_rate: number | null
-}
-
-export interface BacktestEquityItem {
-  trade_date: string
-  net_value: number
-  daily_return: number | null
-  cumulative_return: number | null
-  benchmark_return: number | null
-  drawdown: number | null
-  cash: number | null
-  total_value: number | null
-}
-
-export interface BacktestOrderItem {
-  order_id: string
-  symbol: string
-  direction: string
-  order_type: string
-  price: number
-  amount: number
-  filled_amount: number
-  avg_fill_price: number | null
-  status: string
-  commission: number | null
-  reason: string | null
-  signal_date: string | null
-}
-
-export interface BacktestPositionItem {
-  trade_date: string
-  symbol: string
-  amount: number
-  avg_cost: number
-  current_price: number | null
-  market_value: number | null
-  pnl: number | null
-  pnl_pct: number | null
-  weight: number | null
-  tags: StockTagItem[]
-}
-
-export interface BacktestResultData {
-  execute_id: string
-  workspace_id: string
-  status: string
-  strategy_id: string
-  sizer_id: string
-  start_date: string | null
-  end_date: string | null
-  total_return: number | null
-  annualized_return: number | null
-  sharpe_ratio: number | null
-  max_drawdown: number | null
-  win_rate: number | null
-  total_trades: number | null
-  performance: Record<string, unknown> | null
-  error_message: string | null
-}
-
-interface PaginatedData<T> {
-  total: number
-  page: number
-  page_size: number
-  items: T[]
-}
-
-export async function runBacktest(payload: BacktestRunRequest): Promise<BacktestResultData> {
-  return request.post<BacktestResultData>('/backtest/run', payload)
-}
-
-export async function fetchBacktestResult(executeId: string): Promise<BacktestResultData> {
-  return request.get<BacktestResultData>(`/backtest/${executeId}`)
-}
-
-export async function fetchBacktestEquity(
-  executeId: string,
-  page = 1,
-  pageSize = 500,
-): Promise<PaginatedData<BacktestEquityItem>> {
-  return request.get<PaginatedData<BacktestEquityItem>>(
-    `/backtest/${executeId}/equity`,
-    { params: { page, page_size: pageSize } },
-  )
-}
-
-export async function fetchBacktestOrders(
-  executeId: string,
-  page = 1,
-  pageSize = 50,
-): Promise<PaginatedData<BacktestOrderItem>> {
-  return request.get<PaginatedData<BacktestOrderItem>>(
-    `/backtest/${executeId}/orders`,
-    { params: { page, page_size: pageSize } },
-  )
-}
-
-export async function fetchBacktestPositions(
-  executeId: string,
-  tradeDate?: string,
-  page = 1,
-  pageSize = 50,
-): Promise<PaginatedData<BacktestPositionItem>> {
-  const params: Record<string, unknown> = { page, page_size: pageSize }
-  if (tradeDate) params.trade_date = tradeDate
-  return request.get<PaginatedData<BacktestPositionItem>>(
-    `/backtest/${executeId}/positions`,
-    { params },
-  )
-}
-
-export async function fetchBacktestPerformance(executeId: string): Promise<BacktestPerformance> {
-  return request.get<BacktestPerformance>(`/backtest/${executeId}/performance`)
+interface StrategyPageData {
+  items: BacktestStrategyInfo[]
 }
 
 export async function fetchBacktestStrategies(): Promise<BacktestStrategyInfo[]> {
-  return request.get<BacktestStrategyInfo[]>('/backtest/strategies/list')
+  const page = await request.get<StrategyPageData>('/strategies', {
+    params: { status: 'active', strategy_type: 'timing', page_size: 200 },
+  })
+  return page.items
 }
 
-export async function fetchBacktestSizers(): Promise<BacktestSizerInfo[]> {
-  return request.get<BacktestSizerInfo[]>('/backtest/sizers/list')
+export interface TradeRecord {
+  date: string
+  symbol: string
+  direction: 'buy' | 'sell'
+  price: number
+  quantity: number
+  value: number
+  signal_reason: string
 }
 
-// ---- Simple (synchronous) backtest API ----
+export interface PositionRecord {
+  date: string
+  symbol: string
+  quantity: number
+  avg_cost: number
+  market_value: number
+  pnl: number
+  pnl_pct: number
+  weight: number
+}
 
 export interface SimpleBacktestRequest {
   strategy_id: string
   symbols: string[]
   start_date: string
   end_date: string
-  initial_capital?: number
-  commission_rate?: number
-  slippage?: number
-  indicator_specs?: { name: string; params: Record<string, unknown>; output_columns?: string[] | null }[]
-  lookback_days?: number
-  generate_report?: boolean
-  rf?: number
+  initial_cash?: number
+  commission?: number
+}
+
+export interface BacktestSymbolMetrics {
+  total_return?: number | string
+  annual_return?: number | string
+  annualized_return?: number | string
+  avg_daily_return?: number | string
+  max_drawdown?: number | string
+  sharpe_ratio?: number | string
+  total_trades?: number | string
+  num_trades?: number | string
+  win_rate?: number | string
+  final_value?: number
+  initial_cash?: number
+  equity_curve?: { date: string; value: number }[]
+  trades?: TradeRecord[]
+  positions?: PositionRecord[]
+  ohlcv?: { date: string; open: number; close: number; high: number; low: number; volume: number }[]
+  [key: string]: unknown
 }
 
 export interface SimpleBacktestResponse {
+  run_id: string
   strategy_id: string
-  start_date: string
-  end_date: string
-  initial_capital: number
-  final_value: number
-  total_return: number
-  annual_return: number
-  max_drawdown: number
-  sharpe_ratio: number
-  total_trades: number
-  metrics: Record<string, unknown>
-  equity_curve: { date: string; value: number }[]
-  daily_returns: { date: string; value: number }[]
-  html_report_path: string | null
-  elapsed_ms: number
+  status: string
+  metrics_per_symbol: Record<string, BacktestSymbolMetrics>
 }
 
 export async function runSimpleBacktest(payload: SimpleBacktestRequest): Promise<SimpleBacktestResponse> {

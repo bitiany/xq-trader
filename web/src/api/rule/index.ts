@@ -1,28 +1,18 @@
 import { request } from '@/api/client'
 import type { ApiPageResult } from '@/api/types'
 
-export type RuleCategory = 'cross_section' | 'time_series' | 'both'
-export type RuleType = 'expression' | 'spi'
-export type RuleStatus = 'draft' | 'active' | 'deprecated'
-
-export interface SignalMapping {
-  buy?: string | number | null
-  sell?: string | number | null
-  hold?: string | number | null
-  [key: string]: unknown
-}
+export type RuleCategory = 'selection' | 'timing' | 'both'
+export type RuleType = 'expression' | 'plugin'
+export type RuleStatus = 'active' | 'deprecated'
 
 export interface Rule {
   id?: number
   rule_id: string
   name: string
   category: RuleCategory
-  type: RuleType
-  expression: string | null
-  spi_class: string | null
+  rule_type: RuleType
+  definition: Record<string, unknown>
   factors: string[]
-  signal_mapping: SignalMapping | null
-  default_config: Record<string, unknown> | null
   description: string | null
   is_builtin: boolean
   status: RuleStatus
@@ -34,7 +24,7 @@ export interface RuleListParams {
   page?: number
   page_size?: number
   category?: RuleCategory
-  type?: RuleType
+  rule_type?: RuleType
   status?: RuleStatus
   keyword?: string
 }
@@ -43,21 +33,18 @@ export interface RuleCreatePayload {
   rule_id: string
   name: string
   category?: RuleCategory
-  type?: RuleType
-  expression: string
+  rule_type?: RuleType
+  definition: Record<string, unknown>
   factors: string[]
-  signal_mapping?: SignalMapping
-  default_config?: Record<string, unknown>
   description?: string
   status?: RuleStatus
 }
 
 export interface RuleUpdatePayload {
   name?: string
-  expression?: string
+  category?: RuleCategory
+  definition?: Record<string, unknown>
   factors?: string[]
-  signal_mapping?: SignalMapping
-  default_config?: Record<string, unknown>
   description?: string
   status?: RuleStatus
 }

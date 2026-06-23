@@ -93,7 +93,7 @@ function SignalNotificationBell() {
   const { t } = useTranslation()
   const notifications = useSignalNotificationStore((s) => s.notifications)
   const unreadCount = useSignalNotificationStore((s) => s.unreadCount)
-  const addNotification = useSignalNotificationStore((s) => s.addNotification)
+  const _addNotification = useSignalNotificationStore((s) => s.addNotification)
   const markAllRead = useSignalNotificationStore((s) => s.markAllRead)
   const clearAll = useSignalNotificationStore((s) => s.clearAll)
   const [open, setOpen] = useState(false)

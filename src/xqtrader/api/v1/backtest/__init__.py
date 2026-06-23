@@ -1,3 +1,5 @@
-from xqtrader.api.v1.backtest.router import router
+"""回测 API 路由模块"""
+
+from .router import router
 
 __all__ = ["router"]

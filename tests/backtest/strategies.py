@@ -1,7 +1,16 @@
-"""策略配置实例 — 预定义的策略配置"""
+"""策略配置实例 — 测试用预定义策略
 
-from .core import FusionConfig, RuleConfig, RuleGroupConfig, StrategyConfig
-from .sizer import PositionConfig
+所有策略配置都不包含运行时参数（标的、日期、资金等），
+仅描述策略规则、融合方式和仓位插件，由 API 入参在运行时注入运行参数。
+"""
+
+from xqtrader.domain.trading.backtest import (
+    FusionConfig,
+    PositionConfig,
+    RuleConfig,
+    RuleGroupConfig,
+    StrategyConfig,
+)
 
 # ──────────────────────────────────────────────
 # MACD 策略（无仓位插件，使用默认 95% 仓位）
@@ -14,7 +23,7 @@ MACD_STRATEGY = StrategyConfig(
         RuleConfig(
             rule_id="macd_cross",
             rule_type="plugin",
-            plugin_class="tests.backtest.plugins.macd.MACDPlugin",
+            plugin_class="xqtrader.domain.trading.backtest.plugins.macd.MACDPlugin",
             factor_ids=["macd", "signal", "hist", "hist_slope", "hist_area"],
             prev_factor_ids=["hist", "hist_area"],
         ),
@@ -32,13 +41,13 @@ MACD_KELLY_STRATEGY = StrategyConfig(
         RuleConfig(
             rule_id="macd_cross",
             rule_type="plugin",
-            plugin_class="tests.backtest.plugins.macd.MACDPlugin",
+            plugin_class="xqtrader.domain.trading.backtest.plugins.macd.MACDPlugin",
             factor_ids=["macd", "signal", "hist", "hist_slope", "hist_area"],
             prev_factor_ids=["hist", "hist_area"],
         ),
     ],
     position_config=PositionConfig(
-        plugin_class="tests.backtest.sizer.plugins.kelly.KellyPositionPlugin",
+        plugin_class="xqtrader.domain.trading.backtest.sizer.plugins.kelly.KellyPositionPlugin",
         params={"kelly_fraction": 0.5, "min_trades": 5, "default_pct": 0.2, "max_pct": 0.95},
     ),
 )
@@ -54,13 +63,13 @@ MACD_ATR_STRATEGY = StrategyConfig(
         RuleConfig(
             rule_id="macd_cross",
             rule_type="plugin",
-            plugin_class="tests.backtest.plugins.macd.MACDPlugin",
+            plugin_class="xqtrader.domain.trading.backtest.plugins.macd.MACDPlugin",
             factor_ids=["macd", "signal", "hist", "hist_slope", "hist_area"],
             prev_factor_ids=["hist", "hist_area"],
         ),
     ],
     position_config=PositionConfig(
-        plugin_class="tests.backtest.sizer.plugins.atr_position.ATRPositionPlugin",
+        plugin_class="xqtrader.domain.trading.backtest.sizer.plugins.atr_position.ATRPositionPlugin",
         params={"risk_pct": 0.02, "atr_multiplier": 2.0, "max_pct": 0.95},
         factor_ids=["atr"],
     ),
@@ -175,7 +184,7 @@ MACD_RSI_VOTE_STRATEGY = StrategyConfig(
                 RuleConfig(
                     rule_id="macd_cross",
                     rule_type="plugin",
-                    plugin_class="tests.backtest.plugins.macd.MACDPlugin",
+                    plugin_class="xqtrader.domain.trading.backtest.plugins.macd.MACDPlugin",
                     factor_ids=["macd", "signal", "hist", "hist_slope", "hist_area"],
                     prev_factor_ids=["hist", "hist_area"],
                 ),

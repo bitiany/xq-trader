@@ -19,13 +19,12 @@ import { Edit, Plus, Trash2 } from 'lucide-react'
 import {
   createStrategy,
   deleteStrategy,
-  fetchPools,
   fetchStrategies,
   updateStrategy,
-  type Pool,
   type Strategy,
   type StrategyCreatePayload,
   type StrategyStatus,
+  type StrategyType,
 } from '@/api'
 import { extractPageItems, isApiError } from '@/api/types'
 import { useRequest } from '@/hooks/useRequest'
@@ -41,7 +40,7 @@ interface StrategyFormValues {
   strategy_id: string
   name: string
   description?: string
-  universe_pool?: string
+  strategy_type: StrategyType
   status: StrategyStatus
 }
 
@@ -69,14 +68,13 @@ export function StrategyListPage() {
     () => fetchStrategies(params),
     { deps: [params] },
   )
-  const { data: poolsData } = useRequest(() => fetchPools(true))
 
   const strategies = useMemo(() => extractPageItems<Strategy>(page), [page])
 
   const openCreate = useCallback(() => {
     setEditTarget(null)
     form.resetFields()
-    form.setFieldsValue({ status: 'draft' })
+    form.setFieldsValue({ status: 'draft', strategy_type: 'selection' })
     setModalOpen(true)
   }, [form])
 
@@ -87,7 +85,7 @@ export function StrategyListPage() {
         strategy_id: record.strategy_id,
         name: record.name,
         description: record.description ?? '',
-        universe_pool: record.universe_pool ?? undefined,
+        strategy_type: record.strategy_type,
         status: record.status,
       })
       setModalOpen(true)
@@ -103,7 +101,7 @@ export function StrategyListPage() {
         await updateStrategy(editTarget.strategy_id, {
           name: values.name,
           description: values.description ?? null,
-          universe_pool: values.universe_pool ?? null,
+          strategy_type: values.strategy_type,
           status: values.status,
         })
         message.success(t('strategy.updateSuccess'))
@@ -112,7 +110,8 @@ export function StrategyListPage() {
           strategy_id: values.strategy_id,
           name: values.name,
           description: values.description ?? null,
-          universe_pool: values.universe_pool ?? null,
+          strategy_type: values.strategy_type,
+          config: { groups: [] },
           status: values.status,
         }
         await createStrategy(payload)
@@ -151,6 +150,8 @@ export function StrategyListPage() {
     return 'default'
   }
 
+  const typeColor = (type: StrategyType): string => (type === 'selection' ? 'purple' : 'blue')
+
   const columns: ColumnsType<Strategy> = useMemo(
     () => [
       {
@@ -165,18 +166,18 @@ export function StrategyListPage() {
       },
       { title: t('strategy.strategyName'), dataIndex: 'name', width: 220 },
       {
+        title: t('strategy.strategyType'),
+        dataIndex: 'strategy_type',
+        width: 120,
+        render: (type: StrategyType) => <Tag color={typeColor(type)}>{t(`strategy.strategyType_${type}`)}</Tag>,
+      },
+      {
         title: t('strategy.status'),
         dataIndex: 'status',
         width: 110,
         render: (status: StrategyStatus) => (
           <Tag color={statusColor(status)}>{t(`strategy.status${status.charAt(0).toUpperCase() + status.slice(1)}`)}</Tag>
         ),
-      },
-      {
-        title: t('strategy.universePool'),
-        dataIndex: 'universe_pool',
-        width: 160,
-        render: (val: string | null) => val ?? '—',
       },
       {
         title: t('strategy.updatedAt'),
@@ -278,19 +279,20 @@ export function StrategyListPage() {
           >
             <Input />
           </Form.Item>
+          <Form.Item
+            label={t('strategy.strategyType')}
+            name="strategy_type"
+            rules={[{ required: true, message: t('strategy.strategyType') }]}
+          >
+            <Select
+              options={[
+                { label: t('strategy.strategyType_selection'), value: 'selection' },
+                { label: t('strategy.strategyType_timing'), value: 'timing' },
+              ]}
+            />
+          </Form.Item>
           <Form.Item label={t('strategy.description')} name="description">
             <Input.TextArea rows={3} />
-          </Form.Item>
-          <Form.Item label={t('strategy.universePool')} name="universe_pool">
-            <Select
-              allowClear
-              showSearch
-              optionFilterProp="label"
-              options={(poolsData ?? []).map((p: Pool) => ({
-                label: `${p.pool_name} (${p.pool_id})`,
-                value: p.pool_id,
-              }))}
-            />
           </Form.Item>
           <Form.Item
             label={t('strategy.status')}

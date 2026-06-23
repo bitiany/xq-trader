@@ -15,6 +15,7 @@ export function StatusBar() {
 
   /* --- Broker status via WebSocket --- */
   const [brokerStatus, setBrokerStatus] = useState<BrokerStatusData | null>(null)
+  const [pnlData, setPnlData] = useState<TradingPnlData | null>(null)
   const { status: wsStatus } = usePageWebSocket<BrokerStatusData>({
     topics: [TOPIC_BROKER_STATUS],
     onSnapshot: (_channel, data) => {
@@ -32,13 +33,13 @@ export function StatusBar() {
   // WS断开时重置状态数据
   useEffect(() => {
     if (wsStatus !== 'open') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setBrokerStatus(null)
       setPnlData(null)
     }
   }, [wsStatus])
 
   /* --- Account asset via WebSocket --- */
-  const [pnlData, setPnlData] = useState<TradingPnlData | null>(null)
   usePageWebSocket<TradingPnlData>({
     topics: [TOPIC_TRADING_PNL],
     onSnapshot: (_channel, data) => {

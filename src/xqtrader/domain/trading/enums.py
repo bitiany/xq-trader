@@ -147,22 +147,38 @@ class RiskScope:
 # ──────────────── 规则引擎 ────────────────
 
 class RuleCategory:
-    """规则类别"""
-    CROSS_SECTION = "cross_section"
-    TIME_SERIES = "time_series"
-    BOTH = "both"
+    """规则类别 — 标识规则适用场景"""
+    SELECTION = "selection"  # 仅截面选股
+    TIMING = "timing"        # 仅时序回测
+    BOTH = "both"            # 截面/时序均可
 
 
 class RuleType:
     """规则类型"""
     EXPRESSION = "expression"
-    SPI = "spi"
+    PLUGIN = "plugin"
 
 
 class RuleStatus:
     """规则状态"""
     ACTIVE = "active"
     DEPRECATED = "deprecated"
+
+
+class RuleDirection:
+    """规则方向语义 — 按业务场景定义
+
+    - 截面选股: BULLISH / BEARISH / NEUTRAL (分析当前处于多空中哪种状态)
+    - 时序回测: BUY / SELL / NEUTRAL (产生交易动作)
+    """
+    # 截面选股方向
+    BULLISH = "bullish"
+    BEARISH = "bearish"
+    # 时序回测方向
+    BUY = "buy"
+    SELL = "sell"
+    # 共用
+    NEUTRAL = "neutral"
 
 
 # ──────────────── 策略引擎 ────────────────
@@ -174,16 +190,28 @@ class StrategyStatus:
     DEPRECATED = "deprecated"
 
 
-class GroupType:
-    """规则组类型"""
-    CROSS_SECTION = "cross_section"
-    TIME_SERIES = "time_series"
-
-
 class CombinationMethod:
-    """规则组合方式"""
+    """规则组合 / 信号融合方式"""
     AND = "and"
     OR = "or"
     WEIGHTED_SCORE = "weighted_score"
     WEIGHTED_VOTE = "weighted_vote"
     IC_WEIGHTED = "ic_weighted"
+
+
+class StrategyType:
+    """策略类型 — 决定策略适用场景
+
+    - SELECTION: 截面选股策略 (产出候选标的池，方向 bullish/bearish)
+    - TIMING: 时序回测策略 (对给定标的逐 bar 产生 buy/sell 信号)
+    """
+    SELECTION = "selection"
+    TIMING = "timing"
+
+
+class BacktestRunStatus:
+    """回测运行状态"""
+    PENDING = "pending"
+    RUNNING = "running"
+    SUCCESS = "success"
+    FAILED = "failed"

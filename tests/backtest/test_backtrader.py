@@ -1,18 +1,26 @@
 """Backtrader 回测测试 — 通过模块化组件组装回测"""
 
+import pandas as pd
 import pytest
 import pytest_asyncio
 import talib as ta
-import pandas as pd
 
-from xqtrader.domain.security.models import Security
 from xqtrader.domain.market.models.candlestick import CandlestickDaily
+from xqtrader.domain.security.models import Security
+from xqtrader.domain.trading.backtest.runner import run_backtest
+
 from .strategies import (
-    MACD_STRATEGY, MACD_KELLY_STRATEGY, MACD_ATR_STRATEGY, RSI_STRATEGY,
-    RSI_BIAS_AND_STRATEGY, RSI_BIAS_WEIGHTED_STRATEGY, MACD_RSI_VOTE_STRATEGY,
-    IC_WEIGHTED_STRATEGY, MULTI_GROUP_STRATEGY, MULTI_GROUP_VOTE_STRATEGY,
+    IC_WEIGHTED_STRATEGY,
+    MACD_ATR_STRATEGY,
+    MACD_KELLY_STRATEGY,
+    MACD_RSI_VOTE_STRATEGY,
+    MACD_STRATEGY,
+    MULTI_GROUP_STRATEGY,
+    MULTI_GROUP_VOTE_STRATEGY,
+    RSI_BIAS_AND_STRATEGY,
+    RSI_BIAS_WEIGHTED_STRATEGY,
+    RSI_STRATEGY,
 )
-from .runner import run_backtest
 
 DEFAULT_SYMBOL = "603993.SH"
 START_DATE = "2025-06-01"
