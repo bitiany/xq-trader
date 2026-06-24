@@ -1,4 +1,5 @@
 import { request } from '@/api/client'
+import type { Strategy } from '@/api/strategy'
 
 // ==================== 账户 ====================
 
@@ -106,6 +107,7 @@ export interface WatchlistItem {
   change_pct: number | null
   sizing_config: Record<string, unknown>
   signal_config: Record<string, unknown>
+  signal_strategy?: Strategy | null
   target_weight: string | null
   sort_order: number
   is_enabled: number

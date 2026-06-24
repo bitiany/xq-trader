@@ -29,6 +29,7 @@ from xqtrader.domain.trading.models.account import AccountSnapshot, TradingAccou
 from xqtrader.domain.trading.models.instance import StrategyInstance
 from xqtrader.domain.trading.models.order import PreOrder
 from xqtrader.domain.trading.models.risk import RiskRule
+from xqtrader.domain.trading.models.strategy import Strategy
 from xqtrader.domain.trading.models.watchlist import Watchlist, WatchlistItem
 from xqtrader.ws.spi.impl.pnl import sync_account_assets_to_redis
 from xqtrader.ws.spi.impl.watchlist_quotes import WATCHLIST_SYMBOLS_PREFIX
@@ -60,6 +61,21 @@ async def _get_watchlist_item_or_404(item_id: int) -> WatchlistItem:
     if item is None:
         raise NotFoundException(message=f"自选股不存在: {item_id}")
     return item
+
+
+async def _validate_timing_strategy_id(signal_config: dict | None) -> None:
+    if not signal_config:
+        return
+    strategy_id = signal_config.get("strategy_id")
+    if not strategy_id:
+        return
+    strategy = await Strategy.get_or_none(strategy_id=strategy_id)
+    if strategy is None:
+        raise BusinessException(message=f"策略不存在: {strategy_id}")
+    if strategy.strategy_type != "timing":
+        raise BusinessException(message=f"自选标的只能绑定时序交易信号策略: {strategy_id}")
+    if strategy.status != "active":
+        raise BusinessException(message=f"策略未启用: {strategy_id}")
 
 
 async def _sync_watchlist_quote_symbols(account_id: int | None = None) -> None:
@@ -281,6 +297,13 @@ async def get_watchlist(account_id: int) -> dict:
     symbols = [it.symbol for it in items]
     quote_map: dict[str, dict] = {}
     name_map: dict[str, str] = {}
+    strategy_ids = [
+        it.signal_config.get("strategy_id")
+        for it in items
+        if isinstance(it.signal_config, dict) and it.signal_config.get("strategy_id")
+    ]
+    strategies = await Strategy.filter(strategy_id__in=list(set(strategy_ids))) if strategy_ids else []
+    strategy_map = {s.strategy_id: s.to_dict() for s in strategies}
     if symbols:
         # 最新行情
         for sym in symbols:
@@ -308,6 +331,9 @@ async def get_watchlist(account_id: int) -> dict:
         q = quote_map.get(it.symbol)
         d["last_price"] = q["last_price"] if q else None
         d["change_pct"] = q["change_pct"] if q else None
+        signal_config = it.signal_config if isinstance(it.signal_config, dict) else {}
+        strategy_id = signal_config.get("strategy_id")
+        d["signal_strategy"] = strategy_map.get(strategy_id) if isinstance(strategy_id, str) else None
         result_items.append(d)
 
     return {"watchlist": watchlist.to_dict(), "items": result_items}
@@ -320,6 +346,7 @@ async def get_watchlist(account_id: int) -> dict:
 )
 async def add_watchlist_item(account_id: int, req: WatchlistItemCreate) -> dict:
     await _get_account_or_404(account_id)
+    await _validate_timing_strategy_id(req.signal_config)
     watchlist = await Watchlist.get_or_none(account_id=account_id)
     if watchlist is None:
         watchlist = await Watchlist.create(account_id=account_id)
@@ -361,6 +388,8 @@ async def update_watchlist_item(item_id: int, req: WatchlistItemUpdate) -> dict:
     payload = req.model_dump(exclude_unset=True)
     if payload.get("symbol") is None:
         payload.pop("symbol", None)
+    if "signal_config" in payload:
+        await _validate_timing_strategy_id(payload["signal_config"])
     if "symbol" in payload and payload["symbol"] != item.symbol:
         existing = await WatchlistItem.get_or_none(
             watchlist_id=item.watchlist_id,

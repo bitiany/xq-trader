@@ -1,7 +1,7 @@
-﻿import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { Card, Table, Tag, Button, Space, message, Modal, Form, Input, InputNumber, Select } from 'antd';
 import { Star, Search, Plus, Trash2, Cpu, Settings, X, Edit2 } from 'lucide-react';
-import { INSTANCE_STATUS_COLOR, INSTANCE_STATUS_LABEL, RUN_MODE_LABEL, POSITION_SIZING_OPTIONS } from '../utils/trading';
+import { INSTANCE_STATUS_COLOR, INSTANCE_STATUS_LABEL, RUN_MODE_LABEL } from '../utils/trading';
 import { PositionSizingConfigDrawer } from './PositionSizingConfigDrawer';
 import {
   fetchInstances,
@@ -16,6 +16,7 @@ import {
   type WatchlistItem as ApiWatchlistItem,
 } from '@/api/trading';
 import { searchStocks, type StockSearchItem } from '@/api/stock';
+import { fetchStrategies, type Strategy } from '@/api/strategy';
 import { usePageWebSocket } from '@/ws/usePageWebSocket';
 import { TOPIC_MARKET_WATCHLIST_QUOTES, type WatchlistQuotesData } from '@/ws/protocol';
 
@@ -26,6 +27,7 @@ interface WatchlistStrategyTabProps {
 export function WatchlistStrategyTab({ accountId }: WatchlistStrategyTabProps) {
   const [watchlistItems, setWatchlistItems] = useState<ApiWatchlistItem[]>([]);
   const [instances, setInstances] = useState<StrategyInstance[]>([]);
+  const [timingStrategies, setTimingStrategies] = useState<Strategy[]>([]);
   const [searchText, setSearchText] = useState('');
   const [searchResults, setSearchResults] = useState<StockSearchItem[]>([]);
   const [searching, setSearching] = useState(false);
@@ -48,6 +50,21 @@ export function WatchlistStrategyTab({ accountId }: WatchlistStrategyTabProps) {
     }).catch(() => {});
     return () => { cancelled = true; };
   }, [accountId]);
+
+  // 加载可用于实盘监控的时序交易信号策略
+  useEffect(() => {
+    let cancelled = false;
+    fetchStrategies({ status: 'active', strategy_type: 'timing', page_size: 500 }).then((res) => {
+      if (!cancelled) {
+        setTimingStrategies(res.items);
+      }
+    }).catch(() => {
+      if (!cancelled) {
+        setTimingStrategies([]);
+      }
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   // 加载当前账户的自选池
   const loadWatchlist = useCallback(async () => {
@@ -146,7 +163,7 @@ export function WatchlistStrategyTab({ accountId }: WatchlistStrategyTabProps) {
     editForm.setFieldsValue({
       symbol: item.symbol,
       target_weight: item.target_weight === null ? null : Number(item.target_weight),
-      sizing_strategy: item.sizing_config?.strategy ?? 'equal_weight',
+      strategy_id: typeof item.signal_config?.strategy_id === 'string' ? item.signal_config.strategy_id : undefined,
       note: item.note ?? '',
     });
   }, [editForm]);
@@ -154,14 +171,14 @@ export function WatchlistStrategyTab({ accountId }: WatchlistStrategyTabProps) {
   const handleSaveWatchlistItem = useCallback(async () => {
     if (!editingItem) return;
     const values = await editForm.validateFields();
-    const sizingConfig = {
-      ...(editingItem.sizing_config ?? {}),
-      strategy: values.sizing_strategy,
+    const signalConfig = {
+      ...(editingItem.signal_config ?? {}),
+      strategy_id: values.strategy_id,
     };
     const updated = await updateWatchlistItem(editingItem.id, {
       symbol: values.symbol.trim().toUpperCase(),
       target_weight: values.target_weight ?? null,
-      sizing_config: sizingConfig,
+      signal_config: signalConfig,
       note: values.note ?? '',
     });
     setWatchlistItems(prev => prev.map(item => item.id === updated.id ? { ...item, ...updated } : item));
@@ -195,11 +212,12 @@ export function WatchlistStrategyTab({ accountId }: WatchlistStrategyTabProps) {
     return v > 0 ? 'var(--color-rise)' : v < 0 ? 'var(--color-fall)' : 'var(--text-secondary)';
   };
 
-  const getSizingLabel = (config: Record<string, unknown>) => {
-    const strategy = config?.strategy as string | undefined;
-    if (!strategy) return '—';
-    const found = POSITION_SIZING_OPTIONS.find(o => o.value === strategy);
-    return found ? found.label : strategy;
+  const getSignalStrategyLabel = (item: ApiWatchlistItem) => {
+    if (item.signal_strategy?.name) return item.signal_strategy.name;
+    const strategyId = item.signal_config?.strategy_id;
+    if (typeof strategyId !== 'string') return '未绑定';
+    const found = timingStrategies.find(s => s.strategy_id === strategyId);
+    return found?.name ?? strategyId;
   };
 
   const wlColumns = [
@@ -226,8 +244,8 @@ export function WatchlistStrategyTab({ accountId }: WatchlistStrategyTabProps) {
       render: (v: string | null) => <span style={{ fontFamily: 'var(--font-mono)' }}>{v ? `${v}%` : '—'}</span>,
     },
     {
-      title: '策略', dataIndex: 'sizing_config', width: 70,
-      render: (v: Record<string, unknown>) => <span style={{ fontSize: 11 }}>{getSizingLabel(v)}</span>,
+      title: '信号策略', dataIndex: 'signal_config', width: 120,
+      render: (_: Record<string, unknown>, row: ApiWatchlistItem) => <span style={{ fontSize: 11 }}>{getSignalStrategyLabel(row)}</span>,
     },
     {
       title: '', width: 70,
@@ -358,8 +376,11 @@ export function WatchlistStrategyTab({ accountId }: WatchlistStrategyTabProps) {
           <Form.Item name="target_weight" label="目标权重(%)">
             <InputNumber min={0} max={100} precision={2} style={{ width: '100%' }} placeholder="例如 10" />
           </Form.Item>
-          <Form.Item name="sizing_strategy" label="交易/配仓策略" rules={[{ required: true, message: '请选择策略' }]}>
-            <Select options={POSITION_SIZING_OPTIONS} />
+          <Form.Item name="strategy_id" label="时序交易信号策略" rules={[{ required: true, message: '请选择时序交易信号策略' }]}>
+            <Select
+              placeholder="选择用于监控该标的并产生交易信号的策略"
+              options={timingStrategies.map(strategy => ({ value: strategy.strategy_id, label: strategy.name }))}
+            />
           </Form.Item>
           <Form.Item name="note" label="备注">
             <Input.TextArea rows={2} maxLength={256} />
