@@ -358,7 +358,16 @@ async def update_watchlist_item(item_id: int, req: WatchlistItemUpdate) -> dict:
     item = await _get_watchlist_item_or_404(item_id)
     watchlist = await Watchlist.get_or_none(id=item.watchlist_id)
     account_id = watchlist.account_id if watchlist else None
-    payload = {k: v for k, v in req.model_dump().items() if v is not None}
+    payload = req.model_dump(exclude_unset=True)
+    if payload.get("symbol") is None:
+        payload.pop("symbol", None)
+    if "symbol" in payload and payload["symbol"] != item.symbol:
+        existing = await WatchlistItem.get_or_none(
+            watchlist_id=item.watchlist_id,
+            symbol=payload["symbol"],
+        )
+        if existing is not None:
+            raise BusinessException(message=f"自选股已存在: {payload['symbol']}")
     if payload:
         await item.update(payload)
         await _sync_watchlist_quote_symbols(account_id)

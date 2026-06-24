@@ -1,6 +1,6 @@
-import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
-import { Card, Table, Tag, Button, Space, message } from 'antd';
-import { Star, Search, Plus, Trash2, Cpu, Settings, X } from 'lucide-react';
+﻿import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import { Card, Table, Tag, Button, Space, message, Modal, Form, Input, InputNumber, Select } from 'antd';
+import { Star, Search, Plus, Trash2, Cpu, Settings, X, Edit2 } from 'lucide-react';
 import { INSTANCE_STATUS_COLOR, INSTANCE_STATUS_LABEL, RUN_MODE_LABEL, POSITION_SIZING_OPTIONS } from '../utils/trading';
 import { PositionSizingConfigDrawer } from './PositionSizingConfigDrawer';
 import {
@@ -8,6 +8,7 @@ import {
   fetchWatchlist,
   addWatchlistItem,
   deleteWatchlistItem,
+  updateWatchlistItem,
   startInstance,
   pauseInstance,
   stopInstance,
@@ -29,6 +30,8 @@ export function WatchlistStrategyTab({ accountId }: WatchlistStrategyTabProps) {
   const [searchResults, setSearchResults] = useState<StockSearchItem[]>([]);
   const [searching, setSearching] = useState(false);
   const [sizingDrawerOpen, setSizingDrawerOpen] = useState(false);
+  const [editingItem, setEditingItem] = useState<ApiWatchlistItem | null>(null);
+  const [editForm] = Form.useForm();
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 加载当前账户下的策略实例
@@ -138,6 +141,34 @@ export function WatchlistStrategyTab({ accountId }: WatchlistStrategyTabProps) {
     }
   }, []);
 
+  const handleEditWatchlistItem = useCallback((item: ApiWatchlistItem) => {
+    setEditingItem(item);
+    editForm.setFieldsValue({
+      symbol: item.symbol,
+      target_weight: item.target_weight === null ? null : Number(item.target_weight),
+      sizing_strategy: item.sizing_config?.strategy ?? 'equal_weight',
+      note: item.note ?? '',
+    });
+  }, [editForm]);
+
+  const handleSaveWatchlistItem = useCallback(async () => {
+    if (!editingItem) return;
+    const values = await editForm.validateFields();
+    const sizingConfig = {
+      ...(editingItem.sizing_config ?? {}),
+      strategy: values.sizing_strategy,
+    };
+    const updated = await updateWatchlistItem(editingItem.id, {
+      symbol: values.symbol.trim().toUpperCase(),
+      target_weight: values.target_weight ?? null,
+      sizing_config: sizingConfig,
+      note: values.note ?? '',
+    });
+    setWatchlistItems(prev => prev.map(item => item.id === updated.id ? { ...item, ...updated } : item));
+    setEditingItem(null);
+    message.success('自选股配置已保存');
+  }, [editForm, editingItem]);
+
   const handleInstanceAction = useCallback(async (instanceId: number, action: 'start' | 'pause' | 'stop') => {
     try {
       const fn = action === 'start' ? startInstance : action === 'pause' ? pauseInstance : stopInstance;
@@ -199,11 +230,16 @@ export function WatchlistStrategyTab({ accountId }: WatchlistStrategyTabProps) {
       render: (v: Record<string, unknown>) => <span style={{ fontSize: 11 }}>{getSizingLabel(v)}</span>,
     },
     {
-      title: '', width: 40,
+      title: '', width: 70,
       render: (_: unknown, row: ApiWatchlistItem) => (
-        <Button size="small" type="link" style={{ padding: 0, color: 'var(--color-fall)' }} onClick={() => handleRemoveFromWatchlist(row.id, row.symbol)}>
-          <Trash2 size={11} style={{ verticalAlign: 'middle' }} />
-        </Button>
+        <Space size={4}>
+          <Button size="small" type="link" style={{ padding: 0 }} onClick={() => handleEditWatchlistItem(row)}>
+            <Edit2 size={11} style={{ verticalAlign: 'middle' }} />
+          </Button>
+          <Button size="small" type="link" style={{ padding: 0, color: 'var(--color-fall)' }} onClick={() => handleRemoveFromWatchlist(row.id, row.symbol)}>
+            <Trash2 size={11} style={{ verticalAlign: 'middle' }} />
+          </Button>
+        </Space>
       ),
     },
   ];
@@ -308,6 +344,28 @@ export function WatchlistStrategyTab({ accountId }: WatchlistStrategyTabProps) {
         </div>
       </div>
       <PositionSizingConfigDrawer open={sizingDrawerOpen} onClose={() => setSizingDrawerOpen(false)} watchlist={drawerWatchlist} />
+      <Modal
+        title="编辑自选股配置"
+        open={editingItem !== null}
+        onCancel={() => setEditingItem(null)}
+        onOk={handleSaveWatchlistItem}
+        destroyOnHidden
+      >
+        <Form form={editForm} layout="vertical">
+          <Form.Item name="symbol" label="标的代码" rules={[{ required: true, message: '请输入标的代码' }]}>
+            <Input placeholder="例如 600522.SH" />
+          </Form.Item>
+          <Form.Item name="target_weight" label="目标权重(%)">
+            <InputNumber min={0} max={100} precision={2} style={{ width: '100%' }} placeholder="例如 10" />
+          </Form.Item>
+          <Form.Item name="sizing_strategy" label="交易/配仓策略" rules={[{ required: true, message: '请选择策略' }]}>
+            <Select options={POSITION_SIZING_OPTIONS} />
+          </Form.Item>
+          <Form.Item name="note" label="备注">
+            <Input.TextArea rows={2} maxLength={256} />
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   );
 }

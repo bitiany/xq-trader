@@ -123,9 +123,10 @@ export interface WatchlistItemCreateRequest {
 }
 
 export interface WatchlistItemUpdateRequest {
+  symbol?: string
   sizing_config?: Record<string, unknown>
   signal_config?: Record<string, unknown>
-  target_weight?: string | null
+  target_weight?: string | number | null
   is_enabled?: number
   note?: string
 }

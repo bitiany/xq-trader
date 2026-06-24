@@ -57,6 +57,7 @@ class WatchlistItemCreate(BaseModel):
 
 
 class WatchlistItemUpdate(BaseModel):
+    symbol: str | None = Field(default=None, max_length=16, description="证券代码")
     sizing_config: dict[str, Any] | None = None
     signal_config: dict[str, Any] | None = None
     target_weight: Decimal | None = None
