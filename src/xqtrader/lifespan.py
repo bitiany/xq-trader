@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -11,10 +12,40 @@ from xqtrader.ws.scheduler import WsTopicScheduler
 logger = get_logger("LIFESPAN")
 
 
+async def _auto_connect_qmt() -> None:
+    """应用启动时自动连接 QMT 交易服务并订阅账号。"""
+    from framework.config.settings import settings
+
+    qmt = settings.QMT
+    if not qmt.QMT_USERDATA_PATH:
+        logger.info("QMT_USERDATA_PATH 未配置，跳过自动连接")
+        return
+
+    from xqtrader.broker.services.qmt_callback_handler import QmtCallbackHandler
+    from xqtrader.broker.services.qmt_connection import QmtConnection
+    from xqtrader.broker.services.qmt_trader import QmtTrader
+
+    connection = QmtConnection.get_instance()
+    result = await connection.connect_async()
+    if result == 0:
+        main_loop = asyncio.get_running_loop()
+        callback_handler = QmtCallbackHandler(main_loop=main_loop)
+        connection.trader.register_callback(callback_handler)
+        trader = QmtTrader()
+        await trader.subscribe_account()
+        logger.info("QMT 交易服务自动连接成功")
+    else:
+        logger.warning("QMT 交易服务自动连接失败: result=%s", result)
+
+
 @asynccontextmanager
 async def app_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("应用启动中...")
     WsTopicScheduler.start()
+
+    # 自动连接 QMT 交易服务
+    await _auto_connect_qmt()
+
     yield
     WsTopicScheduler.stop()
     # 关闭 Agent Redis 连接

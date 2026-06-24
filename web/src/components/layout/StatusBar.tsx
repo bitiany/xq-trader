@@ -44,12 +44,23 @@ export function StatusBar() {
     topics: [TOPIC_TRADING_PNL],
     onSnapshot: (_channel, data) => {
       if (data && typeof data === 'object') {
-        setPnlData(data as TradingPnlData)
+        // items 数组格式：取第一个 QMT 账户或第一个账户
+        if (data.items && Array.isArray(data.items) && data.items.length > 0) {
+          const qmtItem = data.items.find(i => i.broker_type === 'qmt') ?? data.items[0]
+          setPnlData(qmtItem as TradingPnlData)
+        } else {
+          setPnlData(data as TradingPnlData)
+        }
       }
     },
     onUpdate: (_channel, data) => {
       if (data && typeof data === 'object') {
-        setPnlData(data as TradingPnlData)
+        if (data.items && Array.isArray(data.items) && data.items.length > 0) {
+          const qmtItem = data.items.find(i => i.broker_type === 'qmt') ?? data.items[0]
+          setPnlData(qmtItem as TradingPnlData)
+        } else {
+          setPnlData(data as TradingPnlData)
+        }
       }
     },
   })

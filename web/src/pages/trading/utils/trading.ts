@@ -41,9 +41,9 @@ export const SIGNAL_SIDE_CLASS: Record<SignalSide, string> = {
   close: 'signal-card--close',
 };
 
-export const INSTANCE_STATUS_COLOR: Record<InstanceStatus, string> = { running: 'success', stopped: 'default', error: 'error' };
-export const INSTANCE_STATUS_LABEL: Record<InstanceStatus, string> = { running: '运行中', stopped: '已停止', error: '异常' };
-export const RUN_MODE_LABEL: Record<RunMode, string> = { paper: '模拟盘', live: '实盘' };
+export const INSTANCE_STATUS_COLOR: Record<InstanceStatus, string> = { draft: 'default', running: 'success', paused: 'warning', stopped: 'default' };
+export const INSTANCE_STATUS_LABEL: Record<InstanceStatus, string> = { draft: '草稿', running: '运行中', paused: '已暂停', stopped: '已停止' };
+export const RUN_MODE_LABEL: Record<RunMode, string> = { live_manual: '实盘(手动)', live_auto: '实盘(自动)', paper: '模拟盘', backtest: '回测' };
 
 export const POSITION_SIZING_OPTIONS: { value: PositionSizingStrategy; label: string }[] = [
   { value: 'equal_weight', label: '等权' },

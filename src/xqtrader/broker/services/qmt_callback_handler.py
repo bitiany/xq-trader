@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import threading
 from typing import Any
 
 from xtquant.xttrader import XtQuantTraderCallback
@@ -11,24 +13,60 @@ from xqtrader.broker.services.qmt_connection import QmtConnection
 
 logger = logging.getLogger(__name__)
 
+# 自动重连间隔（秒）
+_RECONNECT_INTERVAL = 5
+
 
 class QmtCallbackHandler(XtQuantTraderCallback):
     """QMT 交易回调处理器。
 
     继承 XtQuantTraderCallback，重写各回调方法，
     记录关键交易事件日志，便于追踪委托/成交/持仓变动。
+    断连时自动触发重连。
     """
 
-    def __init__(self) -> None:
+    def __init__(self, main_loop: asyncio.AbstractEventLoop | None = None) -> None:
         super().__init__()
         self._connection = QmtConnection.get_instance()
+        self._reconnect_timer: threading.Timer | None = None
+        self._main_loop = main_loop
 
     def on_connected(self) -> None:
         logger.info("QMT 交易回调: 连接成功")
 
     def on_disconnected(self) -> None:
-        logger.warning("QMT 交易回调: 连接断开")
+        logger.warning("QMT 交易回调: 连接断开，将在 %ds 后自动重连", _RECONNECT_INTERVAL)
         self._connection.mark_disconnected()
+        self._schedule_reconnect()
+
+    def _schedule_reconnect(self) -> None:
+        """调度自动重连（在后台线程中延迟执行）。"""
+        if self._reconnect_timer is not None:
+            self._reconnect_timer.cancel()
+
+        def _do_reconnect() -> None:
+            try:
+                result = self._connection.reconnect()
+                if result == 0:
+                    self._connection.trader.register_callback(self)
+                    logger.info("QMT 交易自动重连成功")
+                    # 重连后重新订阅账号：调度回主事件循环
+                    from xqtrader.broker.services.qmt_trader import QmtTrader
+                    trader = QmtTrader()
+                    if self._main_loop is not None and not self._main_loop.is_closed():
+                        asyncio.run_coroutine_threadsafe(trader.subscribe_account(), self._main_loop)
+                    else:
+                        logger.warning("QMT 重连后主事件循环不可用，跳过订阅账号")
+                else:
+                    logger.warning("QMT 交易自动重连失败: result=%s，将在 %ds 后重试", result, _RECONNECT_INTERVAL)
+                    self._schedule_reconnect()
+            except Exception as e:
+                logger.error("QMT 交易自动重连异常: %s", e, exc_info=True)
+                self._schedule_reconnect()
+
+        self._reconnect_timer = threading.Timer(_RECONNECT_INTERVAL, _do_reconnect)
+        self._reconnect_timer.daemon = True
+        self._reconnect_timer.start()
 
     def on_account_status(self, status: Any) -> None:
         logger.info(

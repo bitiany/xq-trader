@@ -1,13 +1,17 @@
 import { useState } from 'react';
 import { Drawer, Select, InputNumber, Button } from 'antd';
 import { Settings, Cpu, Star } from 'lucide-react';
-import type { WatchlistItem } from '../types';
 import { POSITION_SIZING_OPTIONS } from '../utils/trading';
+
+interface DrawerWatchlistItem {
+  symbol: string
+  name: string
+}
 
 interface PositionSizingConfigDrawerProps {
   open: boolean;
   onClose: () => void;
-  watchlist: WatchlistItem[];
+  watchlist: DrawerWatchlistItem[];
 }
 
 interface SizingParams {
@@ -35,7 +39,7 @@ export function PositionSizingConfigDrawer({ open, onClose, watchlist }: Positio
   return (
     <Drawer
       title={<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Settings size={14} />自选股仓位配置</div>}
-      placement="right" width={360} open={open} onClose={onClose}
+      placement="right" size="default" open={open} onClose={onClose}
     >
       <div className="strategy-config__form" data-component="Position Sizing Config">
         <div className="strategy-config__section">
@@ -93,9 +97,6 @@ export function PositionSizingConfigDrawer({ open, onClose, watchlist }: Positio
               <div key={s.symbol} className="strategy-config__stock-item">
                 <span className="strategy-config__stock-symbol">{s.symbol}</span>
                 <span className="strategy-config__stock-name">{s.name}</span>
-                <span className="strategy-config__stock-change" style={{ color: s.changePct > 0 ? 'var(--color-rise)' : 'var(--color-fall)' }}>
-                  {s.changePct > 0 ? '+' : ''}{s.changePct.toFixed(2)}%
-                </span>
               </div>
             ))}
           </div>

@@ -6,17 +6,15 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from framework.dal.base import AuditedBase
 
-from ..enums import Direction
-
 
 class Watchlist(AuditedBase):
-    """自选池 — 每个策略实例一个自选池"""
+    """自选池 — 每个账户一个自选池"""
 
     __bind_key__ = "trading"
     __tablename__ = "td_watchlist"
 
-    instance_id: Mapped[int] = mapped_column(
-        Integer, nullable=False, unique=True, comment="策略实例ID(1:1)",
+    account_id: Mapped[int] = mapped_column(
+        Integer, nullable=False, unique=True, comment="账户ID(1:1)",
     )
     name: Mapped[str] = mapped_column(
         String(64), nullable=False, default="默认自选池", comment="池名称",
@@ -38,10 +36,6 @@ class WatchlistItem(AuditedBase):
         Integer, nullable=False, index=True, comment="自选池ID",
     )
     symbol: Mapped[str] = mapped_column(String(16), nullable=False, comment="证券代码")
-    direction: Mapped[str] = mapped_column(
-        String(8), nullable=False, default=Direction.LONG,
-        comment="方向: long/short/neutral",
-    )
     sizing_config: Mapped[dict | None] = mapped_column(
         JSONB, nullable=True, default={}, comment="个股配仓配置(覆盖实例默认)",
     )

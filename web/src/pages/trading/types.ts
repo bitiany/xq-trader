@@ -52,8 +52,8 @@ export interface RiskStatus {
   deviationAlerts: DeviationAlert[];
 }
 
-export type InstanceStatus = 'running' | 'stopped' | 'error';
-export type RunMode = 'paper' | 'live';
+export type InstanceStatus = 'draft' | 'running' | 'paused' | 'stopped';
+export type RunMode = 'live_manual' | 'live_auto' | 'paper' | 'backtest';
 
 export interface StrategyInstance {
   id: string;

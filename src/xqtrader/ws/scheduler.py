@@ -16,7 +16,7 @@ from framework.ws.redis_listener import redis_listener
 from .spi import SpiRegistry
 
 # 导入SPI实现以触发注册
-from .spi.impl import BrokerStatusSpi, PnlSpi  # noqa: F401
+from .spi.impl import BrokerStatusSpi, PnlSpi, WatchlistQuotesSpi  # noqa: F401
 
 logger = get_logger("ws.scheduler")
 

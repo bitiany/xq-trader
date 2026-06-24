@@ -281,7 +281,18 @@ async def cancel_order_async(
 @router.get("/asset", summary="查询资金资产", operation_id="get_broker_asset")
 async def query_asset() -> dict:
     """查询当前账户资金资产。"""
-    return await _trader.query_asset()
+    try:
+        return await _trader.query_asset()
+    except BusinessException as exc:
+        return {
+            "connected": False,
+            "cash": 0.0,
+            "frozen_cash": 0.0,
+            "market_value": 0.0,
+            "total_asset": 0.0,
+            "fetch_balance": 0.0,
+            "reason": str(exc),
+        }
 
 
 @router.get("/orders", summary="查询当日委托", operation_id="list_broker_orders")

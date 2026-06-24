@@ -2,6 +2,7 @@
 
 from datetime import date, datetime
 from decimal import Decimal
+from uuid import UUID
 
 from sqlalchemy import Boolean, Date, DateTime, Float, Integer, Numeric, String
 from sqlalchemy.dialects.postgresql import JSONB
@@ -94,6 +95,12 @@ class Order(AuditedBase):
     __bind_key__ = "trading"
     __tablename__ = "td_order"
 
+    account_id: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, index=True, comment="账户ID",
+    )
+    platform_order_id: Mapped[UUID | None] = mapped_column(
+        unique=True, nullable=True, default=None, comment="平台内部订单ID",
+    )
     instance_id: Mapped[int] = mapped_column(
         Integer, nullable=False, index=True, comment="策略实例ID",
     )
@@ -178,6 +185,9 @@ class Trade(Base):
     )
     order_id: Mapped[int] = mapped_column(
         Integer, nullable=False, index=True, comment="订单ID",
+    )
+    account_id: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, index=True, comment="账户ID",
     )
     symbol: Mapped[str] = mapped_column(String(16), nullable=False, comment="证券代码")
     side: Mapped[str] = mapped_column(

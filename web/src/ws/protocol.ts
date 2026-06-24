@@ -1,6 +1,7 @@
 // ── Topic 常量（与后端 WsTopic 对齐） ──
 export const TOPIC_BROKER_STATUS = 'ws.broker.status'
 export const TOPIC_TRADING_PNL = 'ws.trading.pnl'
+export const TOPIC_MARKET_WATCHLIST_QUOTES = 'ws.market.watchlist_quotes'
 
 // ── WS 数据类型 ──
 export interface BrokerStatusData {
@@ -9,15 +10,42 @@ export interface BrokerStatusData {
   timestamp: number
 }
 
-export interface TradingPnlData {
+export interface TradingPnlItem {
+  account_id?: number
+  broker_type?: string
   cash: number
   frozen_cash: number
   market_value: number
   total_asset: number
   today_pnl: number
   today_pnl_pct: number
+}
+
+export interface TradingPnlData {
+  items?: TradingPnlItem[]
+  account_id?: number
+  cash?: number
+  frozen_cash?: number
+  market_value?: number
+  total_asset?: number
+  today_pnl?: number
+  today_pnl_pct?: number
   reason?: string
   timestamp: number
+}
+
+export interface WatchlistQuoteItem {
+  symbol: string
+  last_price: number | null
+  change_pct: number | null
+  account_id?: number
+  timestamp: number
+}
+
+export interface WatchlistQuotesData {
+  items: WatchlistQuoteItem[]
+  timestamp: number
+  reason?: string
 }
 
 // ── WS 连接 ──

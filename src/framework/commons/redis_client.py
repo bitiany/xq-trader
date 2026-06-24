@@ -74,6 +74,9 @@ class _RedisClient:
     def smembers(self, name: str) -> set:
         return self.client.smembers(name)
 
+    def scan(self, cursor: int = 0, match: str | None = None, count: int = 10) -> tuple[int, list[str]]:
+        return self.client.scan(cursor=cursor, match=match, count=count)  # type: ignore[return-value]
+
 
 # 全局单例
 redis_client = _RedisClient()

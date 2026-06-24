@@ -6,7 +6,7 @@ import asyncio
 import logging
 import threading
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 import pandas as pd
 from xtquant import xtdata
@@ -274,6 +274,14 @@ class QmtDataCollector:
         """
         logger.info("获取全推Tick: codes=%s", code_list)
         return await asyncio.to_thread(self._with_lock, xtdata.get_full_tick, code_list)
+
+    @classmethod
+    def sync_get_full_tick(cls, code_list: list[str]) -> dict[str, Any]:
+        """同步获取全推 Tick 数据，供 WebSocket SPI 在线程池中调用。"""
+        if not code_list:
+            return {}
+        logger.info("同步获取全推Tick: codes=%s", code_list)
+        return cast(dict[str, Any], cls._with_lock(xtdata.get_full_tick, code_list))
 
     # ── 财务数据 ──────────────────────────────────────────
 
