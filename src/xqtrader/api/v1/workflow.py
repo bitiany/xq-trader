@@ -115,34 +115,43 @@ async def _execute_workflow(run_id: str, engine: FlowEngine, start_time: float, 
 
 # ==================== API 接口 ====================
 
-@router.post("/run")
-async def workflow_run(request: WorkflowRunRequest) -> dict:
-    """启动工作流执行。"""
-    config = _load_flow_config(request.flow_id)
+async def execute_workflow(flow_id: str, inputs: dict[str, Any], workspace_id: str = "") -> dict:
+    """启动工作流执行并返回持久化执行记录。"""
+    config = _load_flow_config(flow_id)
     engine = FlowEngine(config)
 
     thread_id = str(uuid.uuid4())
     start_time = time.time()
 
     run = await run_manager.create(
-        flow_id=request.flow_id,
+        flow_id=flow_id,
         thread_id=thread_id,
-        inputs=request.inputs,
-        workspace_id=request.workspace_id,
+        inputs=inputs,
+        workspace_id=workspace_id,
         total_steps=engine.length(),
     )
 
     logger.info(
         "workflow_run | flow_id: %s | run_id: %s | thread_id: %s",
-        request.flow_id, run.run_id, thread_id,
+        flow_id, run.run_id, thread_id,
     )
 
     return await _execute_workflow(
         run.run_id,
         engine,
         start_time,
-        inputs=request.inputs,
+        inputs=inputs,
         config={"execute_id": run.run_id, "thread_id": thread_id},
+    )
+
+
+@router.post("/run")
+async def workflow_run(request: WorkflowRunRequest) -> dict:
+    """启动工作流执行。"""
+    return await execute_workflow(
+        flow_id=request.flow_id,
+        inputs=request.inputs,
+        workspace_id=request.workspace_id,
     )
 
 

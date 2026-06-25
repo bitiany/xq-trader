@@ -196,7 +196,7 @@ export function StockDetailPage() {
                 {
                   key: 'news',
                   label: t('stock.tabs.news'),
-                  children: <StockNewsPanel data={null} />,
+                  children: <StockNewsPanel data={undefined} />,
                 },
                 {
                   key: 'fundFlow',
@@ -206,7 +206,7 @@ export function StockDetailPage() {
                 {
                   key: 'announcements',
                   label: t('stock.tabs.announcements'),
-                  children: <StockAnnouncementsPanel data={null} />,
+                  children: <StockAnnouncementsPanel data={undefined} />,
                 },
                 {
                   key: 'financials',

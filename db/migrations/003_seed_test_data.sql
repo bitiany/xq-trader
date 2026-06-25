@@ -63,6 +63,17 @@ VALUES
   '["mon_5d"]'::jsonb,
   true,
   'active'
+),
+(
+  'ts_donchian_turtle',
+  '海龟唐奇通道突破',
+  '20日唐奇通道突破买入，10日唐奇通道跌破退出，适用于趋势股实盘信号验证。',
+  'timing',
+  'plugin',
+  '{"plugin_class": "xqtrader.domain.trading.backtest.plugins.donchian_turtle.DonchianTurtlePlugin", "default_params": {}}'::jsonb,
+  '["close", "donchian_high_20", "donchian_low_10", "atr_14"]'::jsonb,
+  true,
+  'active'
 )
 ON CONFLICT (rule_id) DO UPDATE SET
   name = EXCLUDED.name,
@@ -99,7 +110,6 @@ WHERE strategy_id IN (
   'ts_boll_mean_reversion',
   'ts_rsi_reversion',
   'ts_dual_ma_trend',
-  'ts_donchian_turtle',
   'ts_kdj_reversal',
   'ts_multi_signal_timing'
 );
@@ -246,6 +256,24 @@ VALUES
       "buy_threshold": 0.5,
       "sell_threshold": 0.5
     }
+  }'::jsonb,
+  'active'
+),
+(
+  'ts_donchian_turtle',
+  '海龟唐奇通道趋势策略',
+  '经典海龟交易系统趋势突破策略：20日唐奇通道突破入场，10日唐奇通道跌破退出，并使用ATR评估突破强度。',
+  'timing',
+  '{
+    "groups": [
+      {
+        "group_id": "turtle_group",
+        "name": "海龟唐奇通道组",
+        "rules": [{"rule_id": "ts_donchian_turtle", "weight": 1.0}],
+        "fusion": {"method": "or", "buy_threshold": 0.5, "sell_threshold": 0.5}
+      }
+    ],
+    "group_fusion": {"method": "or"}
   }'::jsonb,
   'active'
 )

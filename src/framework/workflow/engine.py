@@ -177,8 +177,9 @@ class FlowEngine:
                 state = self._build_initial_state({})
 
             execute_id = (config or {}).get("execute_id", state.get("execute_id", ""))
-            state.setdefault("execute_id", execute_id)
-            state.setdefault("workspace_id", (config or {}).get("workspace_id", ""))
+            workspace_id = (config or {}).get("workspace_id", state.get("workspace_id", ""))
+            state["execute_id"] = execute_id
+            state["workspace_id"] = workspace_id
             state.setdefault("parallel_outputs", {})
             state.setdefault("interrupt_info", {})
 

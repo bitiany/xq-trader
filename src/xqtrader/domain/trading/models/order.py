@@ -79,8 +79,7 @@ class PreOrder(AuditedBase):
         DateTime(timezone=True), nullable=True, comment="过期时间",
     )
     idempotency_key: Mapped[str | None] = mapped_column(
-        String(128), unique=True, nullable=True,
-        comment="幂等键 instance_id:signal_date:symbol:side",
+        String(128), unique=True, nullable=True, comment="幂等键(instance_id:signal_date:symbol)",
     )
     node_id: Mapped[str | None] = mapped_column(
         String(64), nullable=True, comment="工作流节点ID",

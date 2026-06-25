@@ -24,14 +24,14 @@ export interface TradingPnlItem {
 export interface TradingPnlData {
   items?: TradingPnlItem[]
   account_id?: number
-  cash?: number
-  frozen_cash?: number
-  market_value?: number
-  total_asset?: number
+  cash: number
+  frozen_cash: number
+  market_value: number
+  total_asset: number
   today_pnl?: number
   today_pnl_pct?: number
   reason?: string
-  timestamp: number
+  timestamp?: number
 }
 
 export interface WatchlistQuoteItem {
@@ -86,5 +86,5 @@ export interface WsServerMessage<T = unknown> {
 export interface WsClientMessage {
   method: 'SUBSCRIBE' | 'UNSUBSCRIBE' | 'PING' | 'LIST_SUBSCRIPTIONS'
   params?: string[]
-  id?: number
+  id?: number | string
 }

@@ -294,7 +294,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
     try {
       const sessionId = await ensureSession()
-      const result = await agentChatApi.submitMessage(sessionId, trimmed, undefined, effectiveContext)
+      const result = await agentChatApi.submitMessage(sessionId, trimmed, undefined, effectiveContext ?? undefined)
       closeStream = subscribeAgentRun(result.run_id, {
         onEvent: handleStreamEvent,
         onError: () => {

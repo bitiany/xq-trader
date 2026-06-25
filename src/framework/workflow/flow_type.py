@@ -27,7 +27,7 @@ logger = get_logger(__name__)
 _resolver = PlaceholderResolver()
 
 # flow JSON 中的 {var} 语法转换为 ${var} 语法的正则
-_BRACE_TO_DOLLAR = re.compile(r'(?<!\$)\{(\w+)\}')
+_BRACE_TO_DOLLAR = re.compile(r'(?<!\$)\{([\w.]+)\}')
 
 
 class ConditionType(str, Enum):
@@ -109,8 +109,12 @@ class BaseNode(ABC):
 
     @staticmethod
     def _build_context(state: dict[str, Any]) -> dict[str, Any]:
-        """构建变量解析上下文：context + variables 合并。"""
-        return {**state.get("context", {}), **state.get("variables", {})}
+        """构建变量解析上下文：context + state 标量 + variables 合并。"""
+        state_context = {
+            "execute_id": state.get("execute_id", ""),
+            "workspace_id": state.get("workspace_id", ""),
+        }
+        return {**state.get("context", {}), **state_context, **state.get("variables", {})}
 
     @staticmethod
     def _normalize_template(template: str) -> str:

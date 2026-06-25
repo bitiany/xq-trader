@@ -249,7 +249,7 @@ class FlowCompiler:
             props = node_config.get("props", {})
             tool_name = props.get("name", "")
 
-            if node_type == "tool":
+            if node_type in {"tool", "map"}:
                 tool_class_path = props.get("class", "")
                 if tool_class_path is None:
                     raise WorkflowConfigError(f"Node type {node_type} has no tool class")

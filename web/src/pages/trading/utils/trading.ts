@@ -12,20 +12,24 @@ export const formatPct = (v: number): string => {
 };
 
 export const STATUS_COLOR: Record<OrderStatus, string> = {
-  filled: 'success',
-  partial_filled: 'warning',
+  created: 'default',
+  risk_checked: 'processing',
   submitted: 'processing',
-  rejected: 'error',
+  partial_filled: 'warning',
+  filled: 'success',
   cancelled: 'default',
+  rejected: 'error',
   expired: 'default',
 };
 
 export const STATUS_LABEL: Record<OrderStatus, string> = {
-  filled: '已成交',
-  partial_filled: '部成',
+  created: '已创建',
+  risk_checked: '风控通过',
   submitted: '已报',
-  rejected: '废单',
+  partial_filled: '部成',
+  filled: '已成交',
   cancelled: '已撤',
+  rejected: '废单',
   expired: '过期',
 };
 
@@ -46,13 +50,9 @@ export const INSTANCE_STATUS_LABEL: Record<InstanceStatus, string> = { draft: '�
 export const RUN_MODE_LABEL: Record<RunMode, string> = { live_manual: '实盘(手动)', live_auto: '实盘(自动)', paper: '模拟盘', backtest: '回测' };
 
 export const POSITION_SIZING_OPTIONS: { value: PositionSizingStrategy; label: string }[] = [
+  { value: 'watchlist_target_weight', label: '自选目标权重' },
+  { value: 'confidence_weighted', label: '置信度加权' },
   { value: 'equal_weight', label: '等权' },
-  { value: 'signal_weighted', label: '信号加权' },
-  { value: 'atr_risk', label: 'ATR 风险定仓' },
-  { value: 'inverse_volatility', label: '逆波动率' },
-  { value: 'kelly', label: '凯利半仓' },
-  { value: 'vol_target', label: '波动率目标' },
-  { value: 'fixed_pct', label: '固定比例' },
 ];
 
 export const WF_STATUS_COLOR: Record<string, string> = {

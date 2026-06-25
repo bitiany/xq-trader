@@ -1,24 +1,50 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { Table, Tag, Switch, Badge, Button, message } from 'antd';
 import { Shield, Flame, CheckCircle, ChevronDown, ChevronRight, History } from 'lucide-react';
-import { fetchRiskRules, updateRiskRule, type RiskRule } from '@/api/trading';
+import {
+  enableAccountKillSwitch,
+  fetchRiskEvents,
+  fetchRiskRules,
+  resolveRiskEvent,
+  updateRiskRule,
+  type RiskEvent,
+  type RiskRule,
+} from '@/api/trading';
 import { RISK_LEVEL_TAG } from '../utils/trading';
 
 interface RiskSidePanelProps {
+  accountId: number | null;
   onOpenHistory: () => void;
 }
 
-export function RiskSidePanel({ onOpenHistory }: RiskSidePanelProps) {
+function eventDetailText(event: RiskEvent) {
+  const symbol = typeof event.detail?.symbol === 'string' ? event.detail.symbol : '';
+  const reasons = Array.isArray(event.detail?.reasons) ? event.detail.reasons.join(',') : event.event_type;
+  return symbol ? `${symbol} ${reasons}` : reasons;
+}
+
+export function RiskSidePanel({ accountId, onOpenHistory }: RiskSidePanelProps) {
   const [showRules, setShowRules] = useState(false);
   const [rules, setRules] = useState<RiskRule[]>([]);
+  const [events, setEvents] = useState<RiskEvent[]>([]);
 
   useEffect(() => {
     let cancelled = false;
-    fetchRiskRules().then((res) => {
-      if (!cancelled) setRules(res.items ?? []);
-    }).catch(() => {});
+    Promise.resolve().then(() => {
+      const eventRequest = accountId === null
+        ? Promise.resolve({ items: [], total: 0, page: 1, page_size: 20 })
+        : fetchRiskEvents({ account_id: accountId, resolved: false, page_size: 20 });
+
+      return Promise.all([fetchRiskRules(), eventRequest]).then(([ruleRes, eventRes]) => {
+        if (cancelled) return;
+        setRules(ruleRes.items ?? []);
+        setEvents(eventRes.items ?? []);
+      }).catch(() => {
+        if (!cancelled) message.error('风控数据加载失败');
+      });
+    });
     return () => { cancelled = true; };
-  }, []);
+  }, [accountId]);
 
   const handleToggleRule = useCallback(async (ruleId: number, enabled: boolean) => {
     try {
@@ -29,8 +55,31 @@ export function RiskSidePanel({ onOpenHistory }: RiskSidePanelProps) {
     }
   }, []);
 
+  const handleResolveEvent = useCallback(async (eventId: number) => {
+    try {
+      const updated = await resolveRiskEvent(eventId, { resolved_by: 'user' });
+      setEvents(prev => prev.filter(item => item.id !== updated.id));
+      message.success('告警已处理');
+    } catch {
+      message.error('处理失败');
+    }
+  }, []);
+
+  const handleKillSwitch = useCallback(async () => {
+    if (accountId === null) return;
+    try {
+      await enableAccountKillSwitch(accountId);
+      const eventRes = await fetchRiskEvents({ account_id: accountId, resolved: false, page_size: 20 });
+      setEvents(eventRes.items ?? []);
+      message.success('已启用紧急只减仓');
+    } catch {
+      message.error('紧急全平失败');
+    }
+  }, [accountId]);
+
   const enabledCount = rules.filter(r => r.is_enabled).length;
-  const activeAlerts = rules.filter(r => r.level === 'critical' && r.is_enabled).length;
+  const activeAlerts = events.length;
+  const circuitBreakerTriggered = events.some(e => e.event_type === 'circuit_breaker' || e.level === 'fatal');
 
   const ruleColumns = useMemo(() => [
     { title: '规则', dataIndex: 'rule_code', width: 105, render: (v: string) => <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10 }}>{v}</span> },
@@ -45,6 +94,12 @@ export function RiskSidePanel({ onOpenHistory }: RiskSidePanelProps) {
       return <Switch checked={v} size="small" onChange={(checked) => rule && handleToggleRule(rule.id, checked)} />;
     }},
   ], [rules, handleToggleRule]);
+
+  const eventColumns = useMemo(() => [
+    { title: '级别', dataIndex: 'level', width: 58, render: (v: 'info' | 'warn' | 'critical' | 'fatal') => <Tag color={RISK_LEVEL_TAG[v]} style={{ fontSize: 9, padding: '0 4px', margin: 0 }}>{v}</Tag> },
+    { title: '告警', width: 150, render: (_: unknown, r: RiskEvent) => <span style={{ fontSize: 10 }}>{eventDetailText(r)}</span> },
+    { title: '', width: 45, render: (_: unknown, r: RiskEvent) => <Button size="small" type="link" onClick={() => handleResolveEvent(r.id)} style={{ fontSize: 10, padding: 0 }}>处理</Button> },
+  ], [handleResolveEvent]);
 
   const statusColor = activeAlerts > 0 ? 'var(--color-warning)' : 'var(--color-fall)';
   const statusText = activeAlerts > 0 ? '风控告警' : '风控正常';
@@ -61,7 +116,12 @@ export function RiskSidePanel({ onOpenHistory }: RiskSidePanelProps) {
             <Badge count={activeAlerts} size="small" style={{ backgroundColor: 'var(--color-warning)' }} />
           )}
         </div>
-        <button className="risk-side-panel__kill-btn" data-component="Kill Switch Button">
+        <button
+          className="risk-side-panel__kill-btn"
+          data-component="Kill Switch Button"
+          disabled={accountId === null}
+          onClick={handleKillSwitch}
+        >
           <Flame size={13} />
           <span>紧急全平</span>
         </button>
@@ -71,8 +131,10 @@ export function RiskSidePanel({ onOpenHistory }: RiskSidePanelProps) {
         <div className="risk-side-panel__section-title">熔断器</div>
         <div className="risk-side-panel__circuit">
           <div className="risk-side-panel__circuit-top">
-            <CheckCircle size={18} style={{ color: 'var(--color-fall)' }} />
-            <span style={{ color: 'var(--color-fall)', fontWeight: 700, fontSize: 13 }}>未触发</span>
+            <CheckCircle size={18} style={{ color: circuitBreakerTriggered ? 'var(--color-warning)' : 'var(--color-fall)' }} />
+            <span style={{ color: circuitBreakerTriggered ? 'var(--color-warning)' : 'var(--color-fall)', fontWeight: 700, fontSize: 13 }}>
+              {circuitBreakerTriggered ? '已触发' : '未触发'}
+            </span>
           </div>
         </div>
       </div>
@@ -90,6 +152,13 @@ export function RiskSidePanel({ onOpenHistory }: RiskSidePanelProps) {
           </div>
         </div>
       </div>
+
+      {events.length > 0 && (
+        <div className="risk-side-panel__section">
+          <div className="risk-side-panel__section-title">风控告警 ({events.length})</div>
+          <Table dataSource={events} columns={eventColumns} rowKey="id" size="small" pagination={false} showHeader={false} />
+        </div>
+      )}
 
       <div className="risk-side-panel__section">
         <Button

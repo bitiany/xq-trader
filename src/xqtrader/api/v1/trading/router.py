@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Query
 from sqlalchemy import desc
@@ -11,24 +11,39 @@ from framework.commons.exceptions import BusinessException, NotFoundException
 from framework.commons.logger import get_logger
 from framework.commons.pagination import build_paginated_response, paginate
 from framework.commons.redis_client import redis_client
+from framework.dal.transaction import transactional
 from xqtrader.api.v1.trading.schemas import (
     AccountCreate,
     ApprovalRequest,
     BatchApprovalRequest,
     InstanceCreate,
     InstanceUpdate,
+    ManualDecisionWorkflowRequest,
     PreOrderUpdate,
+    RiskEventResolveRequest,
     RiskRuleUpdate,
     WatchlistItemCreate,
     WatchlistItemUpdate,
 )
+from xqtrader.api.v1.workflow import execute_workflow
+from xqtrader.domain.factor.models.factor_value import FacFactorValue
 from xqtrader.domain.market.models.candlestick import CandlestickDaily
 from xqtrader.domain.security.models import Security
-from xqtrader.domain.trading.enums import ApprovalStatus, PreOrderStatus
+from xqtrader.domain.trading.enums import (
+    AccountType,
+    ApprovalStatus,
+    InstanceStatus,
+    PreOrderStatus,
+    RiskEventType,
+    RiskLevel,
+    RunMode,
+)
 from xqtrader.domain.trading.models.account import AccountSnapshot, TradingAccount
+from xqtrader.domain.trading.models.decision import PositionSizingResult, SignalFusionResult, TradingSignal
 from xqtrader.domain.trading.models.instance import StrategyInstance
-from xqtrader.domain.trading.models.order import PreOrder
-from xqtrader.domain.trading.models.risk import RiskRule
+from xqtrader.domain.trading.models.order import Order, PreOrder
+from xqtrader.domain.trading.models.position import PositionSnapshot
+from xqtrader.domain.trading.models.risk import RiskEvent, RiskRule
 from xqtrader.domain.trading.models.strategy import Strategy
 from xqtrader.domain.trading.models.watchlist import Watchlist, WatchlistItem
 from xqtrader.ws.spi.impl.pnl import sync_account_assets_to_redis
@@ -38,6 +53,10 @@ logger = get_logger(__name__)
 
 router = APIRouter(prefix="/trading", tags=["交易"])
 
+VALID_ACCOUNT_TYPES = {AccountType.LIVE, AccountType.PAPER}
+VALID_RUN_MODES = {RunMode.LIVE_MANUAL, RunMode.LIVE_AUTO, RunMode.PAPER, RunMode.BACKTEST}
+LIVE_RUN_MODES = {RunMode.LIVE_MANUAL, RunMode.LIVE_AUTO}
+
 
 # ==================== 辅助函数 ====================
 
@@ -46,6 +65,8 @@ async def _get_account_or_404(account_id: int) -> TradingAccount:
     account = await TradingAccount.get_or_none(id=account_id)
     if account is None:
         raise NotFoundException(message=f"账户不存在: {account_id}")
+    if account.account_type not in VALID_ACCOUNT_TYPES:
+        raise BusinessException(message=f"账户类型不合法: {account.account_type}")
     return account
 
 
@@ -106,6 +127,90 @@ async def _sync_watchlist_quote_symbols(account_id: int | None = None) -> None:
             redis_client.sadd(key, *symbols)
 
 
+def _decision_run_mode_for_account(account: TradingAccount) -> str:
+    if account.account_type == AccountType.PAPER:
+        return RunMode.PAPER
+    return RunMode.LIVE_MANUAL
+
+
+def _instance_run_mode_matches_account(account: TradingAccount, run_mode: str) -> bool:
+    if account.account_type == AccountType.PAPER:
+        return run_mode == RunMode.PAPER
+    return run_mode in LIVE_RUN_MODES
+
+
+async def _build_watchlist_strategy_bindings(account_id: int) -> list[dict]:
+    watchlist = await Watchlist.get_or_none(account_id=account_id)
+    if watchlist is None:
+        return []
+    items = await WatchlistItem.filter(watchlist_id=watchlist.id, is_enabled=1, limit=None)
+    strategy_ids = sorted({
+        str(item.signal_config["strategy_id"])
+        for item in items
+        if isinstance(item.signal_config, dict) and item.signal_config.get("strategy_id")
+    })
+    strategies = await Strategy.filter(strategy_id__in=strategy_ids, limit=None) if strategy_ids else []
+    strategy_map = {strategy.strategy_id: strategy for strategy in strategies}
+    return [
+        {
+            "strategy_id": strategy_id,
+            "name": strategy_map[strategy_id].name if strategy_id in strategy_map else strategy_id,
+            "symbols": sorted({
+                item.symbol
+                for item in items
+                if isinstance(item.signal_config, dict)
+                and item.signal_config.get("strategy_id") == strategy_id
+            }),
+        }
+        for strategy_id in strategy_ids
+    ]
+
+
+async def _create_account_decision_instance(
+    account_id: int,
+    watchlist_strategies: list[dict] | None = None,
+) -> StrategyInstance:
+    account = await _get_account_or_404(account_id)
+    now = datetime.now(timezone.utc)
+    return await StrategyInstance.create(
+        account_id=account_id,
+        strategy_id=None,
+        instance_name="自选标的盘后信号工作流",
+        run_mode=_decision_run_mode_for_account(account),
+        status=InstanceStatus.RUNNING,
+        config={"pool_id": "all", "watchlist_strategies": watchlist_strategies or []},
+        position_sizing={"mode": "watchlist_target_weight", "max_total_weight": 1.0},
+        risk_overrides={"blacklist": [], "max_total_weight": 1.0, "max_single_weight": 0.2},
+        universe_pool="watchlist",
+        started_at=now,
+        description="账户自选标的盘后信号工作流实例",
+    )
+
+
+async def _sync_account_decision_instances(account_id: int | None) -> None:
+    if account_id is None:
+        return
+    account = await _get_account_or_404(account_id)
+    bindings = await _build_watchlist_strategy_bindings(account_id)
+    instances = await StrategyInstance.filter(
+        account_id=account_id,
+        universe_pool="watchlist",
+        limit=None,
+    )
+    valid_instances = [
+        instance
+        for instance in instances
+        if _instance_run_mode_matches_account(account, instance.run_mode)
+    ]
+    if not valid_instances and bindings:
+        await _create_account_decision_instance(account_id, bindings)
+        return
+    for instance in valid_instances:
+        config = dict(instance.config or {})
+        config["watchlist_strategies"] = bindings
+        await instance.update({"config": config})
+
+
 # ==================== 账户 API ====================
 
 
@@ -134,6 +239,8 @@ async def list_accounts(
 
 @router.post("/accounts", summary="创建账户", operation_id="create_account")
 async def create_account(req: AccountCreate) -> dict:
+    if req.account_type not in VALID_ACCOUNT_TYPES:
+        raise BusinessException(message=f"账户类型不合法: {req.account_type}")
     existing = await TradingAccount.get_or_none(account_code=req.account_code)
     if existing is not None:
         raise BusinessException(message=f"账户编码已存在: {req.account_code}")
@@ -145,6 +252,79 @@ async def create_account(req: AccountCreate) -> dict:
 @router.get("/accounts/{account_id}", summary="账户详情", operation_id="get_account")
 async def get_account(account_id: int) -> dict:
     account = await _get_account_or_404(account_id)
+    return account.to_dict()
+
+
+@router.post(
+    "/accounts/{account_id}/kill-switch",
+    summary="账户紧急全平预订单",
+    operation_id="enable_account_kill_switch",
+)
+@transactional(bind_key="trading")
+async def enable_account_kill_switch(account_id: int) -> dict:
+    account = await _get_account_or_404(account_id)
+    await account.update({"reduce_only": True})
+    latest = await PositionSnapshot.filter(
+        account_id=account_id,
+        limit=1,
+        order_by=desc(PositionSnapshot.snapshot_date),
+    )
+    if latest:
+        positions = await PositionSnapshot.filter(
+            account_id=account_id,
+            snapshot_date=latest[0].snapshot_date,
+            limit=None,
+        )
+        instances = await StrategyInstance.filter(account_id=account_id, limit=1)
+        if not instances:
+            raise BusinessException(message=f"账户没有策略实例，无法生成紧急全平预订单: {account_id}")
+        instance_id = instances[0].id
+        today = datetime.now(timezone.utc).date()
+        pre_orders = [
+            PreOrder(
+                instance_id=instance_id,
+                signal_date=today,
+                execution_date=today,
+                symbol=position.symbol,
+                side="close",
+                target_weight=0,
+                current_weight=float(position.weight or 0),
+                target_qty=int(position.qty),
+                order_type="market",
+                sizing_strategy="kill_switch",
+                status=PreOrderStatus.PENDING_APPROVAL,
+                risk_check_passed=True,
+                risk_check_detail={"reason": "manual_kill_switch"},
+                approval_status=ApprovalStatus.PENDING,
+                idempotency_key=f"kill_switch:{account_id}:{today.isoformat()}:{position.symbol}",
+                node_id="kill_switch",
+            )
+            for position in positions
+            if position.qty > 0
+        ]
+        if pre_orders:
+            await PreOrder.bulk_create_or_update(
+                pre_orders,
+                on_conflict=["idempotency_key"],
+                update_fields=[
+                    "target_weight",
+                    "current_weight",
+                    "target_qty",
+                    "status",
+                    "risk_check_passed",
+                    "risk_check_detail",
+                    "approval_status",
+                    "updated_at",
+                ],
+            )
+    await RiskEvent.create(
+        account_id=account_id,
+        event_type=RiskEventType.KILL_SWITCH,
+        level=RiskLevel.FATAL,
+        detail={"reason": "manual_kill_switch"},
+        action_taken="reduce_only_and_close_pre_orders_generated",
+        resolved=False,
+    )
     return account.to_dict()
 
 
@@ -169,7 +349,6 @@ async def get_account_snapshot(account_id: int) -> dict:
         data["frozen_cash"] = frozen_cash
         data["total_assets"] = available_cash + frozen_cash + market_value
         return data
-    # 无快照时使用 td_account 基础数据
     return {
         "account_id": account_id,
         "snapshot_date": None,
@@ -185,6 +364,29 @@ async def get_account_snapshot(account_id: int) -> dict:
     }
 
 
+@router.get(
+    "/accounts/{account_id}/snapshots",
+    summary="资金快照历史",
+    operation_id="list_account_snapshots",
+)
+async def list_account_snapshots(
+    account_id: int,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=31, ge=1, le=366),
+) -> dict:
+    await _get_account_or_404(account_id)
+    skip, limit = paginate(page, page_size)
+    filters = {"account_id": account_id}
+    items = await AccountSnapshot.filter(
+        skip=skip,
+        limit=limit,
+        order_by=desc(AccountSnapshot.snapshot_date),
+        **filters,
+    )
+    total = await AccountSnapshot.count(**filters)
+    return build_paginated_response([item.to_dict() for item in items], total, page, page_size)
+
+
 # ==================== 策略实例 API ====================
 
 
@@ -198,28 +400,55 @@ async def list_instances(
 ) -> dict:
     skip, limit = paginate(page, page_size)
     filters: dict = {}
+    scoped_account: TradingAccount | None = None
     if account_id is not None:
+        scoped_account = await _get_account_or_404(account_id)
         filters["account_id"] = account_id
     if status:
         filters["status"] = status
     if run_mode:
+        if run_mode not in VALID_RUN_MODES:
+            raise BusinessException(message=f"实例运行模式不合法: {run_mode}")
+        if scoped_account is not None and not _instance_run_mode_matches_account(scoped_account, run_mode):
+            raise BusinessException(message="运行模式与账户类型不匹配")
         filters["run_mode"] = run_mode
 
+    if scoped_account is not None and run_mode is None:
+        if scoped_account.account_type == AccountType.PAPER:
+            filters["run_mode"] = RunMode.PAPER
+        else:
+            filters["run_mode__in"] = list(LIVE_RUN_MODES)
     items = await StrategyInstance.filter(
         skip=skip, limit=limit,
         order_by=desc(StrategyInstance.updated_at),
         **filters,
     )
     total = await StrategyInstance.count(**filters)
+    result_items = []
+    for item in items:
+        data = item.to_dict()
+        config = dict(data.get("config") or {})
+        if item.universe_pool == "watchlist" and account_id is not None:
+            config["watchlist_strategies"] = await _build_watchlist_strategy_bindings(account_id)
+        data["config"] = config
+        result_items.append(data)
     return build_paginated_response(
-        [i.to_dict() for i in items], total, page, page_size,
+        result_items, total, page, page_size,
     )
 
 
 @router.post("/instances", summary="创建实例", operation_id="create_instance")
 async def create_instance(req: InstanceCreate) -> dict:
-    await _get_account_or_404(req.account_id)
-    instance = await StrategyInstance.create(**req.model_dump())
+    account = await _get_account_or_404(req.account_id)
+    payload = req.model_dump()
+    run_mode = str(payload["run_mode"])
+    if run_mode not in VALID_RUN_MODES:
+        raise BusinessException(message=f"实例运行模式不合法: {run_mode}")
+    if account.account_type == AccountType.PAPER and run_mode != RunMode.PAPER:
+        raise BusinessException(message="模拟账户只能创建模拟盘策略实例")
+    if account.account_type == AccountType.LIVE and run_mode not in LIVE_RUN_MODES:
+        raise BusinessException(message="实盘账户只能创建实盘策略实例")
+    instance = await StrategyInstance.create(**payload)
     return instance.to_dict()
 
 
@@ -275,6 +504,90 @@ async def stop_instance(instance_id: int) -> dict:
     now = datetime.now(timezone.utc)
     await instance.update({"status": "stopped", "stopped_at": now})
     return instance.to_dict()
+
+
+async def _resolve_decision_signal_date(signal_date: str | None) -> date:
+    if signal_date:
+        return date.fromisoformat(signal_date)
+    latest = await FacFactorValue.filter(limit=1, order_by=desc(FacFactorValue.trade_date))
+    if not latest:
+        raise BusinessException(message="没有可用于运行信号工作流的因子数据")
+    return latest[0].trade_date
+
+
+async def _get_account_decision_instance(account_id: int) -> StrategyInstance:
+    account = await _get_account_or_404(account_id)
+    instances = await StrategyInstance.filter(
+        account_id=account_id,
+        status=InstanceStatus.RUNNING,
+        universe_pool="watchlist",
+        limit=None,
+        order_by=desc(StrategyInstance.updated_at),
+    )
+    valid_instances = [
+        instance
+        for instance in instances
+        if _instance_run_mode_matches_account(account, instance.run_mode)
+    ]
+    if valid_instances:
+        return valid_instances[0]
+
+    watchlist = await Watchlist.get_or_none(account_id=account_id)
+    if watchlist is None:
+        raise BusinessException(message=f"账户没有自选池，无法手动运行信号工作流: {account_id}")
+    configured_count = await WatchlistItem.count(watchlist_id=watchlist.id, is_enabled=1)
+    if configured_count <= 0:
+        raise BusinessException(message=f"账户自选池为空，无法手动运行信号工作流: {account_id}")
+
+    watchlist_strategies = await _build_watchlist_strategy_bindings(account_id)
+    return await _create_account_decision_instance(account_id, watchlist_strategies)
+
+
+@router.post(
+    "/accounts/{account_id}/decision-workflow/run",
+    summary="手动运行账户盘后信号工作流",
+    operation_id="run_account_decision_workflow",
+)
+async def run_account_decision_workflow(account_id: int, req: ManualDecisionWorkflowRequest) -> dict:
+    await _get_account_or_404(account_id)
+    instance = await _get_account_decision_instance(account_id)
+    signal_date = await _resolve_decision_signal_date(req.signal_date)
+    execution_date = date.fromisoformat(req.execution_date) if req.execution_date else signal_date + timedelta(days=1)
+    workflow_result = await execute_workflow(
+        flow_id="watchlist_after_close_decision_flow",
+        workspace_id=f"trading_account:{account_id}",
+        inputs={
+            "instance_id": instance.id,
+            "signal_date": signal_date.isoformat(),
+            "execution_date": execution_date.isoformat(),
+            "lookback_days": req.lookback_days,
+            "min_confidence": req.min_confidence,
+            "max_selected": req.max_selected,
+        },
+    )
+    run_id = str(workflow_result["run_id"])
+    signals_count = await TradingSignal.count(instance_id=instance.id, workflow_run_id=run_id)
+    fusion_count = await SignalFusionResult.count(instance_id=instance.id, workflow_run_id=run_id)
+    sizing_count = await PositionSizingResult.count(instance_id=instance.id, workflow_run_id=run_id)
+    pre_orders = await PreOrder.filter(
+        instance_id=instance.id,
+        workflow_run_id=run_id,
+        approval_status=ApprovalStatus.PENDING,
+        limit=None,
+        order_by=desc(PreOrder.created_at),
+    )
+    return {
+        "run": workflow_result,
+        "account_id": account_id,
+        "instance_id": instance.id,
+        "signal_date": signal_date.isoformat(),
+        "execution_date": execution_date.isoformat(),
+        "signals_count": signals_count,
+        "fusion_count": fusion_count,
+        "sizing_count": sizing_count,
+        "pre_orders_count": len(pre_orders),
+        "pre_orders": [item.to_dict() for item in pre_orders],
+    }
 
 
 # ==================== 自选池 API ====================
@@ -359,6 +672,7 @@ async def add_watchlist_item(account_id: int, req: WatchlistItemCreate) -> dict:
         watchlist_id=watchlist.id, **req.model_dump(),
     )
     await _sync_watchlist_quote_symbols(account_id)
+    await _sync_account_decision_instances(account_id)
     return item.to_dict()
 
 
@@ -373,6 +687,7 @@ async def delete_watchlist_item(item_id: int) -> dict:
     account_id = watchlist.account_id if watchlist else None
     await item.delete()
     await _sync_watchlist_quote_symbols(account_id)
+    await _sync_account_decision_instances(account_id)
     return {"deleted": True}
 
 
@@ -400,6 +715,7 @@ async def update_watchlist_item(item_id: int, req: WatchlistItemUpdate) -> dict:
     if payload:
         await item.update(payload)
         await _sync_watchlist_quote_symbols(account_id)
+        await _sync_account_decision_instances(account_id)
     return item.to_dict()
 
 
@@ -439,6 +755,122 @@ async def update_risk_rule(rule_id: int, req: RiskRuleUpdate) -> dict:
     return rule.to_dict()
 
 
+@router.get(
+    "/risk-events",
+    summary="风控事件列表",
+    operation_id="list_risk_events",
+)
+async def list_risk_events(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=200),
+    account_id: int | None = Query(default=None, description="账户ID过滤"),
+    instance_id: int | None = Query(default=None, description="策略实例ID过滤"),
+    resolved: bool | None = Query(default=None, description="是否已处理"),
+    level: str | None = Query(default=None, description="级别过滤"),
+    event_type: str | None = Query(default=None, description="事件类型过滤"),
+) -> dict:
+    skip, limit = paginate(page, page_size)
+    filters: dict = {}
+    if account_id is not None:
+        filters["account_id"] = account_id
+    if instance_id is not None:
+        filters["instance_id"] = instance_id
+    if resolved is not None:
+        filters["resolved"] = resolved
+    if level:
+        filters["level"] = level
+    if event_type:
+        filters["event_type"] = event_type
+
+    items = await RiskEvent.filter(
+        skip=skip,
+        limit=limit,
+        order_by=desc(RiskEvent.created_at),
+        **filters,
+    )
+    total = await RiskEvent.count(**filters)
+    return build_paginated_response(
+        [event.to_dict() for event in items], total, page, page_size,
+    )
+
+
+@router.put(
+    "/risk-events/{event_id}/resolve",
+    summary="处理风控事件",
+    operation_id="resolve_risk_event",
+)
+async def resolve_risk_event(event_id: int, req: RiskEventResolveRequest) -> dict:
+    event = await RiskEvent.get(event_id)
+    if event is None:
+        raise NotFoundException(message=f"风控事件不存在: {event_id}")
+    if not event.resolved:
+        await event.update({
+            "resolved": True,
+            "resolved_by": req.resolved_by,
+            "resolved_at": datetime.now(timezone.utc),
+        })
+    return event.to_dict()
+
+
+# ==================== 持仓 & 订单 API ====================
+
+
+@router.get(
+    "/positions",
+    summary="持仓快照列表",
+    operation_id="list_positions",
+)
+async def list_positions(
+    account_id: int = Query(description="账户ID"),
+    snapshot_date: date | None = Query(default=None, description="快照日期 YYYY-MM-DD"),
+) -> dict:
+    await _get_account_or_404(account_id)
+    target_date = snapshot_date
+    if target_date is None:
+        latest = await PositionSnapshot.filter(
+            account_id=account_id,
+            limit=1,
+            order_by=desc(PositionSnapshot.snapshot_date),
+        )
+        if not latest:
+            return {"items": []}
+        target_date = latest[0].snapshot_date
+
+    items = await PositionSnapshot.filter(
+        account_id=account_id,
+        snapshot_date=target_date,
+        limit=None,
+        order_by=desc(PositionSnapshot.market_value),
+    )
+    return {"items": [item.to_dict() for item in items]}
+
+
+@router.get(
+    "/orders",
+    summary="订单列表",
+    operation_id="list_orders",
+)
+async def list_orders(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=200),
+    account_id: int = Query(description="账户ID"),
+    status: str | None = Query(default=None, description="状态过滤"),
+) -> dict:
+    await _get_account_or_404(account_id)
+    skip, limit = paginate(page, page_size)
+    filters: dict = {"account_id": account_id}
+    if status:
+        filters["status"] = status
+    items = await Order.filter(
+        skip=skip,
+        limit=limit,
+        order_by=desc(Order.created_at),
+        **filters,
+    )
+    total = await Order.count(**filters)
+    return build_paginated_response([item.to_dict() for item in items], total, page, page_size)
+
+
 # ==================== 预订单 API ====================
 
 
@@ -450,6 +882,7 @@ async def update_risk_rule(rule_id: int, req: RiskRuleUpdate) -> dict:
 async def list_pre_orders(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=500),
+    account_id: int | None = Query(default=None, description="账户ID"),
     instance_id: int | None = Query(default=None, description="策略实例ID"),
     status: str | None = Query(default=None, description="状态过滤"),
     approval_status: str | None = Query(default=None, description="审批状态过滤"),
@@ -457,6 +890,17 @@ async def list_pre_orders(
 ) -> dict:
     skip, limit = paginate(page, page_size)
     filters: dict = {}
+    if account_id is not None:
+        account = await _get_account_or_404(account_id)
+        instances = await StrategyInstance.filter(account_id=account_id, limit=None)
+        compatible_instance_ids = [
+            instance.id
+            for instance in instances
+            if _instance_run_mode_matches_account(account, instance.run_mode)
+        ]
+        if not compatible_instance_ids:
+            return build_paginated_response([], 0, page, page_size)
+        filters["instance_id__in"] = compatible_instance_ids
     if instance_id is not None:
         filters["instance_id"] = instance_id
     if status:
@@ -472,8 +916,64 @@ async def list_pre_orders(
         **filters,
     )
     total = await PreOrder.count(**filters)
+
+    # 批量查询关联信号数据，附加 signal_detail
+    signal_by_run: dict[tuple, TradingSignal] = {}
+    signal_by_date: dict[tuple, TradingSignal] = {}
+    fusion_by_run: dict[tuple, SignalFusionResult] = {}
+    fusion_by_date: dict[tuple, SignalFusionResult] = {}
+    if items:
+        instance_ids = list({po.instance_id for po in items})
+        symbols = list({po.symbol for po in items})
+        signal_dates = list({po.signal_date for po in items})
+        signal_filters: dict = {
+            "instance_id__in": instance_ids,
+            "symbol__in": symbols,
+            "signal_date__in": signal_dates,
+        }
+        signals = await TradingSignal.filter(**signal_filters)
+        fusion_results = await SignalFusionResult.filter(**signal_filters)
+        # 构建 (instance_id, symbol, signal_date) 三元组查找表
+        # 同一标的同一信号日可能有多条不同 run_id 的信号，取最新一条
+        for s in signals:
+            date_key = (s.instance_id, s.symbol, s.signal_date)
+            run_key = (s.instance_id, s.workflow_run_id, s.symbol, s.signal_date)
+            signal_by_run[run_key] = s
+            # 同 date_key 只保留最新（后遍历覆盖前）
+            signal_by_date[date_key] = s
+        for f in fusion_results:
+            date_key = (f.instance_id, f.symbol, f.signal_date)
+            run_key = (f.instance_id, f.workflow_run_id, f.symbol, f.signal_date)
+            fusion_by_run[run_key] = f
+            fusion_by_date[date_key] = f
+
+    result_items = []
+    for po in items:
+        d = po.to_dict()
+        run_key = (po.instance_id, po.workflow_run_id, po.symbol, po.signal_date)
+        date_key = (po.instance_id, po.symbol, po.signal_date)
+        signal = signal_by_run.get(run_key) or signal_by_date.get(date_key)
+        fusion = fusion_by_run.get(run_key) or fusion_by_date.get(date_key)
+        raw = signal.raw_values if signal and isinstance(signal.raw_values, dict) else {}
+        d["signal_detail"] = {
+            "direction": signal.direction if signal else None,
+            "confidence": raw.get("confidence"),
+            "strength": signal.strength if signal else None,
+            "score": raw.get("score"),
+            "reason": raw.get("reason"),
+            "strategy_id": raw.get("strategy_id"),
+            "fused_score": fusion.fused_score if fusion else None,
+            "factor_values": raw.get("factor_values"),
+            "market_data": raw.get("market_data"),
+            "entry_price_detail": (
+                d.get("risk_check_detail", {}).get("entry_price_detail")
+                if isinstance(d.get("risk_check_detail"), dict) else None
+            ),
+        }
+        result_items.append(d)
+
     return build_paginated_response(
-        [po.to_dict() for po in items], total, page, page_size,
+        result_items, total, page, page_size,
     )
 
 
@@ -500,7 +1000,7 @@ async def update_pre_order(pre_order_id: int, req: PreOrderUpdate) -> dict:
         raise NotFoundException(message=f"预订单不存在: {pre_order_id}")
     if po.approval_status != ApprovalStatus.PENDING:
         raise BusinessException(message="仅待审批状态可修改")
-    payload = {k: v for k, v in req.model_dump().items() if v is not None}
+    payload = req.model_dump(exclude_unset=True)
     if payload:
         await po.update(payload)
     return po.to_dict()

@@ -668,7 +668,7 @@ export function StockKlineChart({
           ],
         }
         : option
-      if (dz && dz.length > 0 && dz[0].start != null) {
+      if (dz && dz.length > 0 && dz[0].start != null && dz[0].end != null) {
         zoomStateRef.current = { start: dz[0].start, end: dz[0].end }
       }
       chart.setOption(nextOption, true)
@@ -688,7 +688,7 @@ export function StockKlineChart({
     const handleDataZoom = () => {
       const opt = chart.getOption()
       const dz = opt?.dataZoom as Array<{ start?: number; end?: number }> | undefined
-      if (dz && dz.length > 0 && dz[0].start != null) {
+      if (dz && dz.length > 0 && dz[0].start != null && dz[0].end != null) {
         zoomStateRef.current = { start: dz[0].start, end: dz[0].end }
       }
     }

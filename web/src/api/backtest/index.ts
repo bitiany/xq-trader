@@ -50,6 +50,7 @@ export interface BacktestSymbolMetrics {
   annualized_return?: number
   avg_daily_return?: number
   max_drawdown?: number
+  max_dd_length?: number
   sharpe_ratio?: number
   total_trades?: number
   num_trades?: number

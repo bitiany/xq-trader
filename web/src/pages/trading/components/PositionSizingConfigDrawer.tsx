@@ -1,7 +1,9 @@
-import { useState } from 'react';
-import { Drawer, Select, InputNumber, Button } from 'antd';
+import { useState, useEffect } from 'react';
+import { Drawer, Select, InputNumber, Button, message } from 'antd';
 import { Settings, Cpu, Star } from 'lucide-react';
 import { POSITION_SIZING_OPTIONS } from '../utils/trading';
+import { updateInstance } from '@/api/trading';
+import type { PositionSizingStrategy } from '../types';
 
 interface DrawerWatchlistItem {
   symbol: string
@@ -11,30 +13,75 @@ interface DrawerWatchlistItem {
 interface PositionSizingConfigDrawerProps {
   open: boolean;
   onClose: () => void;
+  onSaved: () => Promise<void>;
   watchlist: DrawerWatchlistItem[];
+  instanceId: number | null;
+  positionSizing: Record<string, unknown>;
 }
 
 interface SizingParams {
-  atrPeriod: number;
-  riskBudgetPct: number;
+  maxTotalWeight: number;
   maxSingleWeight: number;
-  fallbackStrategy: string;
-  kellyFraction: number;
-  kellyWindow: number;
-  signalMinWeight: number;
-  volTarget: number;
-  volWindow: number;
-  fixedPct: number;
 }
 
-export function PositionSizingConfigDrawer({ open, onClose, watchlist }: PositionSizingConfigDrawerProps) {
-  const [selectedSizing, setSelectedSizing] = useState<string>('atr_risk');
-  const [sizingParams, setSizingParams] = useState<SizingParams>({
-    atrPeriod: 14, riskBudgetPct: 2, maxSingleWeight: 10, fallbackStrategy: 'equal_weight',
-    kellyFraction: 0.25, kellyWindow: 60, signalMinWeight: 2, volTarget: 15, volWindow: 20, fixedPct: 10,
-  });
+const DEFAULT_MODE: PositionSizingStrategy = 'watchlist_target_weight';
+const DEFAULT_PARAMS: SizingParams = { maxTotalWeight: 100, maxSingleWeight: 20 };
 
-  const update = (k: keyof SizingParams, v: number | string) => setSizingParams(p => ({ ...p, [k]: v }));
+function resolveSizingMode(value: unknown): PositionSizingStrategy {
+  return POSITION_SIZING_OPTIONS.some(option => option.value === value) ? value as PositionSizingStrategy : DEFAULT_MODE;
+}
+
+function percentFromFraction(value: unknown, fallback: number): number {
+  if (typeof value !== 'number') return fallback;
+  return value <= 1 ? value * 100 : value;
+}
+
+function extractParamsFromPositionSizing(ps: Record<string, unknown>): SizingParams {
+  return {
+    maxTotalWeight: percentFromFraction(ps.max_total_weight, DEFAULT_PARAMS.maxTotalWeight),
+    maxSingleWeight: percentFromFraction(ps.max_single_weight, DEFAULT_PARAMS.maxSingleWeight),
+  };
+}
+
+export function PositionSizingConfigDrawer({ open, onClose, onSaved, watchlist, instanceId, positionSizing }: PositionSizingConfigDrawerProps) {
+  const [selectedSizing, setSelectedSizing] = useState<PositionSizingStrategy>(
+    resolveSizingMode(positionSizing.mode),
+  );
+  const [sizingParams, setSizingParams] = useState<SizingParams>(
+    extractParamsFromPositionSizing(positionSizing),
+  );
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setSelectedSizing(resolveSizingMode(positionSizing.mode));
+    setSizingParams(extractParamsFromPositionSizing(positionSizing));
+  }, [positionSizing]);
+
+  const update = (k: keyof SizingParams, v: number | null) => setSizingParams(p => ({ ...p, [k]: v ?? 0 }));
+
+  const handleSave = async () => {
+    if (instanceId === null) {
+      message.warning('无可用策略实例');
+      return;
+    }
+    setSaving(true);
+    try {
+      await updateInstance(instanceId, {
+        position_sizing: {
+          mode: selectedSizing,
+          max_total_weight: sizingParams.maxTotalWeight / 100,
+          max_single_weight: sizingParams.maxSingleWeight / 100,
+        },
+      });
+      message.success('仓位配置已保存');
+      await onSaved();
+      onClose();
+    } catch {
+      message.error('保存失败');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <Drawer
@@ -47,46 +94,30 @@ export function PositionSizingConfigDrawer({ open, onClose, watchlist }: Positio
           <Select value={selectedSizing} onChange={setSelectedSizing} options={POSITION_SIZING_OPTIONS} style={{ width: '100%' }} size="small" />
         </div>
 
-        {selectedSizing === 'atr_risk' && (
-          <div className="strategy-config__params">
-            <div className="strategy-config__param"><span>ATR 周期</span><InputNumber value={sizingParams.atrPeriod} onChange={v => update('atrPeriod', v ?? 0)} size="small" min={1} max={100} style={{ width: 80 }} /></div>
-            <div className="strategy-config__param"><span>风险预算 (%)</span><InputNumber value={sizingParams.riskBudgetPct} onChange={v => update('riskBudgetPct', v ?? 0)} size="small" min={0.1} max={10} step={0.1} style={{ width: 80 }} /></div>
-            <div className="strategy-config__param"><span>单票上限 (%)</span><InputNumber value={sizingParams.maxSingleWeight} onChange={v => update('maxSingleWeight', v ?? 0)} size="small" min={1} max={50} style={{ width: 80 }} /></div>
-            <div className="strategy-config__param"><span>降级策略</span><Select value={sizingParams.fallbackStrategy} onChange={v => update('fallbackStrategy', v)} options={POSITION_SIZING_OPTIONS.filter(o => o.value !== selectedSizing)} size="small" style={{ width: '100%' }} /></div>
-            <div className="strategy-config__param-hint">主策略缺数据时使用，必填</div>
+        <div className="strategy-config__params">
+          <div className="strategy-config__param">
+            <span>组合总仓位上限 (%)</span>
+            <InputNumber value={sizingParams.maxTotalWeight} onChange={v => update('maxTotalWeight', v)} size="small" min={1} max={100} precision={2} style={{ width: 100 }} />
+          </div>
+          <div className="strategy-config__param">
+            <span>单票仓位上限 (%)</span>
+            <InputNumber value={sizingParams.maxSingleWeight} onChange={v => update('maxSingleWeight', v)} size="small" min={1} max={100} precision={2} style={{ width: 100 }} />
+          </div>
+        </div>
+
+        {selectedSizing === 'watchlist_target_weight' && (
+          <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+            使用自选股表格中的目标权重；若合计超过组合总仓位上限，会按比例缩放。
           </div>
         )}
-
-        {selectedSizing === 'kelly' && (
-          <div className="strategy-config__params">
-            <div className="strategy-config__param"><span>Kelly 分数</span><InputNumber value={sizingParams.kellyFraction} onChange={v => update('kellyFraction', v ?? 0)} size="small" min={0.01} max={1} step={0.05} style={{ width: 80 }} /></div>
-            <div className="strategy-config__param"><span>统计窗口</span><InputNumber value={sizingParams.kellyWindow} onChange={v => update('kellyWindow', v ?? 0)} size="small" min={10} max={500} style={{ width: 80 }} /></div>
+        {selectedSizing === 'confidence_weighted' && (
+          <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+            按入选信号置信度分配组合总仓位，并受单票仓位上限约束。
           </div>
         )}
-
-        {selectedSizing === 'signal_weighted' && (
-          <div className="strategy-config__params">
-            <div className="strategy-config__param"><span>最小权重阈值 (%)</span><InputNumber value={sizingParams.signalMinWeight} onChange={v => update('signalMinWeight', v ?? 0)} size="small" min={0.5} max={20} step={0.5} style={{ width: 80 }} /></div>
-          </div>
-        )}
-
-        {selectedSizing === 'vol_target' && (
-          <div className="strategy-config__params">
-            <div className="strategy-config__param"><span>目标波动率 (%)</span><InputNumber value={sizingParams.volTarget} onChange={v => update('volTarget', v ?? 0)} size="small" min={5} max={50} style={{ width: 80 }} /></div>
-            <div className="strategy-config__param"><span>估计窗口</span><InputNumber value={sizingParams.volWindow} onChange={v => update('volWindow', v ?? 0)} size="small" min={5} max={100} style={{ width: 80 }} /></div>
-          </div>
-        )}
-
-        {selectedSizing === 'inverse_volatility' && (
-          <div className="strategy-config__params">
-            <div className="strategy-config__param"><span>估计窗口</span><InputNumber value={20} size="small" min={5} max={100} style={{ width: 80 }} /></div>
-            <div className="strategy-config__param"><span>最小波动率</span><InputNumber value={0.01} size="small" min={0.001} max={1} step={0.001} style={{ width: 80 }} /></div>
-          </div>
-        )}
-
-        {selectedSizing === 'fixed_pct' && (
-          <div className="strategy-config__params">
-            <div className="strategy-config__param"><span>固定比例 (%)</span><InputNumber value={sizingParams.fixedPct} onChange={v => update('fixedPct', v ?? 0)} size="small" min={1} max={50} style={{ width: 80 }} /></div>
+        {selectedSizing === 'equal_weight' && (
+          <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+            对入选信号等权分配组合总仓位，并受单票仓位上限约束。
           </div>
         )}
 
@@ -103,7 +134,7 @@ export function PositionSizingConfigDrawer({ open, onClose, watchlist }: Positio
         </div>
         <div className="strategy-config__footer">
           <Button onClick={onClose}>取消</Button>
-          <Button type="primary" onClick={onClose}>保存配置</Button>
+          <Button type="primary" loading={saving} onClick={handleSave}>保存配置</Button>
         </div>
       </div>
     </Drawer>

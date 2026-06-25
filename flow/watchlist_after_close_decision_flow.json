@@ -1,0 +1,176 @@
+{
+  "id": "watchlist_after_close_decision_flow",
+  "description": "盘后自选股信号决策与预订单生成工作流",
+  "input_schema": {
+    "instance_id": "instance_id",
+    "signal_date": "signal_date",
+    "execution_date": "execution_date",
+    "lookback_days": "lookback_days",
+    "min_confidence": "min_confidence",
+    "max_selected": "max_selected"
+  },
+  "output_schema": {
+    "context": "load_trading_context",
+    "watchlist": "load_watchlist_targets",
+    "signals": "persist_trading_signals",
+    "fusion": "portfolio_signal_fusion",
+    "sizing": "position_sizing",
+    "risk": "risk_gateway",
+    "pre_orders": "generate_pre_orders"
+  },
+  "graph": {
+    "nodes": [
+      {
+        "id": "start",
+        "type": "start",
+        "name": "开始",
+        "props": {
+          "variables": [
+            {"variable": "instance_id"},
+            {"variable": "signal_date"},
+            {"variable": "execution_date"},
+            {"variable": "lookback_days"},
+            {"variable": "min_confidence"},
+            {"variable": "max_selected"}
+          ]
+        }
+      },
+      {
+        "id": "load_trading_context",
+        "type": "tool",
+        "name": "加载交易上下文",
+        "props": {
+          "name": "load_trading_context_tool",
+          "class": "xqtrader.domain.trading.workflow.tools.decision_tools.LoadTradingContextTool",
+          "variables": [
+            {"variable": "instance_id", "value": "{instance_id}", "type": "text"},
+            {"variable": "signal_date", "value": "{signal_date}", "type": "text"},
+            {"variable": "execution_date", "value": "{execution_date}", "type": "text"}
+          ]
+        }
+      },
+      {
+        "id": "load_watchlist_targets",
+        "type": "tool",
+        "name": "加载自选股标的",
+        "props": {
+          "name": "load_watchlist_targets_tool",
+          "class": "xqtrader.domain.trading.workflow.tools.decision_tools.LoadWatchlistTargetsTool",
+          "variables": [
+            {"variable": "context", "value": "{load_trading_context}", "type": "json"}
+          ]
+        }
+      },
+      {
+        "id": "map_symbol_signals",
+        "type": "map",
+        "name": "并行执行标的信号策略",
+        "props": {
+          "name": "symbol_signal_worker_tool",
+          "class": "xqtrader.domain.trading.workflow.tools.decision_tools.SymbolSignalWorkerTool",
+          "items": "{load_watchlist_targets.targets}",
+          "item_variable": "target",
+          "concurrency": 8,
+          "variables": [
+            {"variable": "context", "value": "{load_trading_context}", "type": "json"},
+            {"variable": "lookback_days", "value": "{lookback_days}", "type": "text"}
+          ]
+        }
+      },
+      {
+        "id": "persist_trading_signals",
+        "type": "tool",
+        "name": "持久化交易信号",
+        "props": {
+          "name": "persist_trading_signals_tool",
+          "class": "xqtrader.domain.trading.workflow.tools.decision_tools.PersistTradingSignalsTool",
+          "variables": [
+            {"variable": "context", "value": "{load_trading_context}", "type": "json"},
+            {"variable": "map_result", "value": "{map_symbol_signals}", "type": "json"},
+            {"variable": "node_id", "value": "persist_trading_signals", "type": "text"},
+            {"variable": "workflow_run_id", "value": "{execute_id}", "type": "text"}
+          ]
+        }
+      },
+      {
+        "id": "portfolio_signal_fusion",
+        "type": "tool",
+        "name": "组合信号融合",
+        "props": {
+          "name": "portfolio_signal_fusion_tool",
+          "class": "xqtrader.domain.trading.workflow.tools.decision_tools.PortfolioSignalFusionTool",
+          "variables": [
+            {"variable": "context", "value": "{load_trading_context}", "type": "json"},
+            {"variable": "signal_result", "value": "{persist_trading_signals}", "type": "json"},
+            {"variable": "node_id", "value": "portfolio_signal_fusion", "type": "text"},
+            {"variable": "min_confidence", "value": "{min_confidence}", "type": "text"},
+            {"variable": "max_selected", "value": "{max_selected}", "type": "text"},
+            {"variable": "workflow_run_id", "value": "{execute_id}", "type": "text"}
+          ]
+        }
+      },
+      {
+        "id": "position_sizing",
+        "type": "tool",
+        "name": "仓位管理",
+        "props": {
+          "name": "position_sizing_tool",
+          "class": "xqtrader.domain.trading.workflow.tools.decision_tools.PositionSizingTool",
+          "variables": [
+            {"variable": "context", "value": "{load_trading_context}", "type": "json"},
+            {"variable": "fusion_result", "value": "{portfolio_signal_fusion}", "type": "json"},
+            {"variable": "node_id", "value": "position_sizing", "type": "text"},
+            {"variable": "workflow_run_id", "value": "{execute_id}", "type": "text"}
+          ]
+        }
+      },
+      {
+        "id": "risk_gateway",
+        "type": "tool",
+        "name": "风控检查",
+        "props": {
+          "name": "risk_gateway_tool",
+          "class": "xqtrader.domain.trading.workflow.tools.decision_tools.RiskGatewayTool",
+          "variables": [
+            {"variable": "context", "value": "{load_trading_context}", "type": "json"},
+            {"variable": "sizing_result", "value": "{position_sizing}", "type": "json"}
+          ]
+        }
+      },
+      {
+        "id": "generate_pre_orders",
+        "type": "tool",
+        "name": "生成预订单",
+        "props": {
+          "name": "generate_pre_orders_tool",
+          "class": "xqtrader.domain.trading.workflow.tools.decision_tools.GeneratePreOrdersTool",
+          "variables": [
+            {"variable": "context", "value": "{load_trading_context}", "type": "json"},
+            {"variable": "risk_result", "value": "{risk_gateway}", "type": "json"},
+            {"variable": "node_id", "value": "generate_pre_orders", "type": "text"},
+            {"variable": "workflow_run_id", "value": "{execute_id}", "type": "text"}
+          ]
+        }
+      },
+      {
+        "id": "end",
+        "type": "end",
+        "name": "结束",
+        "props": {
+          "output": "{generate_pre_orders}"
+        }
+      }
+    ],
+    "edges": [
+      {"from": "start", "to": "load_trading_context"},
+      {"from": "load_trading_context", "to": "load_watchlist_targets"},
+      {"from": "load_watchlist_targets", "to": "map_symbol_signals"},
+      {"from": "map_symbol_signals", "to": "persist_trading_signals"},
+      {"from": "persist_trading_signals", "to": "portfolio_signal_fusion"},
+      {"from": "portfolio_signal_fusion", "to": "position_sizing"},
+      {"from": "position_sizing", "to": "risk_gateway"},
+      {"from": "risk_gateway", "to": "generate_pre_orders"},
+      {"from": "generate_pre_orders", "to": "end"}
+    ]
+  }
+}

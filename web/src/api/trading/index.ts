@@ -1,5 +1,6 @@
 import { request } from '@/api/client'
 import type { Strategy } from '@/api/strategy'
+import type { OrderStatus } from '@/pages/trading/types'
 
 // ==================== 账户 ====================
 
@@ -35,6 +36,48 @@ export interface AccountSnapshot {
   snapshot_time: string | null
 }
 
+export interface PositionSnapshot {
+  id: number
+  account_id: number
+  instance_id: number | null
+  symbol: string
+  snapshot_date: string
+  qty: number
+  available_qty: number
+  cost_price: string | number | null
+  market_price: string | number | null
+  market_value: string | number | null
+  weight: string | number | null
+  target_weight: string | number | null
+  weight_deviation: string | number | null
+  unrealized_pnl: string | number | null
+  daily_pnl: string | number | null
+  snapshot_time: string | null
+  extra: Record<string, unknown> | null
+}
+
+export interface TradingOrder {
+  id: number
+  account_id: number | null
+  instance_id: number
+  pre_order_id: number | null
+  symbol: string
+  side: 'buy' | 'sell'
+  order_type: 'limit' | 'market'
+  order_price: string | number | null
+  order_qty: number
+  filled_price: string | number | null
+  filled_qty: number
+  status: OrderStatus
+  broker_order_id: string | null
+  reject_reason: string | null
+  signal_date: string | null
+  execution_date: string | null
+  workflow_run_id: string | null
+  created_at: string
+  updated_at: string
+}
+
 export interface AccountCreateRequest {
   account_code: string
   account_name: string
@@ -54,7 +97,7 @@ export interface StrategyInstance {
   instance_name: string
   run_mode: 'live_manual' | 'live_auto' | 'paper' | 'backtest'
   status: 'draft' | 'running' | 'paused' | 'stopped'
-  config: Record<string, unknown>
+  config: Record<string, unknown> & { watchlist_strategies?: WatchlistStrategyBinding[] }
   position_sizing: Record<string, unknown>
   risk_overrides: Record<string, unknown>
   universe_pool: string
@@ -63,6 +106,12 @@ export interface StrategyInstance {
   description: string
   created_at: string
   updated_at: string
+}
+
+export interface WatchlistStrategyBinding {
+  strategy_id: string
+  name: string
+  symbols: string[]
 }
 
 export interface InstanceCreateRequest {
@@ -166,6 +215,17 @@ export async function fetchAccountSnapshot(accountId: number): Promise<AccountSn
   return request.get(`/trading/accounts/${accountId}/snapshot`)
 }
 
+export async function fetchAccountSnapshots(accountId: number, params?: {
+  page?: number
+  page_size?: number
+}): Promise<PaginatedResponse<AccountSnapshot>> {
+  return request.get(`/trading/accounts/${accountId}/snapshots`, { params })
+}
+
+export async function enableAccountKillSwitch(accountId: number): Promise<TradingAccount> {
+  return request.post(`/trading/accounts/${accountId}/kill-switch`)
+}
+
 // ---- 策略实例 ----
 
 export async function fetchInstances(params?: {
@@ -253,7 +313,66 @@ export async function updateRiskRule(ruleId: number, data: { is_enabled: boolean
   return request.put(`/trading/risk-rules/${ruleId}`, data)
 }
 
+export async function fetchPositions(accountId: number, params?: {
+  snapshot_date?: string
+}): Promise<{ items: PositionSnapshot[] }> {
+  return request.get('/trading/positions', { params: { account_id: accountId, ...params } })
+}
+
+export async function fetchOrders(params: {
+  account_id: number
+  status?: string
+  page?: number
+  page_size?: number
+}): Promise<PaginatedResponse<TradingOrder>> {
+  return request.get('/trading/orders', { params })
+}
+
+export interface RiskEvent {
+  id: number
+  rule_id: number | null
+  account_id: number | null
+  instance_id: number | null
+  event_type: 'blocked' | 'warning' | 'circuit_breaker' | 'kill_switch'
+  level: 'info' | 'warn' | 'critical' | 'fatal'
+  detail: Record<string, unknown> | null
+  action_taken: string | null
+  resolved: boolean
+  resolved_by: string | null
+  resolved_at: string | null
+  created_at: string
+}
+
+export async function fetchRiskEvents(params?: {
+  account_id?: number
+  instance_id?: number
+  resolved?: boolean
+  level?: string
+  event_type?: string
+  page?: number
+  page_size?: number
+}): Promise<PaginatedResponse<RiskEvent>> {
+  return request.get('/trading/risk-events', { params })
+}
+
+export async function resolveRiskEvent(eventId: number, data: { resolved_by?: string }): Promise<RiskEvent> {
+  return request.put(`/trading/risk-events/${eventId}/resolve`, data)
+}
+
 // ---- 预订单 ----
+
+export interface SignalDetail {
+  direction: string
+  confidence: number | null
+  strength: number | null
+  score: number | null
+  reason: string | null
+  strategy_id: string | null
+  fused_score: number | null
+  factor_values: Record<string, unknown> | null
+  market_data: Record<string, unknown> | null
+  entry_price_detail: Record<string, unknown> | null
+}
 
 export interface PreOrder {
   id: number
@@ -269,6 +388,7 @@ export interface PreOrder {
   order_type: 'limit' | 'market'
   limit_price: string | null
   sizing_strategy: string | null
+  signal_detail: SignalDetail | null
   status: string
   risk_check_passed: boolean | null
   risk_check_detail: Record<string, unknown> | null
@@ -284,6 +404,7 @@ export interface PreOrder {
 }
 
 export async function fetchPreOrders(params?: {
+  account_id?: number
   instance_id?: number
   status?: string
   approval_status?: string
@@ -294,8 +415,28 @@ export async function fetchPreOrders(params?: {
   return request.get('/trading/pre-orders', { params })
 }
 
-export async function fetchPreOrder(preOrderId: number): Promise<PreOrder> {
-  return request.get(`/trading/pre-orders/${preOrderId}`)
+export interface ManualDecisionWorkflowResult {
+  run: {
+    run_id: string
+    flow_id: string
+    workspace_id: string
+    status: 'running' | 'succeeded' | 'failed' | 'paused' | 'stopped'
+    outputs: Record<string, unknown>
+    elapsed_time: number
+  }
+  account_id: number
+  instance_id: number
+  signal_date: string
+  execution_date: string
+  signals_count: number
+  fusion_count: number
+  sizing_count: number
+  pre_orders_count: number
+  pre_orders: PreOrder[]
+}
+
+export async function runAccountDecisionWorkflow(accountId: number): Promise<ManualDecisionWorkflowResult> {
+  return request.post(`/trading/accounts/${accountId}/decision-workflow/run`, {})
 }
 
 export async function updatePreOrder(preOrderId: number, data: {

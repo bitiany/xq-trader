@@ -4,19 +4,20 @@ import { Star, Search, Plus, Trash2, Cpu, Settings, X, Edit2 } from 'lucide-reac
 import { INSTANCE_STATUS_COLOR, INSTANCE_STATUS_LABEL, RUN_MODE_LABEL } from '../utils/trading';
 import { PositionSizingConfigDrawer } from './PositionSizingConfigDrawer';
 import {
+  fetchAccount,
   fetchInstances,
   fetchWatchlist,
   addWatchlistItem,
   deleteWatchlistItem,
   updateWatchlistItem,
   startInstance,
-  pauseInstance,
-  stopInstance,
   type StrategyInstance,
+  type TradingAccount,
   type WatchlistItem as ApiWatchlistItem,
 } from '@/api/trading';
 import { searchStocks, type StockSearchItem } from '@/api/stock';
 import { fetchStrategies, type Strategy } from '@/api/strategy';
+import { extractPageItems } from '@/api/types';
 import { usePageWebSocket } from '@/ws/usePageWebSocket';
 import { TOPIC_MARKET_WATCHLIST_QUOTES, type WatchlistQuotesData } from '@/ws/protocol';
 
@@ -27,41 +28,67 @@ interface WatchlistStrategyTabProps {
 export function WatchlistStrategyTab({ accountId }: WatchlistStrategyTabProps) {
   const [watchlistItems, setWatchlistItems] = useState<ApiWatchlistItem[]>([]);
   const [instances, setInstances] = useState<StrategyInstance[]>([]);
+  const [account, setAccount] = useState<TradingAccount | null>(null);
   const [timingStrategies, setTimingStrategies] = useState<Strategy[]>([]);
   const [searchText, setSearchText] = useState('');
   const [searchResults, setSearchResults] = useState<StockSearchItem[]>([]);
-  const [searching, setSearching] = useState(false);
   const [sizingDrawerOpen, setSizingDrawerOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<ApiWatchlistItem | null>(null);
   const [editForm] = Form.useForm();
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // 加载当前账户下的策略实例
   useEffect(() => {
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (accountId === null) {
+        setAccount(null);
+        return undefined;
+      }
+      return fetchAccount(accountId).then((res) => {
+        if (!cancelled) setAccount(res);
+      }).catch(() => {
+        if (!cancelled) setAccount(null);
+      });
+    });
+    return () => { cancelled = true; };
+  }, [accountId]);
+
+  const loadInstances = useCallback(async () => {
     if (accountId === null) {
       setInstances([]);
       return;
     }
-    let cancelled = false;
-    fetchInstances({ account_id: accountId, page_size: 200 }).then((res) => {
-      if (!cancelled) {
-        setInstances(res.items);
-      }
-    }).catch(() => {});
-    return () => { cancelled = true; };
+    try {
+      const res = await fetchInstances({ account_id: accountId, page_size: 200 });
+      setInstances(res.items);
+    } catch {
+      setInstances([]);
+    }
   }, [accountId]);
+
+  // 加载当前账户下的策略实例
+  useEffect(() => {
+    let cancelled = false;
+    Promise.resolve().then(async () => {
+      if (cancelled) return;
+      await loadInstances();
+    });
+    return () => { cancelled = true; };
+  }, [loadInstances]);
 
   // 加载可用于实盘监控的时序交易信号策略
   useEffect(() => {
     let cancelled = false;
-    fetchStrategies({ status: 'active', strategy_type: 'timing', page_size: 500 }).then((res) => {
-      if (!cancelled) {
-        setTimingStrategies(res.items);
-      }
-    }).catch(() => {
-      if (!cancelled) {
-        setTimingStrategies([]);
-      }
+    Promise.resolve().then(() => {
+      return fetchStrategies({ status: 'active', strategy_type: 'timing', page_size: 500 }).then((res) => {
+        if (!cancelled) {
+          setTimingStrategies(extractPageItems<Strategy>(res));
+        }
+      }).catch(() => {
+        if (!cancelled) {
+          setTimingStrategies([]);
+        }
+      });
     });
     return () => { cancelled = true; };
   }, []);
@@ -77,14 +104,28 @@ export function WatchlistStrategyTab({ accountId }: WatchlistStrategyTabProps) {
     }
   }, [accountId]);
 
-  useEffect(() => { loadWatchlist(); }, [loadWatchlist]);
+  useEffect(() => {
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (accountId === null) {
+        setWatchlistItems([]);
+        return undefined;
+      }
+      return fetchWatchlist(accountId).then((res) => {
+        if (!cancelled) setWatchlistItems(res.items ?? []);
+      }).catch(() => {
+        if (!cancelled) message.error('自选池加载失败');
+      });
+    });
+    return () => { cancelled = true; };
+  }, [accountId]);
 
   const handleQuotesUpdate = useCallback((_channel: string, data: WatchlistQuotesData) => {
     if (!data?.items?.length || accountId === null) return;
     // 只处理当前账户的行情数据
     const quoteMap = new Map(
       data.items
-        .filter(item => item.account_id === accountId || item.account_id === undefined)
+        .filter(item => item.account_id === accountId)
         .map(item => [item.symbol, item]),
     );
     if (quoteMap.size === 0) return;
@@ -114,23 +155,27 @@ export function WatchlistStrategyTab({ accountId }: WatchlistStrategyTabProps) {
 
   // 搜索标的 — 防抖调用后端 API
   useEffect(() => {
-    if (!searchText.trim()) {
-      setSearchResults([]);
-      return;
-    }
-    if (searchTimer.current) clearTimeout(searchTimer.current);
-    searchTimer.current = setTimeout(async () => {
-      setSearching(true);
-      try {
-        const results = await searchStocks(searchText.trim(), 10);
-        setSearchResults(results.filter(s => !existingSymbols.has(s.symbol)));
-      } catch {
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (!searchText.trim()) {
         setSearchResults([]);
-      } finally {
-        setSearching(false);
+        return undefined;
       }
-    }, 300);
-    return () => { if (searchTimer.current) clearTimeout(searchTimer.current); };
+      if (searchTimer.current) clearTimeout(searchTimer.current);
+      searchTimer.current = setTimeout(async () => {
+        try {
+          const results = await searchStocks(searchText.trim(), 10);
+          if (!cancelled) setSearchResults(results.filter(s => !existingSymbols.has(s.symbol)));
+        } catch {
+          if (!cancelled) message.error('标的搜索失败');
+        }
+      }, 300);
+      return undefined;
+    });
+    return () => {
+      cancelled = true;
+      if (searchTimer.current) clearTimeout(searchTimer.current);
+    };
   }, [searchText, existingSymbols]);
 
   const handleAddToWatchlist = useCallback(async (stock: StockSearchItem) => {
@@ -143,20 +188,22 @@ export function WatchlistStrategyTab({ accountId }: WatchlistStrategyTabProps) {
       setSearchText('');
       setSearchResults([]);
       await loadWatchlist();
+      await loadInstances();
       message.success(`已添加 ${stock.name}`);
     } catch {
       message.error('添加失败');
     }
-  }, [accountId, loadWatchlist]);
+  }, [accountId, loadInstances, loadWatchlist]);
 
   const handleRemoveFromWatchlist = useCallback(async (itemId: number, symbol: string) => {
     try {
       await deleteWatchlistItem(itemId);
       setWatchlistItems(prev => prev.filter(w => w.id !== itemId));
+      await loadInstances();
     } catch {
       message.error(`删除 ${symbol} 失败`);
     }
-  }, []);
+  }, [loadInstances]);
 
   const handleEditWatchlistItem = useCallback((item: ApiWatchlistItem) => {
     setEditingItem(item);
@@ -182,14 +229,15 @@ export function WatchlistStrategyTab({ accountId }: WatchlistStrategyTabProps) {
       note: values.note ?? '',
     });
     setWatchlistItems(prev => prev.map(item => item.id === updated.id ? { ...item, ...updated } : item));
+    await loadWatchlist();
+    await loadInstances();
     setEditingItem(null);
     message.success('自选股配置已保存');
-  }, [editForm, editingItem]);
+  }, [editForm, editingItem, loadInstances, loadWatchlist]);
 
-  const handleInstanceAction = useCallback(async (instanceId: number, action: 'start' | 'pause' | 'stop') => {
+  const handleInstanceAction = useCallback(async (instanceId: number, action: 'start') => {
     try {
-      const fn = action === 'start' ? startInstance : action === 'pause' ? pauseInstance : stopInstance;
-      const updated = await fn(instanceId);
+      const updated = await startInstance(instanceId);
       setInstances(prev => prev.map(inst => inst.id === instanceId ? updated : inst));
     } catch {
       message.error(`${action} 失败`);
@@ -268,6 +316,53 @@ export function WatchlistStrategyTab({ accountId }: WatchlistStrategyTabProps) {
     [watchlistItems],
   );
 
+  const visibleInstances = useMemo(
+    () => instances.filter(inst => {
+      if (inst.account_id !== accountId) return false;
+      if (account?.account_type === 'paper') return inst.run_mode === 'paper';
+      if (account?.account_type === 'live') return inst.run_mode === 'live_manual' || inst.run_mode === 'live_auto';
+      return false;
+    }),
+    [account?.account_type, accountId, instances],
+  );
+
+  // 每个实例关联的自选股中已配置的策略清单
+  const configuredStrategiesMap = useMemo(() => {
+    const map = new Map<number, { name: string; symbols: string[] }[]>();
+    for (const inst of visibleInstances) {
+      const configured = inst.config?.watchlist_strategies;
+      if (Array.isArray(configured)) {
+        map.set(inst.id, configured.map(item => ({ name: item.name, symbols: item.symbols })));
+        continue;
+      }
+      const strategyIds = new Set<string>();
+      for (const item of watchlistItems) {
+        const sid = item.signal_config?.strategy_id;
+        if (typeof sid === 'string') {
+          strategyIds.add(sid);
+        }
+      }
+      const names: { name: string; symbols: string[] }[] = [];
+      for (const sid of strategyIds) {
+        const found = timingStrategies.find(s => s.strategy_id === sid);
+        names.push({
+          name: found?.name ?? sid,
+          symbols: watchlistItems
+            .filter(item => item.signal_config?.strategy_id === sid)
+            .map(item => item.symbol),
+        });
+      }
+      map.set(inst.id, names);
+    }
+    return map;
+  }, [visibleInstances, watchlistItems, timingStrategies]);
+
+  // 当前用于仓位配置的实例（优先取 running 状态的第一个）
+  const activeInstance = useMemo(
+    () => visibleInstances.find(i => i.status === 'running') ?? visibleInstances[0] ?? null,
+    [visibleInstances],
+  );
+
   return (
     <div className="ws-tab" data-component="Watchlist & Strategy Tab">
       <div className="ws-tab__panels">
@@ -322,7 +417,7 @@ export function WatchlistStrategyTab({ accountId }: WatchlistStrategyTabProps) {
             <Button size="small" icon={<Settings size={12} />} onClick={() => setSizingDrawerOpen(true)}>仓位配置</Button>
           </div>
           <div className="strategy-instance-cards">
-            {instances.map(inst => (
+            {visibleInstances.map(inst => (
               <Card key={inst.id} size="small" className="strategy-card" data-component="Strategy Instance Card">
                 <div className="strategy-card__header">
                   <div className="strategy-card__identity">
@@ -336,24 +431,26 @@ export function WatchlistStrategyTab({ accountId }: WatchlistStrategyTabProps) {
                 <div className="strategy-card__metrics">
                   <div className="strategy-card__metric"><span>股票池</span><span>{inst.universe_pool || '—'}</span></div>
                 </div>
+                <div className="strategy-card__strategies">
+                  <span className="strategy-card__strategies-label">已配置策略</span>
+                  {configuredStrategiesMap.get(inst.id)?.length ? (
+                    <div className="strategy-card__strategies-tags">
+                      {configuredStrategiesMap.get(inst.id)!.map(strategy => (
+                        <Tag key={strategy.name}>{strategy.name}({strategy.symbols.length})</Tag>
+                      ))}
+                    </div>
+                  ) : (
+                    <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>未配置策略</span>
+                  )}
+                </div>
                 <div className="strategy-card__actions">
-                  {inst.status === 'draft' || inst.status === 'stopped' ? (
+                  {(inst.status === 'draft' || inst.status === 'stopped') && (
                     <Button size="small" onClick={() => handleInstanceAction(inst.id, 'start')}>启动</Button>
-                  ) : inst.status === 'running' ? (
-                    <>
-                      <Button size="small" onClick={() => handleInstanceAction(inst.id, 'pause')}>暂停</Button>
-                      <Button size="small" onClick={() => handleInstanceAction(inst.id, 'stop')}>停止</Button>
-                    </>
-                  ) : inst.status === 'paused' ? (
-                    <>
-                      <Button size="small" onClick={() => handleInstanceAction(inst.id, 'start')}>恢复</Button>
-                      <Button size="small" onClick={() => handleInstanceAction(inst.id, 'stop')}>停止</Button>
-                    </>
-                  ) : null}
+                  )}
                 </div>
               </Card>
             ))}
-            {instances.length === 0 && (
+            {visibleInstances.length === 0 && (
               <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 20, fontSize: 12 }}>
                 暂无策略实例
               </div>
@@ -361,7 +458,14 @@ export function WatchlistStrategyTab({ accountId }: WatchlistStrategyTabProps) {
           </div>
         </div>
       </div>
-      <PositionSizingConfigDrawer open={sizingDrawerOpen} onClose={() => setSizingDrawerOpen(false)} watchlist={drawerWatchlist} />
+      <PositionSizingConfigDrawer
+        open={sizingDrawerOpen}
+        onClose={() => setSizingDrawerOpen(false)}
+        onSaved={loadInstances}
+        watchlist={drawerWatchlist}
+        instanceId={activeInstance?.id ?? null}
+        positionSizing={activeInstance?.position_sizing ?? {}}
+      />
       <Modal
         title="编辑自选股配置"
         open={editingItem !== null}

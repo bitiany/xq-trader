@@ -70,6 +70,18 @@ class RiskRuleUpdate(BaseModel):
     is_enabled: bool | None = Field(default=None, description="启用/禁用")
 
 
+class RiskEventResolveRequest(BaseModel):
+    resolved_by: str = Field(default="user", max_length=64, description="处理人")
+
+
+class ManualDecisionWorkflowRequest(BaseModel):
+    signal_date: str | None = Field(default=None, description="信号日 YYYY-MM-DD；不传则使用最新因子交易日")
+    execution_date: str | None = Field(default=None, description="执行日 YYYY-MM-DD；不传则为信号日后一日")
+    lookback_days: int = Field(default=120, ge=1, le=500, description="信号计算回看天数")
+    min_confidence: float = Field(default=0.6, ge=0, le=1, description="组合信号最小置信度")
+    max_selected: int = Field(default=10, ge=1, le=100, description="最多入选信号数")
+
+
 # ---- 预订单 ----
 class PreOrderUpdate(BaseModel):
     target_weight: float | None = Field(default=None, description="目标权重")
