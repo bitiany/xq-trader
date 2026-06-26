@@ -2,6 +2,7 @@
   "nav": {
     "dashboard": "总览",
     "strategy": "策略",
+    "factor": "因子",
     "liveTrading": "实盘交易",
     "paperTrading": "模拟盘",
     "research": "研究",
@@ -1411,6 +1412,85 @@
     "colIndustry": "行业",
     "colMarketValue": "市值",
     "colActions": "操作"
+  },
+  "factor": {
+    "title": "因子研究工作台",
+    "pool": "样本池",
+    "evalDate": "评估期",
+    "noEval": "未评估",
+    "runEvaluate": "运行评估",
+    "runSynthesize": "运行合成",
+    "refresh": "刷新",
+    "dashboard": {
+      "total": "因子总数",
+      "gradeA": "A 级",
+      "gradeB": "B 级",
+      "usable": "可用率",
+      "avgIcir": "平均 ICIR",
+      "lastEval": "最近评估",
+      "gradeDist": "等级分布",
+      "categoryDist": "分类分布",
+      "ungraded": "未评级"
+    },
+    "tabs": {
+      "library": "因子库",
+      "composite": "合成中心",
+      "correlation": "相关性",
+      "evalRuns": "评估任务"
+    },
+    "library": {
+      "name": "因子",
+      "category": "类别",
+      "direction": "方向",
+      "grade": "等级",
+      "status": "状态",
+      "composite": "合成",
+      "actions": "操作",
+      "detail": "详情",
+      "keyword": "搜索名称/ID",
+      "allCategories": "全部类别",
+      "allGrades": "全部等级",
+      "allStatus": "全部状态",
+      "onlyUsable": "仅可用(A+B)",
+      "metricsHint": "IC/ICIR 等池内评估指标随 overview 端点接入，当前可点击详情查看单因子评估快照"
+    },
+    "composite": {
+      "method": "合成方法",
+      "children": "输入因子",
+      "childCount": "输入因子数",
+      "empty": "暂无合成因子",
+      "lineageHint": "血缘图与跨组权重随合成中心端点接入"
+    },
+    "correlation": {
+      "placeholder": "相关性热力图与冗余识别待后端 correlation 端点接入（improvement-plan T9）"
+    },
+    "evalRuns": {
+      "placeholder": "评估/合成任务运行记录与手动触发待对接调度 API"
+    },
+    "detail": {
+      "metadata": "元数据",
+      "snapshot": "当前池评估快照",
+      "icTrend": "IC 趋势",
+      "icMean": "IC 均值",
+      "icStd": "IC 标准差",
+      "icir": "ICIR",
+      "icWinRate": "IC 胜率",
+      "longShortAnnual": "多空年化",
+      "longShortSharpe": "多空夏普",
+      "turnover": "换手率",
+      "decayHalfLife": "衰减半衰期",
+      "coverage": "覆盖度",
+      "dependencies": "依赖",
+      "lineage": "合成血缘",
+      "noSnapshot": "该池暂无评估快照",
+      "noTrend": "暂无 IC 趋势数据"
+    },
+    "grade": {
+      "A": "核心 Alpha",
+      "B": "辅助 Alpha",
+      "C": "弱 Alpha",
+      "D": "无效"
+    }
   },
   "strategy": {
     "workbench": "选股工作台",

@@ -2,6 +2,7 @@
   "nav": {
     "dashboard": "Dashboard",
     "strategy": "Strategy",
+    "factor": "Factors",
     "liveTrading": "Live Trading",
     "paperTrading": "Paper Trading",
     "research": "Research",
@@ -1251,6 +1252,85 @@
     "colIndustry": "Industry",
     "colMarketValue": "Mkt Cap",
     "colActions": "Actions"
+  },
+  "factor": {
+    "title": "Factor Research Workbench",
+    "pool": "Pool",
+    "evalDate": "Eval date",
+    "noEval": "Not evaluated",
+    "runEvaluate": "Run evaluate",
+    "runSynthesize": "Run synthesize",
+    "refresh": "Refresh",
+    "dashboard": {
+      "total": "Total factors",
+      "gradeA": "Grade A",
+      "gradeB": "Grade B",
+      "usable": "Usable rate",
+      "avgIcir": "Avg ICIR",
+      "lastEval": "Last eval",
+      "gradeDist": "Grade distribution",
+      "categoryDist": "Category distribution",
+      "ungraded": "Ungraded"
+    },
+    "tabs": {
+      "library": "Library",
+      "composite": "Composite",
+      "correlation": "Correlation",
+      "evalRuns": "Eval runs"
+    },
+    "library": {
+      "name": "Factor",
+      "category": "Category",
+      "direction": "Direction",
+      "grade": "Grade",
+      "status": "Status",
+      "composite": "Composite",
+      "actions": "Actions",
+      "detail": "Detail",
+      "keyword": "Search name/ID",
+      "allCategories": "All categories",
+      "allGrades": "All grades",
+      "allStatus": "All status",
+      "onlyUsable": "Usable only (A+B)",
+      "metricsHint": "Per-pool IC/ICIR metrics arrive with the overview endpoint; open detail to view a single factor's evaluation snapshot"
+    },
+    "composite": {
+      "method": "Method",
+      "children": "Input factors",
+      "childCount": "Inputs",
+      "empty": "No composite factors",
+      "lineageHint": "Lineage chart and cross-group weights arrive with the composite endpoint"
+    },
+    "correlation": {
+      "placeholder": "Correlation heatmap and redundancy detection pending backend correlation endpoint (improvement-plan T9)"
+    },
+    "evalRuns": {
+      "placeholder": "Eval/synthesize run history and manual trigger pending scheduler API integration"
+    },
+    "detail": {
+      "metadata": "Metadata",
+      "snapshot": "Pool snapshot",
+      "icTrend": "IC trend",
+      "icMean": "IC mean",
+      "icStd": "IC std",
+      "icir": "ICIR",
+      "icWinRate": "IC win rate",
+      "longShortAnnual": "L/S annual",
+      "longShortSharpe": "L/S sharpe",
+      "turnover": "Turnover",
+      "decayHalfLife": "Decay half-life",
+      "coverage": "Coverage",
+      "dependencies": "Dependencies",
+      "lineage": "Lineage",
+      "noSnapshot": "No snapshot for this pool",
+      "noTrend": "No IC trend data"
+    },
+    "grade": {
+      "A": "Core alpha",
+      "B": "Auxiliary alpha",
+      "C": "Weak alpha",
+      "D": "Ineffective"
+    }
   },
   "strategy": {
     "workbench": "Stock Picker",

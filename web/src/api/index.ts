@@ -74,11 +74,13 @@ export type {
 
 export {
   fetchFactors,
+  fetchAllFactors,
   fetchFactorCategories,
   fetchFactorDetail,
   fetchFactorValues,
   fetchFactorStats,
   fetchFactorStatsLatest,
+  FACTOR_PAGE_SIZE_MAX,
 } from '@/api/factor'
 export type {
   Factor,

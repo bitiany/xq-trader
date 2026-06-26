@@ -22,6 +22,7 @@ import { AuthGuard } from '@/router/AuthGuard'
 import { RouteErrorBoundary } from '@/router/RouteErrorBoundary'
 import { Activity } from 'lucide-react'
 import { LiveCockpitPage } from '@/pages/trading/LiveCockpitPage'
+import { FactorWorkbenchPage } from '@/pages/factor/FactorWorkbenchPage'
 
 export const router = createBrowserRouter([
   {
@@ -53,6 +54,7 @@ export const router = createBrowserRouter([
         { index: true, element: <DataOverviewPage /> },
         { path: 'tasks', element: <DataTasksPage /> },
       ] },
+      { path: 'factors', element: <FactorWorkbenchPage /> },
       { path: 'trading', element: <LiveCockpitPage /> },
       { path: 'monitor', element: <RoutePlaceholder pageKey="monitor" icon={Activity} /> },
       {

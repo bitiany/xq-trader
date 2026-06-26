@@ -1,5 +1,8 @@
 import { request } from '@/api/client'
-import type { ApiPageResult } from '@/api/types'
+import { extractPageItems, type ApiPageResult } from '@/api/types'
+
+/** 与后端 `/factors` 的 page_size 上限一致 */
+export const FACTOR_PAGE_SIZE_MAX = 200
 
 export type FactorDirection = 'DESC' | 'ASC'
 export type FactorStatus = 'draft' | 'testing' | 'active' | 'deprecated'
@@ -23,6 +26,9 @@ export interface Factor {
   base_factor?: string | null
   min_periods?: number | null
   tags?: string[] | null
+  is_composite?: number | null
+  composite_factor_ids?: string | null
+  composite_method?: string | null
   updated_at?: string
 }
 
@@ -78,7 +84,32 @@ export interface FactorStatsParams {
 }
 
 export async function fetchFactors(params: FactorListParams = {}): Promise<ApiPageResult<Factor>> {
-  return request.get<ApiPageResult<Factor>>('/factors', { params })
+  const pageSize = Math.min(params.page_size ?? 50, FACTOR_PAGE_SIZE_MAX)
+  return request.get<ApiPageResult<Factor>>('/factors', {
+    params: { ...params, page_size: pageSize },
+  })
+}
+
+/** 分页拉取全部因子（驾驶舱/合成中心等需全量列表时使用） */
+export async function fetchAllFactors(
+  params: Omit<FactorListParams, 'page' | 'page_size'> = {},
+): Promise<Factor[]> {
+  const first = await fetchFactors({ ...params, page: 1, page_size: FACTOR_PAGE_SIZE_MAX })
+  const items = extractPageItems<Factor>(first)
+  const total = first.total ?? items.length
+  if (items.length >= total) {
+    return items
+  }
+  const pageCount = Math.ceil(total / FACTOR_PAGE_SIZE_MAX)
+  const rest = await Promise.all(
+    Array.from({ length: pageCount - 1 }, (_, i) =>
+      fetchFactors({ ...params, page: i + 2, page_size: FACTOR_PAGE_SIZE_MAX }),
+    ),
+  )
+  for (const page of rest) {
+    items.push(...extractPageItems<Factor>(page))
+  }
+  return items
 }
 
 export async function fetchFactorCategories(): Promise<FactorCategoryStat[]> {
