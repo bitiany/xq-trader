@@ -5,7 +5,9 @@
   2. 获取交易日列表
   3. 逐日执行：采集 → 清洗 → 持久化 → 更新标的水位
 
-数据源：Tushare moneyflow 接口（单次上限 6000 条）。
+数据源：
+  - 沪深 A 股：Tushare moneyflow 接口（单次上限 6000 条）
+  - 北交所（.BJ）：Tushare moneyflow_dc 接口（moneyflow 不含北交所数据）
 逐日采集时传入 trade_date 获取全市场当日数据，若返回达到上限则按标的补采。
 """
 
@@ -165,6 +167,71 @@ def clean_fund_flow_data(df: pd.DataFrame) -> pd.DataFrame:
     return df.reset_index(drop=True)
 
 
+def _is_bj_symbol(symbol: str) -> bool:
+    """判断是否为北交所标的。"""
+    return symbol.endswith(".BJ")
+
+
+def clean_fund_flow_dc_data(df: pd.DataFrame) -> pd.DataFrame:
+    """moneyflow_dc 数据清洗 — 东财数据源，各档 buy_* 字段实为净流入额/占比。
+
+    moneyflow_dc 不返回买卖分拆金额，仅映射净流入相关字段到 FundFlowIndividual。
+    """
+    numeric_cols = [
+        "close", "pct_change",
+        "huge_net_amt", "huge_net_pct",
+        "big_net_amt", "big_net_pct",
+        "mid_net_amt", "mid_net_pct",
+        "small_net_amt", "small_net_pct",
+        "main_net_amt", "main_net_pct",
+        "net_mf_amt",
+    ]
+    net_mapping = {
+        "buy_elg_amount": "huge_net_amt",
+        "buy_lg_amount": "big_net_amt",
+        "buy_md_amount": "mid_net_amt",
+        "buy_sm_amount": "small_net_amt",
+    }
+    pct_mapping = {
+        "buy_elg_amount_rate": "huge_net_pct",
+        "buy_lg_amount_rate": "big_net_pct",
+        "buy_md_amount_rate": "mid_net_pct",
+        "buy_sm_amount_rate": "small_net_pct",
+    }
+
+    df = df.rename(columns={"ts_code": "symbol"})
+
+    if "trade_date" in df.columns:
+        df["trade_date"] = pd.to_datetime(df["trade_date"], format="%Y%m%d").dt.strftime("%Y-%m-%d")
+
+    df = df.dropna(subset=["trade_date"])
+    if df.empty:
+        return df
+
+    for src, dst in net_mapping.items():
+        if src in df.columns:
+            df[dst] = pd.to_numeric(df[src], errors="coerce")
+
+    for src, dst in pct_mapping.items():
+        if src in df.columns:
+            df[dst] = pd.to_numeric(df[src], errors="coerce")
+
+    if "net_amount" in df.columns:
+        df["net_mf_amt"] = pd.to_numeric(df["net_amount"], errors="coerce")
+    if "net_amount_rate" in df.columns:
+        df["main_net_pct"] = pd.to_numeric(df["net_amount_rate"], errors="coerce")
+
+    if "huge_net_amt" in df.columns and "big_net_amt" in df.columns:
+        df["main_net_amt"] = df["huge_net_amt"] + df["big_net_amt"]
+
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = df[col].round(4)
+
+    df = df.dropna(subset=["symbol", "trade_date"])
+    return df.reset_index(drop=True)
+
+
 async def persist_fund_flow_data(df: pd.DataFrame) -> int:
     """将资金流向数据 upsert 到 FundFlowIndividual 表。"""
     df["source"] = "tushare"
@@ -249,22 +316,33 @@ class FundFlowIncrementalStage:
         """处理单个交易日：采集→清洗→持久化→更新标的水位。"""
         ts_date = trade_date.strftime("%Y%m%d")
 
-        # 采集全市场当日数据
-        df = await _get_collector().fetch_moneyflow(trade_date=ts_date)
-        if df is None or df.empty:
+        frames: list[pd.DataFrame] = []
+
+        # 采集沪深 A 股（moneyflow 不含北交所）
+        raw_szsh = await _get_collector().fetch_moneyflow(trade_date=ts_date)
+        if raw_szsh is not None and not raw_szsh.empty:
+            if len(raw_szsh) >= _MONEYFLOW_ROW_LIMIT:
+                logger.warning(
+                    "[fund_flow.incremental] 返回 %d 条达到上限 %d，可能存在截断: %s",
+                    len(raw_szsh), _MONEYFLOW_ROW_LIMIT, trade_date,
+                )
+                raw_szsh = await self._supplement_missing(raw_szsh, ts_date)
+            cleaned_szsh = clean_fund_flow_data(raw_szsh)
+            if not cleaned_szsh.empty:
+                frames.append(cleaned_szsh)
+
+        # 北交所单独从 moneyflow_dc 采集
+        raw_bj = await self._fetch_bj_moneyflow_dc(trade_date)
+        if raw_bj is not None and not raw_bj.empty:
+            cleaned_bj = clean_fund_flow_dc_data(raw_bj)
+            if not cleaned_bj.empty:
+                frames.append(cleaned_bj)
+
+        if not frames:
             logger.debug("[fund_flow.incremental] 无数据: %s", trade_date)
             return 0
 
-        # 检查是否达到上限，需要补采
-        if len(df) >= _MONEYFLOW_ROW_LIMIT:
-            logger.warning(
-                "[fund_flow.incremental] 返回 %d 条达到上限 %d，可能存在截断: %s",
-                len(df), _MONEYFLOW_ROW_LIMIT, trade_date,
-            )
-            df = await self._supplement_missing(df, ts_date)
-
-        # 清洗
-        df = clean_fund_flow_data(df)
+        df = pd.concat(frames, ignore_index=True)
         if df.empty:
             return 0
 
@@ -295,7 +373,7 @@ class FundFlowIncrementalStage:
         from xqtrader.domain.security.models import Security  # noqa: PLC0415
 
         all_securities = await Security.filter(list_status="L")
-        all_codes = {s.symbol for s in all_securities}
+        all_codes = {s.symbol for s in all_securities if not _is_bj_symbol(s.symbol)}
         missing_codes = all_codes - existing_codes
 
         if not missing_codes:
@@ -323,6 +401,18 @@ class FundFlowIncrementalStage:
                 )
 
         return existing_df
+
+    @staticmethod
+    async def _fetch_bj_moneyflow_dc(trade_date: date) -> pd.DataFrame:
+        """采集北交所个股资金流向（moneyflow_dc 按交易日全量后过滤 .BJ）。"""
+        ts_date = trade_date.strftime("%Y%m%d")
+        raw = await _get_collector().fetch_moneyflow_dc(trade_date=ts_date)
+        if raw is None or raw.empty or "ts_code" not in raw.columns:
+            return pd.DataFrame()
+        bj_df = raw[raw["ts_code"].str.endswith(".BJ")].copy()
+        if bj_df.empty:
+            logger.debug("[fund_flow.incremental] 北交所无数据: %s", trade_date)
+        return bj_df
 
     @staticmethod
     async def _get_trade_dates(start_date: date, end_date: date) -> list[date]:

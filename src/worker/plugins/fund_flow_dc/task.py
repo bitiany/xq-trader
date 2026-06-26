@@ -51,7 +51,9 @@ from framework.pipeline import (
 from framework.scheduler.base_task import BaseTask
 from worker.plugins.aspects import WatermarkAspect
 from worker.plugins.daily_incremental.stages.fund_flow_stage import (
+    _is_bj_symbol,
     clean_fund_flow_data,
+    clean_fund_flow_dc_data,
     persist_fund_flow_data,
 )
 from xqtrader.broker.services.tushare_data_collector import TushareDataCollector
@@ -105,11 +107,19 @@ class DownloadStage(Stage):
             ts_start = start_date.replace("-", "")
             ts_end = end_date.replace("-", "") if end_date else ""
 
-            df = await _get_collector().fetch_moneyflow(
-                ts_code=stock_code,
-                start_date=ts_start,
-                end_date=ts_end,
-            )
+            use_dc = _is_bj_symbol(stock_code)
+            if use_dc:
+                df = await _get_collector().fetch_moneyflow_dc(
+                    ts_code=stock_code,
+                    start_date=ts_start,
+                    end_date=ts_end,
+                )
+            else:
+                df = await _get_collector().fetch_moneyflow(
+                    ts_code=stock_code,
+                    start_date=ts_start,
+                    end_date=ts_end,
+                )
 
             if df is None or df.empty:
                 logger.debug("[fund_flow.collect] 无数据: %s range=%s~%s", stock_code, start_date, end_date)
@@ -120,6 +130,7 @@ class DownloadStage(Stage):
                 ctx.set("download_data", df)
                 ctx.set("row_count", len(df))
                 ctx.set("skip_persist", False)
+                ctx.set("use_dc_source", use_dc)
 
             return StageResult.ok(data={"stock_code": stock_code, "rows": ctx.get("row_count", 0)})
         except Exception as e:
@@ -144,7 +155,10 @@ class CleanStage(Stage):
             return StageResult.ok(data={"stock_code": stock_code, "cleaned": 0})
 
         initial_len = len(df)
-        df = clean_fund_flow_data(df)
+        if ctx.get("use_dc_source"):
+            df = clean_fund_flow_dc_data(df)
+        else:
+            df = clean_fund_flow_data(df)
 
         ctx.set("download_data", df)
         ctx.set("row_count", len(df))
