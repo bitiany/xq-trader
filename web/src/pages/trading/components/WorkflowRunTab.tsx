@@ -1,11 +1,30 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Card, Steps, Tag, Button, message } from 'antd';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Button, Card, message, Space, Steps, Table, Tag } from 'antd';
+import type { ColumnsType } from 'antd/es/table';
 import { GitBranch, Zap } from 'lucide-react';
-import { fetchPreOrders, type PreOrder } from '@/api/trading';
+import { ApiError } from '@/api/types';
+import { batchSubmitPreOrders, fetchPreOrders, submitPreOrder, type PreOrder } from '@/api/trading';
+import { SIGNAL_SIDE_COLOR, SIGNAL_SIDE_LABEL } from '../utils/trading';
 
 interface WorkflowRunTabProps {
   accountId: number | null;
   onOpenApproval?: () => void;
+}
+
+const OPERATOR_STORAGE_KEY = 'xqtrader:approval_operator';
+
+function loadStoredOperator(): string {
+  try {
+    return localStorage.getItem(OPERATOR_STORAGE_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function resolveOperator(): string {
+  const stored = loadStoredOperator().trim();
+  if (stored) return stored;
+  throw new Error('请先在审批区填写操作人后再下单');
 }
 
 interface WorkflowRunSummary {
@@ -33,6 +52,14 @@ const EXECUTION_STEPS = [
   { title: '交易提交', status: 'wait' as const },
   { title: '成交回报', status: 'wait' as const },
 ];
+
+const PRE_ORDER_STATUS_LABEL: Record<string, string> = {
+  pending_approval: '待审批',
+  approved: '已批准',
+  rejected: '已拒绝',
+  submitted: '已下单',
+  expired: '已过期',
+};
 
 function groupRuns(preOrders: PreOrder[]): WorkflowRunSummary[] {
   const groups = new Map<string, WorkflowRunSummary>();
@@ -62,8 +89,33 @@ function approvalStatus(run: WorkflowRunSummary) {
   return 'approved';
 }
 
+function formatWeight(value: number | null) {
+  if (value === null || value === undefined) return '—';
+  return `${(Number(value) * 100).toFixed(2)}%`;
+}
+
 export function WorkflowRunTab({ accountId, onOpenApproval }: WorkflowRunTabProps) {
   const [preOrders, setPreOrders] = useState<PreOrder[]>([]);
+  const [submittingIds, setSubmittingIds] = useState<number[]>([]);
+  const [batchSubmitting, setBatchSubmitting] = useState(false);
+
+  const executablePreOrders = useMemo(
+    () => preOrders.filter((item) => item.approval_status === 'approved' && item.status === 'approved'),
+    [preOrders],
+  );
+
+  const loadPreOrders = useCallback(async () => {
+    if (accountId === null) {
+      setPreOrders([]);
+      return;
+    }
+    try {
+      const res = await fetchPreOrders({ account_id: accountId, page_size: 200 });
+      setPreOrders(res.items);
+    } catch {
+      message.error('工作流运行记录加载失败');
+    }
+  }, [accountId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -81,8 +133,82 @@ export function WorkflowRunTab({ accountId, onOpenApproval }: WorkflowRunTabProp
     return () => { cancelled = true; };
   }, [accountId]);
 
+  const handleSubmitOne = useCallback(async (preOrderId: number) => {
+    setSubmittingIds((ids) => [...ids, preOrderId]);
+    try {
+      const operator = resolveOperator();
+      const result = await submitPreOrder(preOrderId, { operator });
+      message.success(`已提交订单 ${result.order.id}${result.submitter === 'qmt' ? '（QMT）' : '（模拟）'}`);
+      await loadPreOrders();
+    } catch (error) {
+      message.error(error instanceof ApiError ? error.message : error instanceof Error ? error.message : '预订单下单失败');
+    } finally {
+      setSubmittingIds((ids) => ids.filter((id) => id !== preOrderId));
+    }
+  }, [loadPreOrders]);
+
+  const handleSubmitBatch = useCallback(async () => {
+    if (executablePreOrders.length === 0) return;
+    setBatchSubmitting(true);
+    try {
+      const operator = resolveOperator();
+      const result = await batchSubmitPreOrders({
+        pre_order_ids: executablePreOrders.map((item) => item.id),
+        operator,
+      });
+      if (result.failed > 0) {
+        message.warning(`批量下单完成：成功 ${result.submitted} 条，失败 ${result.failed} 条`);
+      } else {
+        message.success(`批量下单完成：成功 ${result.submitted} 条`);
+      }
+      await loadPreOrders();
+    } catch (error) {
+      message.error(error instanceof ApiError ? error.message : error instanceof Error ? error.message : '批量下单失败');
+    } finally {
+      setBatchSubmitting(false);
+    }
+  }, [executablePreOrders, loadPreOrders]);
+
+  const orderColumns: ColumnsType<PreOrder> = [
+    { title: '标的', dataIndex: 'symbol', width: 100 },
+    {
+      title: '方向',
+      dataIndex: 'side',
+      width: 76,
+      render: (side: PreOrder['side']) => <Tag color={SIGNAL_SIDE_COLOR[side]}>{SIGNAL_SIDE_LABEL[side]}</Tag>,
+    },
+    { title: '数量', dataIndex: 'target_qty', width: 80, render: (value: number | null) => value ?? '—' },
+    { title: '目标仓位', dataIndex: 'target_weight', width: 92, render: formatWeight },
+    {
+      title: '委托方式',
+      dataIndex: 'order_type',
+      width: 112,
+      render: (_: PreOrder['order_type'], item) => (
+        item.order_type === 'market' ? '市价' : `限价 ${item.limit_price ?? '—'}`
+      ),
+    },
+    { title: '状态', dataIndex: 'status', width: 82, render: (status: string) => PRE_ORDER_STATUS_LABEL[status] ?? status },
+    {
+      title: '操作',
+      key: 'action',
+      width: 88,
+      render: (_, item) => (
+        <Button
+          size="small"
+          type="primary"
+          loading={submittingIds.includes(item.id)}
+          disabled={batchSubmitting}
+          onClick={() => void handleSubmitOne(item.id)}
+        >
+          下单
+        </Button>
+      ),
+    },
+  ];
+
   const runs = useMemo(() => groupRuns(preOrders), [preOrders]);
   const latestRun = runs[0];
+  const executionStep = executablePreOrders.length > 0 ? 1 : latestRun?.pending ? 0 : -1;
 
   return (
     <div className="workflow-run-tab" data-component="Workflow Run Tab">
@@ -109,21 +235,38 @@ export function WorkflowRunTab({ accountId, onOpenApproval }: WorkflowRunTabProp
       <Card size="small" className="workflow-run-tab__flow">
         <div className="workflow-run-tab__flow-header">
           <div>
-            <span className="workflow-run-tab__flow-name">trading_execution</span>
-            <Tag color={latestRun?.pending ? 'processing' : 'default'} style={{ fontSize: 10, marginLeft: 6 }}>
-              {latestRun?.pending ? 'pending_approval' : 'waiting'}
+            <span className="workflow-run-tab__flow-name">pre_order_execution_flow</span>
+            <Tag color={executablePreOrders.length > 0 ? 'processing' : 'default'} style={{ fontSize: 10, marginLeft: 6 }}>
+              {executablePreOrders.length > 0 ? 'ready_to_submit' : 'waiting'}
             </Tag>
           </div>
           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
             {latestRun ? `执行日: ${latestRun.executionDate}` : '等待审批信号'}
           </span>
         </div>
-        <Steps size="small" current={latestRun?.pending ? 0 : -1} items={EXECUTION_STEPS} style={{ marginTop: 8 }} />
-        <div style={{ marginTop: 10 }}>
+        <Steps size="small" current={executionStep} items={EXECUTION_STEPS} style={{ marginTop: 8 }} />
+        <Space style={{ marginTop: 10 }}>
           <Button type="primary" size="small" icon={<Zap size={12} />} onClick={onOpenApproval}>
             打开审批列表
           </Button>
-        </div>
+          <Button
+            size="small"
+            disabled={executablePreOrders.length === 0}
+            loading={batchSubmitting}
+            onClick={() => void handleSubmitBatch()}
+          >
+            批量下单 {executablePreOrders.length > 0 ? `(${executablePreOrders.length})` : ''}
+          </Button>
+        </Space>
+        <Table
+          size="small"
+          rowKey="id"
+          columns={orderColumns}
+          dataSource={executablePreOrders}
+          pagination={false}
+          style={{ marginTop: 10 }}
+          locale={{ emptyText: '暂无已批准且待下单预订单' }}
+        />
       </Card>
 
       <Card size="small" className="workflow-run-tab__history">

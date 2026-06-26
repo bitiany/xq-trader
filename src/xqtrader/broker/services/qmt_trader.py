@@ -1,41 +1,27 @@
-"""QMT 交易服务 — 封装下单、撤单、查询等交易接口。"""
+"""QMT 交易服务 — 封装下单、撤单、订阅接口。
+
+查询接口见 QmtQueryService；共用连接与超时控制见 QmtServiceBase。
+"""
 
 from __future__ import annotations
 
-import asyncio
-import logging
-from typing import Any
-
-from xtquant.xttype import StockAccount
-
 from framework.commons.exceptions import BusinessException
-from framework.config.settings import settings
-from xqtrader.broker.services.qmt_connection import QmtConnection
+from framework.commons.logger import get_logger
+from xqtrader.broker.services.qmt_service_base import QmtServiceBase
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
-class QmtTrader:
+class QmtTrader(QmtServiceBase):
     """QMT 交易服务。
 
-    封装 XtQuantTrader 的下单/撤单/查询接口，
-    通过 QmtConnection 获取交易实例，通过 asyncio.to_thread 适配异步框架。
+    封装 XtQuantTrader 的下单/撤单/订阅接口，
+    通过 QmtConnection 获取交易实例，通过 _call_sync_with_timeout 适配异步框架。
+
+    所有 QMT 调用均强制施加超时控制，防止网络挂起永久阻塞事件循环：
+    - 下单/撤单/订阅等关键操作：10s
+    超时抛 BusinessException，上层（如 submit_qmt_order）可据此决定重试或拒绝。
     """
-
-    def __init__(self) -> None:
-        self._connection = QmtConnection.get_instance()
-
-    def _ensure_connected(self) -> None:
-        """确保交易连接已建立，未连接时抛出业务异常。"""
-        if not self._connection.is_connected:
-            raise BusinessException("QMT 交易连接未建立，请先调用 /broker/connect")
-
-    def _get_account(self) -> StockAccount:
-        """获取当前配置的交易账号。"""
-        qmt = settings.QMT
-        if not qmt.QMT_ACCOUNT_ID:
-            raise BusinessException("QMT_ACCOUNT_ID 未配置")
-        return StockAccount(qmt.QMT_ACCOUNT_ID, qmt.QMT_ACCOUNT_TYPE)
 
     # ── 下单 ──────────────────────────────────────────────
 
@@ -68,18 +54,27 @@ class QmtTrader:
         trader = self._connection.trader
 
         logger.info(
-            "下单: stock=%s type=%s volume=%s price_type=%s price=%.4f strategy=%s",
+            "下单: stock=%s type=%s volume=%s price_type=%s price=%.4f strategy=%s | "
+            "account_id=%s account_type=%s trader=%s",
             stock_code, order_type, order_volume, price_type, price, strategy_name,
+            account.account_id, account.account_type, type(trader).__name__,
         )
 
-        order_id: int = await asyncio.to_thread(
+        order_id: int = await self._call_sync_with_timeout(
             trader.order_stock,
-            account, stock_code, order_type, order_volume, price_type, price,
-            strategy_name, order_remark,
+            (account, stock_code, order_type, order_volume, price_type, price,
+             strategy_name, order_remark),
+            timeout=self._TRADE_TIMEOUT,
+            operation_name="下单",
+        )
+
+        logger.info(
+            "下单返回: stock=%s order_id=%s type=%s",
+            stock_code, order_id, type(order_id).__name__,
         )
 
         if order_id < 0:
-            logger.error("下单失败: stock=%s order_id=%s", stock_code, order_id, exc_info=True)
+            logger.warning("下单失败: stock=%s order_id=%s", stock_code, order_id)
             raise BusinessException(f"下单失败: stock={stock_code}, order_id={order_id}")
 
         logger.info("下单成功: stock=%s order_id=%s", stock_code, order_id)
@@ -108,11 +103,17 @@ class QmtTrader:
             stock_code, order_type, order_volume, price_type, price,
         )
 
-        seq: int = await asyncio.to_thread(
+        seq: int = await self._call_sync_with_timeout(
             trader.order_stock_async,
-            account, stock_code, order_type, order_volume, price_type, price,
-            strategy_name, order_remark,
+            (account, stock_code, order_type, order_volume, price_type, price,
+             strategy_name, order_remark),
+            timeout=self._TRADE_TIMEOUT,
+            operation_name="异步下单",
         )
+
+        if seq < 0:
+            logger.warning("异步下单失败: stock=%s seq=%s", stock_code, seq)
+            raise BusinessException(f"异步下单失败: stock={stock_code}, seq={seq}")
 
         logger.info("异步下单已提交: stock=%s seq=%s", stock_code, seq)
         return int(seq)
@@ -134,12 +135,15 @@ class QmtTrader:
 
         logger.info("撤单: order_id=%s", order_id)
 
-        result: int = await asyncio.to_thread(
-            trader.cancel_order_stock, account, order_id,
+        result: int = await self._call_sync_with_timeout(
+            trader.cancel_order_stock,
+            (account, order_id),
+            timeout=self._TRADE_TIMEOUT,
+            operation_name="撤单",
         )
 
         if result < 0:
-            logger.error("撤单失败: order_id=%s result=%s", order_id, result, exc_info=True)
+            logger.warning("撤单失败: order_id=%s result=%s", order_id, result)
             raise BusinessException(f"撤单失败: order_id={order_id}, result={result}")
 
         logger.info("撤单成功: order_id=%s", order_id)
@@ -153,169 +157,70 @@ class QmtTrader:
 
         logger.info("异步撤单: order_id=%s", order_id)
 
-        seq: int = await asyncio.to_thread(
-            trader.cancel_order_stock_async, account, order_id,
+        seq: int = await self._call_sync_with_timeout(
+            trader.cancel_order_stock_async,
+            (account, order_id),
+            timeout=self._TRADE_TIMEOUT,
+            operation_name="异步撤单",
         )
+
+        if seq < 0:
+            logger.warning("异步撤单失败: order_id=%s seq=%s", order_id, seq)
+            raise BusinessException(f"异步撤单失败: order_id={order_id}, seq={seq}")
 
         logger.info("异步撤单已提交: order_id=%s seq=%s", order_id, seq)
         return int(seq)
 
-    # ── 查询 ──────────────────────────────────────────────
+    # ── 订阅 ──────────────────────────────────────────────
 
-    async def query_asset(self) -> dict[str, Any]:
-        """查询资金资产。"""
-        account = self._get_account()
-        self._ensure_connected()
-        trader = self._connection.trader
+    async def subscribe_account(self) -> int:
+        """订阅账号信息（资金/委托/成交/持仓推送）。
 
-        asset = await asyncio.to_thread(trader.query_stock_asset, account)
-        if asset is None:
-            logger.warning("查询资产为空: account=%s", account.account_id)
-            return {}
-
-        return {
-            "account_id": asset.account_id,
-            "cash": asset.cash,
-            "frozen_cash": asset.frozen_cash,
-            "market_value": asset.market_value,
-            "total_asset": asset.total_asset,
-            "fetch_balance": asset.fetch_balance,
-        }
-
-    async def query_orders(self, cancelable_only: bool = False) -> list[dict[str, Any]]:
-        """查询当日委托。
-
-        Args:
-            cancelable_only: 是否仅查询可撤委托
+        Returns:
+            0 成功，非 0 失败。
         """
         account = self._get_account()
         self._ensure_connected()
         trader = self._connection.trader
 
-        orders = await asyncio.to_thread(trader.query_stock_orders, account, cancelable_only)
-        return [self._order_to_dict(o) for o in (orders or [])]
+        result: int = await self._call_sync_with_timeout(
+            trader.subscribe,
+            (account,),
+            timeout=self._TRADE_TIMEOUT,
+            operation_name="订阅账号",
+        )
 
-    async def query_order(self, order_id: int) -> dict[str, Any] | None:
-        """查询单笔委托。"""
-        account = self._get_account()
-        self._ensure_connected()
-        trader = self._connection.trader
+        if result != 0:
+            logger.warning("订阅账号失败: account=%s result=%s", account.account_id, result)
+            raise BusinessException(
+                f"订阅账号失败: account={account.account_id}, result={result}"
+            )
 
-        order = await asyncio.to_thread(trader.query_stock_order, account, order_id)
-        return self._order_to_dict(order) if order else None
-
-    async def query_trades(self) -> list[dict[str, Any]]:
-        """查询当日成交。"""
-        account = self._get_account()
-        self._ensure_connected()
-        trader = self._connection.trader
-
-        trades = await asyncio.to_thread(trader.query_stock_trades, account)
-        return [self._trade_to_dict(t) for t in (trades or [])]
-
-    async def query_positions(self) -> list[dict[str, Any]]:
-        """查询所有持仓。"""
-        account = self._get_account()
-        self._ensure_connected()
-        trader = self._connection.trader
-
-        positions = await asyncio.to_thread(trader.query_stock_positions, account)
-        return [self._position_to_dict(p) for p in (positions or [])]
-
-    async def query_position(self, stock_code: str) -> dict[str, Any] | None:
-        """查询单只股票持仓。"""
-        account = self._get_account()
-        self._ensure_connected()
-        trader = self._connection.trader
-
-        position = await asyncio.to_thread(trader.query_stock_position, account, stock_code)
-        return self._position_to_dict(position) if position else None
-
-    async def query_account_infos(self) -> list[dict[str, Any]]:
-        """查询所有资金账号。"""
-        self._ensure_connected()
-        trader = self._connection.trader
-
-        infos = await asyncio.to_thread(trader.query_account_infos)
-        return [
-            {
-                "account_id": getattr(i, "account_id", ""),
-                "account_type": getattr(i, "account_type", ""),
-            }
-            for i in (infos or [])
-        ]
-
-    # ── 订阅 ──────────────────────────────────────────────
-
-    async def subscribe_account(self) -> int:
-        """订阅账号信息（资金/委托/成交/持仓推送）。"""
-        account = self._get_account()
-        self._ensure_connected()
-        trader = self._connection.trader
-
-        result: int = await asyncio.to_thread(trader.subscribe, account)
-        logger.info("订阅账号: account=%s result=%s", account.account_id, result)
+        logger.info("订阅账号成功: account=%s result=%s", account.account_id, result)
         return int(result)
 
     async def unsubscribe_account(self) -> int:
-        """反订阅账号信息。"""
+        """反订阅账号信息。
+
+        Returns:
+            0 成功，非 0 失败。
+        """
         account = self._get_account()
         self._ensure_connected()
         trader = self._connection.trader
 
-        result: int = await asyncio.to_thread(trader.unsubscribe, account)
-        logger.info("反订阅账号: account=%s result=%s", account.account_id, result)
+        result: int = await self._call_sync_with_timeout(
+            trader.unsubscribe,
+            (account,),
+            timeout=self._TRADE_TIMEOUT,
+            operation_name="反订阅账号",
+        )
+
+        if result != 0:
+            logger.warning("反订阅账号失败: account=%s result=%s", account.account_id, result)
+            raise BusinessException(
+                f"反订阅账号失败: account={account.account_id}, result={result}"
+            )
+
+        logger.info("反订阅账号成功: account=%s result=%s", account.account_id, result)
         return int(result)
-
-    # ── 数据转换 ──────────────────────────────────────────
-
-    @staticmethod
-    def _order_to_dict(order: Any) -> dict[str, Any]:
-        return {
-            "account_id": order.account_id,
-            "stock_code": order.stock_code,
-            "order_id": order.order_id,
-            "order_sysid": order.order_sysid,
-            "order_time": order.order_time,
-            "order_type": order.order_type,
-            "order_volume": order.order_volume,
-            "price_type": order.price_type,
-            "price": order.price,
-            "traded_volume": order.traded_volume,
-            "traded_price": order.traded_price,
-            "order_status": order.order_status,
-            "status_msg": order.status_msg,
-            "strategy_name": order.strategy_name,
-            "order_remark": order.order_remark,
-        }
-
-    @staticmethod
-    def _trade_to_dict(trade: Any) -> dict[str, Any]:
-        return {
-            "account_id": trade.account_id,
-            "stock_code": trade.stock_code,
-            "order_type": trade.order_type,
-            "traded_id": trade.traded_id,
-            "traded_time": trade.traded_time,
-            "traded_price": trade.traded_price,
-            "traded_volume": trade.traded_volume,
-            "traded_amount": trade.traded_amount,
-            "order_id": trade.order_id,
-            "order_sysid": trade.order_sysid,
-        }
-
-    @staticmethod
-    def _position_to_dict(position: Any) -> dict[str, Any]:
-        return {
-            "account_id": position.account_id,
-            "stock_code": position.stock_code,
-            "volume": position.volume,
-            "can_use_volume": position.can_use_volume,
-            "open_price": position.open_price,
-            "market_value": position.market_value,
-            "frozen_volume": position.frozen_volume,
-            "on_road_volume": position.on_road_volume,
-            "yesterday_volume": position.yesterday_volume,
-            "avg_price": position.avg_price,
-            "direction": position.direction,
-        }

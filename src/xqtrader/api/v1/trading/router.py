@@ -2,23 +2,27 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
+from decimal import Decimal
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 from sqlalchemy import desc
 
 from framework.commons.exceptions import BusinessException, NotFoundException
 from framework.commons.logger import get_logger
 from framework.commons.pagination import build_paginated_response, paginate
 from framework.commons.redis_client import redis_client
-from framework.dal.transaction import transactional
+from framework.commons.time_util import now_shanghai
 from xqtrader.api.v1.trading.schemas import (
     AccountCreate,
     ApprovalRequest,
     BatchApprovalRequest,
+    BatchPreOrderSubmitRequest,
     InstanceCreate,
     InstanceUpdate,
+    KillSwitchRequest,
     ManualDecisionWorkflowRequest,
+    PreOrderSubmitRequest,
     PreOrderUpdate,
     RiskEventResolveRequest,
     RiskRuleUpdate,
@@ -34,8 +38,6 @@ from xqtrader.domain.trading.enums import (
     ApprovalStatus,
     InstanceStatus,
     PreOrderStatus,
-    RiskEventType,
-    RiskLevel,
     RunMode,
 )
 from xqtrader.domain.trading.models.account import AccountSnapshot, TradingAccount
@@ -46,6 +48,7 @@ from xqtrader.domain.trading.models.position import PositionSnapshot
 from xqtrader.domain.trading.models.risk import RiskEvent, RiskRule
 from xqtrader.domain.trading.models.strategy import Strategy
 from xqtrader.domain.trading.models.watchlist import Watchlist, WatchlistItem
+from xqtrader.domain.trading.workflow.kill_switch_service import KillSwitchService
 from xqtrader.ws.spi.impl.pnl import sync_account_assets_to_redis
 from xqtrader.ws.spi.impl.watchlist_quotes import WATCHLIST_SYMBOLS_PREFIX
 
@@ -56,6 +59,26 @@ router = APIRouter(prefix="/trading", tags=["交易"])
 VALID_ACCOUNT_TYPES = {AccountType.LIVE, AccountType.PAPER}
 VALID_RUN_MODES = {RunMode.LIVE_MANUAL, RunMode.LIVE_AUTO, RunMode.PAPER, RunMode.BACKTEST}
 LIVE_RUN_MODES = {RunMode.LIVE_MANUAL, RunMode.LIVE_AUTO}
+RISK_LEVEL_LABEL = {"info": "提示", "warn": "警告", "critical": "严重", "fatal": "致命"}
+RISK_EVENT_TYPE_LABEL = {
+    "blocked": "已阻断",
+    "warning": "风险提示",
+    "circuit_breaker": "熔断",
+    "kill_switch": "紧急只减仓",
+}
+RISK_REASON_LABEL = {
+    "blacklisted": "命中黑名单",
+    "max_single_weight_exceeded": "单标的仓位超过上限",
+    "max_total_weight_exceeded": "组合总仓位超过上限",
+    "account_reduce_only": "账户处于仅减仓模式",
+    "manual_kill_switch": "人工触发紧急只减仓",
+    "no_position_to_reduce": "无可减仓持仓",
+}
+RISK_ACTION_LABEL = {
+    "pre_order_blocked": "已阻断该标的预订单",
+    "all_pre_orders_blocked": "已阻断本轮信号预订单",
+    "reduce_only_and_close_pre_orders_generated": "已切换仅减仓并生成平仓预订单",
+}
 
 
 # ==================== 辅助函数 ====================
@@ -171,7 +194,7 @@ async def _create_account_decision_instance(
     watchlist_strategies: list[dict] | None = None,
 ) -> StrategyInstance:
     account = await _get_account_or_404(account_id)
-    now = datetime.now(timezone.utc)
+    now = now_shanghai()
     return await StrategyInstance.create(
         account_id=account_id,
         strategy_id=None,
@@ -257,75 +280,27 @@ async def get_account(account_id: int) -> dict:
 
 @router.post(
     "/accounts/{account_id}/kill-switch",
-    summary="账户紧急全平预订单",
+    summary="账户紧急全平 — 绕过审批直连 Broker",
     operation_id="enable_account_kill_switch",
 )
-@transactional(bind_key="trading")
-async def enable_account_kill_switch(account_id: int) -> dict:
-    account = await _get_account_or_404(account_id)
-    await account.update({"reduce_only": True})
-    latest = await PositionSnapshot.filter(
+async def enable_account_kill_switch(
+    account_id: int,
+    req: KillSwitchRequest,
+) -> dict:
+    """触发账户紧急全平：
+    1. 设置 reduce_only=True 阻断新买入
+    2. 写入 FATAL 级 kill_switch 风控事件
+    3. 取消所有 SUBMITTED 挂单
+    4. 对每个持仓生成 close 预订单（APPROVED）+ Order（CREATED）
+    5. 直接提交到模拟撮合或 QMT，不经过人工审批
+    """
+    service = KillSwitchService.get_instance()
+    result = await service.execute(
         account_id=account_id,
-        limit=1,
-        order_by=desc(PositionSnapshot.snapshot_date),
+        operator=req.operator,
+        reason=req.reason,
     )
-    if latest:
-        positions = await PositionSnapshot.filter(
-            account_id=account_id,
-            snapshot_date=latest[0].snapshot_date,
-            limit=None,
-        )
-        instances = await StrategyInstance.filter(account_id=account_id, limit=1)
-        if not instances:
-            raise BusinessException(message=f"账户没有策略实例，无法生成紧急全平预订单: {account_id}")
-        instance_id = instances[0].id
-        today = datetime.now(timezone.utc).date()
-        pre_orders = [
-            PreOrder(
-                instance_id=instance_id,
-                signal_date=today,
-                execution_date=today,
-                symbol=position.symbol,
-                side="close",
-                target_weight=0,
-                current_weight=float(position.weight or 0),
-                target_qty=int(position.qty),
-                order_type="market",
-                sizing_strategy="kill_switch",
-                status=PreOrderStatus.PENDING_APPROVAL,
-                risk_check_passed=True,
-                risk_check_detail={"reason": "manual_kill_switch"},
-                approval_status=ApprovalStatus.PENDING,
-                idempotency_key=f"kill_switch:{account_id}:{today.isoformat()}:{position.symbol}",
-                node_id="kill_switch",
-            )
-            for position in positions
-            if position.qty > 0
-        ]
-        if pre_orders:
-            await PreOrder.bulk_create_or_update(
-                pre_orders,
-                on_conflict=["idempotency_key"],
-                update_fields=[
-                    "target_weight",
-                    "current_weight",
-                    "target_qty",
-                    "status",
-                    "risk_check_passed",
-                    "risk_check_detail",
-                    "approval_status",
-                    "updated_at",
-                ],
-            )
-    await RiskEvent.create(
-        account_id=account_id,
-        event_type=RiskEventType.KILL_SWITCH,
-        level=RiskLevel.FATAL,
-        detail={"reason": "manual_kill_switch"},
-        action_taken="reduce_only_and_close_pre_orders_generated",
-        resolved=False,
-    )
-    return account.to_dict()
+    return result
 
 
 @router.get(
@@ -478,7 +453,7 @@ async def update_instance(instance_id: int, req: InstanceUpdate) -> dict:
 )
 async def start_instance(instance_id: int) -> dict:
     instance = await _get_instance_or_404(instance_id)
-    now = datetime.now(timezone.utc)
+    now = now_shanghai()
     await instance.update({"status": "running", "started_at": now})
     return instance.to_dict()
 
@@ -501,7 +476,7 @@ async def pause_instance(instance_id: int) -> dict:
 )
 async def stop_instance(instance_id: int) -> dict:
     instance = await _get_instance_or_404(instance_id)
-    now = datetime.now(timezone.utc)
+    now = now_shanghai()
     await instance.update({"status": "stopped", "stopped_at": now})
     return instance.to_dict()
 
@@ -541,6 +516,24 @@ async def _get_account_decision_instance(account_id: int) -> StrategyInstance:
 
     watchlist_strategies = await _build_watchlist_strategy_bindings(account_id)
     return await _create_account_decision_instance(account_id, watchlist_strategies)
+
+
+async def _get_active_decision_instance_id(account_id: int) -> int:
+    return (await _get_account_decision_instance(account_id)).id
+
+
+@router.get(
+    "/accounts/{account_id}/decision-workflow/instance",
+    summary="账户当前盘后信号工作流实例",
+    operation_id="get_account_decision_workflow_instance",
+)
+async def get_account_decision_workflow_instance(account_id: int) -> dict:
+    instance = await _get_account_decision_instance(account_id)
+    data = instance.to_dict()
+    config = dict(data.get("config") or {})
+    config["watchlist_strategies"] = await _build_watchlist_strategy_bindings(account_id)
+    data["config"] = config
+    return data
 
 
 @router.post(
@@ -755,6 +748,32 @@ async def update_risk_rule(rule_id: int, req: RiskRuleUpdate) -> dict:
     return rule.to_dict()
 
 
+def _serialize_risk_event(event: RiskEvent) -> dict:
+    data = event.to_dict()
+    detail_value = data.get("detail")
+    detail: dict = detail_value if isinstance(detail_value, dict) else {}
+    raw_reasons = detail.get("reasons")
+    if not isinstance(raw_reasons, list):
+        raw_reasons = [detail.get("reason") or data.get("event_type")]
+    reason_labels = [RISK_REASON_LABEL.get(str(reason), str(reason)) for reason in raw_reasons]
+    symbol = detail.get("symbol") if isinstance(detail.get("symbol"), str) else "账户级"
+    action = data.get("action_taken")
+    data["display"] = {
+        "level_label": RISK_LEVEL_LABEL.get(str(data.get("level")), str(data.get("level"))),
+        "event_type_label": RISK_EVENT_TYPE_LABEL.get(str(data.get("event_type")), str(data.get("event_type"))),
+        "reason_labels": reason_labels,
+        "action_label": RISK_ACTION_LABEL.get(str(action), str(action)) if action else None,
+        "summary": f"{symbol}：{'、'.join(reason_labels)}",
+        "scope": "标的级" if symbol != "账户级" else "账户级",
+        "reasons_text": "、".join(reason_labels),
+        "relation_hint": (
+            "这是账户未处理风控事件，可能来自历史阻断或账户级控制；"
+            "待审批信号本身以 risk_check_passed 为准。"
+        ),
+    }
+    return data
+
+
 @router.get(
     "/risk-events",
     summary="风控事件列表",
@@ -772,9 +791,12 @@ async def list_risk_events(
     skip, limit = paginate(page, page_size)
     filters: dict = {}
     if account_id is not None:
+        await _get_account_or_404(account_id)
         filters["account_id"] = account_id
     if instance_id is not None:
         filters["instance_id"] = instance_id
+    elif account_id is not None and resolved is False:
+        filters["instance_id"] = await _get_active_decision_instance_id(account_id)
     if resolved is not None:
         filters["resolved"] = resolved
     if level:
@@ -790,7 +812,7 @@ async def list_risk_events(
     )
     total = await RiskEvent.count(**filters)
     return build_paginated_response(
-        [event.to_dict() for event in items], total, page, page_size,
+        [_serialize_risk_event(event) for event in items], total, page, page_size,
     )
 
 
@@ -807,9 +829,9 @@ async def resolve_risk_event(event_id: int, req: RiskEventResolveRequest) -> dic
         await event.update({
             "resolved": True,
             "resolved_by": req.resolved_by,
-            "resolved_at": datetime.now(timezone.utc),
+            "resolved_at": now_shanghai(),
         })
-    return event.to_dict()
+    return _serialize_risk_event(event)
 
 
 # ==================== 持仓 & 订单 API ====================
@@ -869,6 +891,65 @@ async def list_orders(
     )
     total = await Order.count(**filters)
     return build_paginated_response([item.to_dict() for item in items], total, page, page_size)
+
+
+async def _run_pre_order_execution_workflow(pre_order_id: int, operator: str) -> dict:
+    pre_order = await PreOrder.get(pre_order_id)
+    if pre_order is None:
+        raise NotFoundException(message=f"预订单不存在: {pre_order_id}")
+    # 业务规则校验（账户启用/类型/审批/风控/限价等）由 execute_workflow →
+    # load_execution_context → PreOrderExecutionWorkflowService._validate_pre_order
+    # 内部统一执行，此处不再跨模块调用私有方法。
+    workflow_result = await execute_workflow(
+        flow_id="pre_order_execution_flow",
+        workspace_id=f"pre_order:{pre_order_id}",
+        inputs={"pre_order_id": pre_order_id, "operator": operator},
+    )
+    outputs = workflow_result.get("outputs") or {}
+    submit_result = outputs.get("submit_qmt_order") or outputs.get("submit_simulated_order") or {}
+    create_result = outputs.get("create_order") or {}
+    order = submit_result.get("order") or create_result.get("order")
+    if not isinstance(order, dict):
+        raise BusinessException(message=f"预订单执行流未返回订单: {pre_order_id}")
+    return {
+        "run": workflow_result,
+        "order": order,
+        "submitter": submit_result.get("submitter"),
+        "broker_order_id": submit_result.get("broker_order_id") or order.get("broker_order_id"),
+    }
+
+
+@router.post(
+    "/pre-orders/{pre_order_id}/submit",
+    summary="预订单下单",
+    operation_id="submit_pre_order",
+)
+async def submit_pre_order(pre_order_id: int, req: PreOrderSubmitRequest) -> dict:
+    return await _run_pre_order_execution_workflow(pre_order_id, req.operator)
+
+
+@router.post(
+    "/pre-orders/submit/batch",
+    summary="批量预订单下单",
+    operation_id="batch_submit_pre_orders",
+)
+async def batch_submit_pre_orders(req: BatchPreOrderSubmitRequest) -> dict:
+    submitted: list[dict] = []
+    failed: list[dict] = []
+    for pre_order_id in req.pre_order_ids:
+        try:
+            submitted.append(await _run_pre_order_execution_workflow(pre_order_id, req.operator))
+        except BusinessException as exc:
+            failed.append({"pre_order_id": pre_order_id, "message": exc.message})
+        except Exception as exc:
+            logger.error("预订单批量下单失败: %s", pre_order_id, exc_info=True)
+            failed.append({"pre_order_id": pre_order_id, "message": str(exc)})
+    return {
+        "submitted": len(submitted),
+        "failed": len(failed),
+        "items": submitted,
+        "failures": failed,
+    }
 
 
 # ==================== 预订单 API ====================
@@ -1001,9 +1082,21 @@ async def update_pre_order(pre_order_id: int, req: PreOrderUpdate) -> dict:
     if po.approval_status != ApprovalStatus.PENDING:
         raise BusinessException(message="仅待审批状态可修改")
     payload = req.model_dump(exclude_unset=True)
+    approval_execution = payload.pop("approval_execution", None)
+    if approval_execution is not None:
+        risk_detail = po.risk_check_detail if isinstance(po.risk_check_detail, dict) else {}
+        payload["risk_check_detail"] = risk_detail | {"approval_execution": approval_execution}
     if payload:
         await po.update(payload)
     return po.to_dict()
+
+
+def _resolve_audit_comment(comment: str, request: Request) -> str:
+    """将客户端 IP/UA 附加到审批意见，作为审计依据。"""
+    client_ip = request.client.host if request.client else "unknown"
+    user_agent = request.headers.get("user-agent", "unknown")
+    audit = f"[ip={client_ip};ua={user_agent[:120]}]"
+    return f"{comment} {audit}".strip() if comment else audit
 
 
 # ==================== 审批 API ====================
@@ -1014,8 +1107,9 @@ async def update_pre_order(pre_order_id: int, req: PreOrderUpdate) -> dict:
     summary="批量审批",
     operation_id="batch_approve_pre_orders",
 )
-async def batch_approve_pre_orders(req: BatchApprovalRequest) -> dict:
-    now = datetime.now(timezone.utc)
+async def batch_approve_pre_orders(req: BatchApprovalRequest, request: Request) -> dict:
+    now = now_shanghai()
+    audit_comment = _resolve_audit_comment(req.comment, request)
     approved_count = 0
     rejected_count = 0
     skipped_count = 0
@@ -1030,7 +1124,7 @@ async def batch_approve_pre_orders(req: BatchApprovalRequest) -> dict:
                 "status": PreOrderStatus.APPROVED,
                 "approved_by": req.approved_by,
                 "approved_at": now,
-                "approval_comment": req.comment,
+                "approval_comment": audit_comment,
             })
             approved_count += 1
         else:
@@ -1039,7 +1133,7 @@ async def batch_approve_pre_orders(req: BatchApprovalRequest) -> dict:
                 "status": PreOrderStatus.REJECTED,
                 "approved_by": req.approved_by,
                 "approved_at": now,
-                "approval_comment": req.comment,
+                "approval_comment": audit_comment,
             })
             rejected_count += 1
     return {
@@ -1054,20 +1148,21 @@ async def batch_approve_pre_orders(req: BatchApprovalRequest) -> dict:
     summary="逐条审批",
     operation_id="approve_pre_order",
 )
-async def approve_pre_order(pre_order_id: int, req: ApprovalRequest) -> dict:
+async def approve_pre_order(pre_order_id: int, req: ApprovalRequest, request: Request) -> dict:
     po = await PreOrder.get_or_none(id=pre_order_id)
     if po is None:
         raise NotFoundException(message=f"预订单不存在: {pre_order_id}")
     if po.approval_status != ApprovalStatus.PENDING:
         raise BusinessException(message=f"当前审批状态为 {po.approval_status}，不可重复审批")
-    now = datetime.now(timezone.utc)
+    now = now_shanghai()
+    audit_comment = _resolve_audit_comment(req.comment, request)
     if req.approved:
         await po.update({
             "approval_status": ApprovalStatus.APPROVED,
             "status": PreOrderStatus.APPROVED,
             "approved_by": req.approved_by,
             "approved_at": now,
-            "approval_comment": req.comment,
+            "approval_comment": audit_comment,
         })
     else:
         await po.update({
@@ -1075,6 +1170,6 @@ async def approve_pre_order(pre_order_id: int, req: ApprovalRequest) -> dict:
             "status": PreOrderStatus.REJECTED,
             "approved_by": req.approved_by,
             "approved_at": now,
-            "approval_comment": req.comment,
+            "approval_comment": audit_comment,
         })
     return po.to_dict()

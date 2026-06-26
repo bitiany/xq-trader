@@ -3,17 +3,17 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import threading
 from typing import TYPE_CHECKING
 
 from framework.commons.exceptions import BrokerConfigError, BrokerConnectionError
+from framework.commons.logger import get_logger
 from framework.config.settings import settings
 
 if TYPE_CHECKING:
     from xtquant.xttrader import XtQuantTrader
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class QmtConnection:
@@ -88,7 +88,7 @@ class QmtConnection:
             )
         else:
             self._trader = None
-            logger.error("QMT 交易连接失败: result=%s path=%s", result, qmt.QMT_USERDATA_PATH, exc_info=True)
+            logger.warning("QMT 交易连接失败: result=%s path=%s", result, qmt.QMT_USERDATA_PATH)
 
         return int(result)
 

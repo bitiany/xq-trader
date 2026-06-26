@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { Table, Tag, Switch, Badge, Button, message } from 'antd';
+import { Table, Tag, Switch, Badge, Button, message, Modal, Input } from 'antd';
 import { Shield, Flame, CheckCircle, ChevronDown, ChevronRight, History } from 'lucide-react';
 import {
   enableAccountKillSwitch,
@@ -7,6 +7,7 @@ import {
   fetchRiskRules,
   resolveRiskEvent,
   updateRiskRule,
+  type KillSwitchResult,
   type RiskEvent,
   type RiskRule,
 } from '@/api/trading';
@@ -14,16 +15,28 @@ import { RISK_LEVEL_TAG } from '../utils/trading';
 
 interface RiskSidePanelProps {
   accountId: number | null;
+  instanceId: number | null;
   onOpenHistory: () => void;
 }
 
-function eventDetailText(event: RiskEvent) {
-  const symbol = typeof event.detail?.symbol === 'string' ? event.detail.symbol : '';
-  const reasons = Array.isArray(event.detail?.reasons) ? event.detail.reasons.join(',') : event.event_type;
-  return symbol ? `${symbol} ${reasons}` : reasons;
+const OPERATOR_STORAGE_KEY = 'xqtrader:approval_operator';
+
+function loadStoredOperator(): string {
+  try {
+    return localStorage.getItem(OPERATOR_STORAGE_KEY) ?? '';
+  } catch {
+    return '';
+  }
 }
 
-export function RiskSidePanel({ accountId, onOpenHistory }: RiskSidePanelProps) {
+function eventDetailText(event: RiskEvent) {
+  if (event.display?.summary) return event.display.summary;
+  const symbol = typeof event.detail?.symbol === 'string' ? event.detail.symbol : '账户级';
+  const reasonText = event.display?.reasons_text ?? event.event_type;
+  return `${symbol}：${reasonText}`;
+}
+
+export function RiskSidePanel({ accountId, instanceId, onOpenHistory }: RiskSidePanelProps) {
   const [showRules, setShowRules] = useState(false);
   const [rules, setRules] = useState<RiskRule[]>([]);
   const [events, setEvents] = useState<RiskEvent[]>([]);
@@ -33,7 +46,12 @@ export function RiskSidePanel({ accountId, onOpenHistory }: RiskSidePanelProps) 
     Promise.resolve().then(() => {
       const eventRequest = accountId === null
         ? Promise.resolve({ items: [], total: 0, page: 1, page_size: 20 })
-        : fetchRiskEvents({ account_id: accountId, resolved: false, page_size: 20 });
+        : fetchRiskEvents({
+          account_id: accountId,
+          instance_id: instanceId ?? undefined,
+          resolved: false,
+          page_size: 20,
+        });
 
       return Promise.all([fetchRiskRules(), eventRequest]).then(([ruleRes, eventRes]) => {
         if (cancelled) return;
@@ -44,7 +62,7 @@ export function RiskSidePanel({ accountId, onOpenHistory }: RiskSidePanelProps) 
       });
     });
     return () => { cancelled = true; };
-  }, [accountId]);
+  }, [accountId, instanceId]);
 
   const handleToggleRule = useCallback(async (ruleId: number, enabled: boolean) => {
     try {
@@ -65,17 +83,82 @@ export function RiskSidePanel({ accountId, onOpenHistory }: RiskSidePanelProps) 
     }
   }, []);
 
-  const handleKillSwitch = useCallback(async () => {
-    if (accountId === null) return;
-    try {
-      await enableAccountKillSwitch(accountId);
-      const eventRes = await fetchRiskEvents({ account_id: accountId, resolved: false, page_size: 20 });
-      setEvents(eventRes.items ?? []);
-      message.success('已启用紧急只减仓');
-    } catch {
-      message.error('紧急全平失败');
+  const showKillSwitchResult = useCallback((result: KillSwitchResult) => {
+    const cancelSucceeded = result.cancelled_orders.filter(o => o.status === 'cancel_succeeded').length;
+    const cancelFailed = result.cancelled_orders.length - cancelSucceeded;
+    const closeSucceeded = result.close_orders.filter(o => o.status === 'submitted').length;
+    const closeFailed = result.close_orders.length - closeSucceeded;
+    const summary = [
+      `撤单: ${cancelSucceeded}/${result.cancelled_orders.length} 成功` +
+        (cancelFailed > 0 ? ` (${cancelFailed} 失败)` : ''),
+      `平仓: ${closeSucceeded}/${result.close_orders.length} 成功` +
+        (closeFailed > 0 ? ` (${closeFailed} 失败)` : ''),
+    ].join(' | ');
+    if (closeFailed > 0 || cancelFailed > 0) {
+      message.warning(summary);
+    } else {
+      message.success(summary);
     }
-  }, [accountId]);
+  }, []);
+
+  const handleKillSwitch = useCallback(() => {
+    if (accountId === null) return;
+    const storedOperator = loadStoredOperator();
+    let operatorInput = storedOperator;
+    let reasonInput = 'manual_kill_switch';
+    const modal = Modal.confirm({
+      title: '账户紧急全平',
+      content: (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+          <div style={{ fontSize: 12, color: 'var(--text-warning)' }}>
+            将设置账户为仅减仓、取消所有挂单、并对所有持仓发起市价平仓委托。请确认。
+          </div>
+          <Input
+            placeholder="操作人 (必填，禁止 system)"
+            defaultValue={operatorInput}
+            onChange={(e) => { operatorInput = e.target.value.trim(); }}
+          />
+          <Input
+            placeholder="触发原因 (默认 manual_kill_switch)"
+            defaultValue={reasonInput}
+            onChange={(e) => { reasonInput = e.target.value || 'manual_kill_switch'; }}
+          />
+        </div>
+      ),
+      okText: '确认全平',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        const trimmedOperator = operatorInput.trim();
+        if (!trimmedOperator) {
+          message.error('请填写操作人后再触发紧急全平');
+          throw new Error('operator required');
+        }
+        if (trimmedOperator.toLowerCase() === 'system') {
+          message.error('操作人禁止使用 system，请填写真实姓名');
+          throw new Error('operator forbidden');
+        }
+        try {
+          const result = await enableAccountKillSwitch(accountId, {
+            operator: trimmedOperator,
+            reason: reasonInput,
+          });
+          showKillSwitchResult(result);
+          const eventRes = await fetchRiskEvents({
+            account_id: accountId,
+            instance_id: instanceId ?? undefined,
+            resolved: false,
+            page_size: 20,
+          });
+          setEvents(eventRes.items ?? []);
+        } catch {
+          message.error('紧急全平失败');
+          throw new Error('kill switch failed');
+        }
+      },
+    });
+    return modal;
+  }, [accountId, instanceId, showKillSwitchResult]);
 
   const enabledCount = rules.filter(r => r.is_enabled).length;
   const activeAlerts = events.length;
@@ -87,7 +170,10 @@ export function RiskSidePanel({ accountId, onOpenHistory }: RiskSidePanelProps) 
       const labels: Record<string, string> = { circuit_breaker: '熔断', position: '仓位', capital: '资金', timing: '时段' };
       return <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>{labels[v] || v}</span>;
     }},
-    { title: '级', dataIndex: 'level', width: 35, render: (v: 'info' | 'warn' | 'critical' | 'fatal') => <Tag color={RISK_LEVEL_TAG[v]} style={{ fontSize: 9, padding: '0 3px', margin: 0, lineHeight: '16px' }}>{v}</Tag> },
+    { title: '级', dataIndex: 'level', width: 35, render: (v: 'info' | 'warn' | 'critical' | 'fatal') => {
+      const labels: Record<string, string> = { info: '提示', warn: '警告', critical: '严重', fatal: '致命' };
+      return <Tag color={RISK_LEVEL_TAG[v]} style={{ fontSize: 9, padding: '0 3px', margin: 0, lineHeight: '16px' }}>{labels[v] ?? v}</Tag>;
+    }},
     { title: '参数', dataIndex: 'params', width: 70, render: (v: Record<string, unknown>) => <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10 }}>{v ? JSON.stringify(v) : '—'}</span> },
     { title: '', dataIndex: 'is_enabled', width: 35, render: (v: boolean, _: unknown, idx: number) => {
       const rule = rules[idx];
@@ -96,7 +182,7 @@ export function RiskSidePanel({ accountId, onOpenHistory }: RiskSidePanelProps) 
   ], [rules, handleToggleRule]);
 
   const eventColumns = useMemo(() => [
-    { title: '级别', dataIndex: 'level', width: 58, render: (v: 'info' | 'warn' | 'critical' | 'fatal') => <Tag color={RISK_LEVEL_TAG[v]} style={{ fontSize: 9, padding: '0 4px', margin: 0 }}>{v}</Tag> },
+    { title: '级别', dataIndex: 'level', width: 58, render: (v: 'info' | 'warn' | 'critical' | 'fatal', r: RiskEvent) => <Tag color={RISK_LEVEL_TAG[v]} style={{ fontSize: 9, padding: '0 4px', margin: 0 }}>{r.display?.level_label ?? v}</Tag> },
     { title: '告警', width: 150, render: (_: unknown, r: RiskEvent) => <span style={{ fontSize: 10 }}>{eventDetailText(r)}</span> },
     { title: '', width: 45, render: (_: unknown, r: RiskEvent) => <Button size="small" type="link" onClick={() => handleResolveEvent(r.id)} style={{ fontSize: 10, padding: 0 }}>处理</Button> },
   ], [handleResolveEvent]);
@@ -156,6 +242,9 @@ export function RiskSidePanel({ accountId, onOpenHistory }: RiskSidePanelProps) 
       {events.length > 0 && (
         <div className="risk-side-panel__section">
           <div className="risk-side-panel__section-title">风控告警 ({events.length})</div>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: 6 }}>
+            这里展示账户未处理风控事件；当前待审批信号以卡片上的“风控预检”为准，二者不必然矛盾。
+          </div>
           <Table dataSource={events} columns={eventColumns} rowKey="id" size="small" pagination={false} showHeader={false} />
         </div>
       )}

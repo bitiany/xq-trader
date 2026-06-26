@@ -222,8 +222,33 @@ export async function fetchAccountSnapshots(accountId: number, params?: {
   return request.get(`/trading/accounts/${accountId}/snapshots`, { params })
 }
 
-export async function enableAccountKillSwitch(accountId: number): Promise<TradingAccount> {
-  return request.post(`/trading/accounts/${accountId}/kill-switch`)
+export interface KillSwitchCancelResult {
+  order_id: number
+  broker_order_id: string
+  cancel_result?: number
+  status: 'cancel_succeeded' | 'cancel_failed'
+  error?: string
+}
+
+export interface KillSwitchCloseOrderResult {
+  order_id: number
+  status: 'submitted' | 'submit_failed'
+  result?: PreOrderExecutionResult
+  error?: string
+}
+
+export interface KillSwitchResult {
+  account_id: number
+  reduce_only: boolean
+  cancelled_orders: KillSwitchCancelResult[]
+  close_orders: KillSwitchCloseOrderResult[]
+}
+
+export async function enableAccountKillSwitch(
+  accountId: number,
+  data: { operator: string; reason?: string },
+): Promise<KillSwitchResult> {
+  return request.post(`/trading/accounts/${accountId}/kill-switch`, data)
 }
 
 // ---- 策略实例 ----
@@ -236,6 +261,10 @@ export async function fetchInstances(params?: {
   page_size?: number
 }): Promise<PaginatedResponse<StrategyInstance>> {
   return request.get('/trading/instances', { params })
+}
+
+export async function fetchAccountDecisionWorkflowInstance(accountId: number): Promise<StrategyInstance> {
+  return request.get(`/trading/accounts/${accountId}/decision-workflow/instance`)
 }
 
 export async function createInstance(data: InstanceCreateRequest): Promise<StrategyInstance> {
@@ -328,6 +357,49 @@ export async function fetchOrders(params: {
   return request.get('/trading/orders', { params })
 }
 
+export interface PreOrderExecutionResult {
+  run: {
+    run_id: string
+    flow_id: string
+    workspace_id: string
+    status: 'running' | 'succeeded' | 'failed' | 'paused' | 'stopped'
+    outputs: Record<string, unknown>
+    elapsed_time: number
+  }
+  order: TradingOrder
+  submitter: 'simulated' | 'qmt' | null
+  broker_order_id: string | null
+}
+
+export interface BatchPreOrderExecutionResult {
+  submitted: number
+  failed: number
+  items: PreOrderExecutionResult[]
+  failures: { pre_order_id: number; message: string }[]
+}
+
+export async function submitPreOrder(preOrderId: number, data: { operator?: string }): Promise<PreOrderExecutionResult> {
+  return request.post(`/trading/pre-orders/${preOrderId}/submit`, data)
+}
+
+export async function batchSubmitPreOrders(data: {
+  pre_order_ids: number[]
+  operator?: string
+}): Promise<BatchPreOrderExecutionResult> {
+  return request.post('/trading/pre-orders/submit/batch', data)
+}
+
+export interface RiskEventDisplay {
+  level_label: string
+  event_type_label: string
+  reason_labels: string[]
+  action_label: string | null
+  summary: string
+  scope: string
+  reasons_text?: string
+  relation_hint: string
+}
+
 export interface RiskEvent {
   id: number
   rule_id: number | null
@@ -341,6 +413,7 @@ export interface RiskEvent {
   resolved_by: string | null
   resolved_at: string | null
   created_at: string
+  display?: RiskEventDisplay
 }
 
 export async function fetchRiskEvents(params?: {
@@ -444,6 +517,7 @@ export async function updatePreOrder(preOrderId: number, data: {
   target_qty?: number | null
   order_type?: string
   limit_price?: string | null
+  approval_execution?: Record<string, unknown>
 }): Promise<PreOrder> {
   return request.put(`/trading/pre-orders/${preOrderId}`, data)
 }

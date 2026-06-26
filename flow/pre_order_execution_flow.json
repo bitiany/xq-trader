@@ -1,0 +1,115 @@
+{
+  "id": "pre_order_execution_flow",
+  "description": "预订单转正式订单并按账户类型分支提交：模拟盘走模拟提交，实盘走QMT真实下单",
+  "input_schema": {
+    "pre_order_id": "pre_order_id",
+    "operator": "operator"
+  },
+  "output_schema": {
+    "context": "load_execution_context",
+    "order": "create_order",
+    "simulated_submit": "submit_simulated_order",
+    "qmt_submit": "submit_qmt_order"
+  },
+  "graph": {
+    "nodes": [
+      {
+        "id": "start",
+        "type": "start",
+        "name": "开始",
+        "props": {
+          "variables": [
+            {"variable": "pre_order_id"},
+            {"variable": "operator"}
+          ]
+        }
+      },
+      {
+        "id": "load_execution_context",
+        "type": "tool",
+        "name": "加载预订单执行上下文",
+        "props": {
+          "name": "load_pre_order_execution_context_tool",
+          "class": "xqtrader.domain.trading.workflow.tools.execution_tools.LoadPreOrderExecutionContextTool",
+          "variables": [
+            {"variable": "pre_order_id", "value": "{pre_order_id}", "type": "text"}
+          ]
+        }
+      },
+      {
+        "id": "create_order",
+        "type": "tool",
+        "name": "生成正式订单",
+        "props": {
+          "name": "create_order_from_pre_order_tool",
+          "class": "xqtrader.domain.trading.workflow.tools.execution_tools.CreateOrderFromPreOrderTool",
+          "variables": [
+            {"variable": "context", "value": "{load_execution_context}", "type": "json"},
+            {"variable": "workflow_run_id", "value": "{execute_id}", "type": "text"},
+            {"variable": "operator", "value": "{operator}", "type": "text"}
+          ]
+        }
+      },
+      {
+        "id": "route_submitter",
+        "type": "switch",
+        "name": "账户类型分支",
+        "props": {
+          "case": [
+            {
+              "id": "qmt",
+              "condition": {"type": "equals", "variable": "{load_execution_context.submitter}", "value": "qmt"}
+            },
+            {
+              "id": "simulated",
+              "condition": {"type": "equals", "variable": "{load_execution_context.submitter}", "value": "simulated"}
+            }
+          ]
+        }
+      },
+      {
+        "id": "submit_simulated_order",
+        "type": "tool",
+        "name": "模拟盘提交订单",
+        "props": {
+          "name": "submit_simulated_order_tool",
+          "class": "xqtrader.domain.trading.workflow.tools.execution_tools.SubmitSimulatedOrderTool",
+          "variables": [
+            {"variable": "order_id", "value": "{create_order.order.id}", "type": "text"},
+            {"variable": "operator", "value": "{operator}", "type": "text"}
+          ]
+        }
+      },
+      {
+        "id": "submit_qmt_order",
+        "type": "tool",
+        "name": "QMT真实下单",
+        "props": {
+          "name": "submit_qmt_order_tool",
+          "class": "xqtrader.domain.trading.workflow.tools.execution_tools.SubmitQmtOrderTool",
+          "variables": [
+            {"variable": "order_id", "value": "{create_order.order.id}", "type": "text"},
+            {"variable": "operator", "value": "{operator}", "type": "text"}
+          ]
+        }
+      },
+      {
+        "id": "end",
+        "type": "end",
+        "name": "结束",
+        "props": {
+          "output": "{submit_simulated_order}{submit_qmt_order}"
+        }
+      }
+    ],
+    "edges": [
+      {"from": "start", "to": "load_execution_context"},
+      {"from": "load_execution_context", "to": "create_order"},
+      {"from": "create_order", "to": "route_submitter"},
+      {"from": "route_submitter", "to": "submit_qmt_order", "condition": "qmt"},
+      {"from": "route_submitter", "to": "submit_simulated_order", "condition": "simulated"},
+      {"from": "submit_qmt_order", "to": "end"},
+      {"from": "submit_simulated_order", "to": "end"}
+    ]
+  }
+}

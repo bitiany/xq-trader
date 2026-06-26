@@ -29,7 +29,7 @@ async def _auto_connect_qmt() -> None:
     result = await connection.connect_async()
     if result == 0:
         main_loop = asyncio.get_running_loop()
-        callback_handler = QmtCallbackHandler(main_loop=main_loop)
+        callback_handler = QmtCallbackHandler.get_instance(main_loop=main_loop)
         connection.trader.register_callback(callback_handler)
         trader = QmtTrader()
         await trader.subscribe_account()

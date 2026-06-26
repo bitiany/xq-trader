@@ -10,6 +10,7 @@ from framework.commons.exceptions import BusinessException
 from xqtrader.broker.services.qmt_callback_handler import QmtCallbackHandler
 from xqtrader.broker.services.qmt_connection import QmtConnection
 from xqtrader.broker.services.qmt_data_collector import QmtDataCollector
+from xqtrader.broker.services.qmt_query_service import QmtQueryService
 from xqtrader.broker.services.qmt_trader import QmtTrader
 
 router = APIRouter(prefix="/broker", tags=["券商代理"])
@@ -17,7 +18,9 @@ router = APIRouter(prefix="/broker", tags=["券商代理"])
 _connection = QmtConnection.get_instance()
 _data_collector = QmtDataCollector()
 _trader = QmtTrader()
-_callback_handler = QmtCallbackHandler()
+_query_service = QmtQueryService()
+# 复用 lifespan 创建的单例（绑定主事件循环）；若 lifespan 未初始化则惰性创建
+_callback_handler = QmtCallbackHandler.get_instance()
 
 
 # ── 连接管理 ──────────────────────────────────────────────
@@ -282,7 +285,7 @@ async def cancel_order_async(
 async def query_asset() -> dict:
     """查询当前账户资金资产。"""
     try:
-        return await _trader.query_asset()
+        return await _query_service.query_asset()
     except BusinessException as exc:
         return {
             "connected": False,
@@ -300,14 +303,14 @@ async def query_orders(
     cancelable_only: bool = Query(default=False, description="是否仅查询可撤委托"),
 ) -> dict:
     """查询当日委托列表。"""
-    orders = await _trader.query_orders(cancelable_only=cancelable_only)
+    orders = await _query_service.query_orders(cancelable_only=cancelable_only)
     return {"orders": orders}
 
 
 @router.get("/orders/{order_id}", summary="查询单笔委托")
 async def query_order(order_id: int) -> dict:
     """查询单笔委托详情。"""
-    order = await _trader.query_order(order_id)
+    order = await _query_service.query_order(order_id)
     if order is None:
         raise BusinessException(f"委托不存在: {order_id}")
     return order
@@ -316,21 +319,21 @@ async def query_order(order_id: int) -> dict:
 @router.get("/trades", summary="查询当日成交", operation_id="list_broker_trades")
 async def query_trades() -> dict:
     """查询当日成交列表。"""
-    trades = await _trader.query_trades()
+    trades = await _query_service.query_trades()
     return {"trades": trades}
 
 
 @router.get("/positions", summary="查询所有持仓", operation_id="list_broker_positions")
 async def query_positions() -> dict:
     """查询所有持仓。"""
-    positions = await _trader.query_positions()
+    positions = await _query_service.query_positions()
     return {"positions": positions}
 
 
 @router.get("/positions/{stock_code}", summary="查询单只股票持仓", operation_id="get_broker_position")
 async def query_position(stock_code: str) -> dict:
     """查询单只股票持仓。"""
-    position = await _trader.query_position(stock_code)
+    position = await _query_service.query_position(stock_code)
     if position is None:
         raise BusinessException(f"持仓不存在: {stock_code}")
     return position
@@ -339,5 +342,5 @@ async def query_position(stock_code: str) -> dict:
 @router.get("/accounts", summary="查询所有资金账号")
 async def query_account_infos() -> dict:
     """查询所有资金账号。"""
-    accounts = await _trader.query_account_infos()
+    accounts = await _query_service.query_account_infos()
     return {"accounts": accounts}

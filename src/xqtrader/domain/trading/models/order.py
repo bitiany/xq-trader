@@ -4,7 +4,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import Boolean, Date, DateTime, Float, Integer, Numeric, String
+from sqlalchemy import Boolean, Date, DateTime, Float, Integer, Numeric, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -169,6 +169,12 @@ class OrderEvent(Base):
     operator: Mapped[str | None] = mapped_column(
         String(64), nullable=True, comment="操作人(系统/人工)",
     )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+        comment="事件入库时间",
+    )
 
     __table_args__ = ({"comment": "订单事件溯源"},)
 
@@ -212,6 +218,12 @@ class Trade(Base):
     )
     broker_trade_id: Mapped[str | None] = mapped_column(
         String(64), nullable=True, comment="券商成交号",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+        comment="成交记录入库时间",
     )
 
     __table_args__ = ({"comment": "成交记录"},)

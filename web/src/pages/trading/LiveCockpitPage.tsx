@@ -3,7 +3,14 @@ import { Tabs, Select, Space, Table, Tag, Modal, message } from 'antd';
 import { Star, Briefcase, ListOrdered, GitBranch } from 'lucide-react';
 import { usePageWebSocket } from '@/ws/usePageWebSocket';
 import { TOPIC_TRADING_PNL, type TradingPnlData } from '@/ws/protocol';
-import { fetchAccounts, fetchAccountSnapshot, fetchPreOrders, type PreOrder, type TradingAccount } from '@/api/trading';
+import {
+  fetchAccounts,
+  fetchAccountDecisionWorkflowInstance,
+  fetchAccountSnapshot,
+  fetchPreOrders,
+  type PreOrder,
+  type TradingAccount,
+} from '@/api/trading';
 import { useTradingStore } from '@/stores/tradingStore';
 import { SIGNAL_SIDE_LABEL, SIGNAL_SIDE_COLOR } from './utils/trading';
 import { CockpitDashboard } from './components/CockpitDashboard';
@@ -38,6 +45,7 @@ const ACCOUNT_TYPE_COLOR: Record<TradingAccount['account_type'], string> = {
 export function LiveCockpitPage() {
   const [accounts, setAccounts] = useState<TradingAccount[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
+  const [activeDecisionInstanceId, setActiveDecisionInstanceId] = useState<number | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [signalHistory, setSignalHistory] = useState<PreOrder[]>([]);
 
@@ -56,12 +64,26 @@ export function LiveCockpitPage() {
       return fetchAccounts({ page_size: 200 }).then((res) => {
         if (!cancelled && res.items.length > 0) {
           setAccounts(res.items);
-          setSelectedAccountId(res.items.find(account => account.account_type === 'live')?.id ?? res.items[0].id);
+          setSelectedAccountId(res.items.find(account => account.account_type === 'paper')?.id ?? res.items[0].id);
         }
       });
     });
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    if (selectedAccountId === null) {
+      setActiveDecisionInstanceId(null);
+      return;
+    }
+    let cancelled = false;
+    fetchAccountDecisionWorkflowInstance(selectedAccountId).then((instance) => {
+      if (!cancelled) setActiveDecisionInstanceId(instance.id);
+    }).catch(() => {
+      if (!cancelled) setActiveDecisionInstanceId(null);
+    });
+    return () => { cancelled = true; };
+  }, [selectedAccountId]);
 
   useEffect(() => {
     if (selectedAccountId === null) return;
@@ -128,7 +150,7 @@ export function LiveCockpitPage() {
     <div className="trading-page" data-component="Live Trading Cockpit">
       <div className="trading-page__header">
         <div className="trading-page__title-area">
-          <span className="trading-page__title">实盘交易</span>
+          <span className="trading-page__title">交易工作台</span>
           <Select
             value={selectedAccountId ?? undefined}
             onChange={setSelectedAccountId}
@@ -153,10 +175,19 @@ export function LiveCockpitPage() {
 
         <div className="trading-layout__main">
           <div className="trading-layout__signal">
-            <SignalApprovalTab accountId={selectedAccountId} onOpenHistory={() => setHistoryOpen(true)} />
+            <SignalApprovalTab
+              accountId={selectedAccountId}
+              instanceId={activeDecisionInstanceId}
+              onInstanceChange={setActiveDecisionInstanceId}
+              onOpenHistory={() => setHistoryOpen(true)}
+            />
           </div>
           <div className="trading-layout__risk">
-            <RiskSidePanel accountId={selectedAccountId} onOpenHistory={() => setHistoryOpen(true)} />
+            <RiskSidePanel
+              accountId={selectedAccountId}
+              instanceId={activeDecisionInstanceId}
+              onOpenHistory={() => setHistoryOpen(true)}
+            />
           </div>
         </div>
 

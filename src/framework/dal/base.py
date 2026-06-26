@@ -60,8 +60,8 @@ class Base(DeclarativeBase):
     def to_dict(self) -> dict[str, Any]:
         """转换为字典（用于序列化）"""
         return {
-            column.name: getattr(self, column.name)
-            for column in self.__table__.columns
+            column.key: getattr(self, column.key)
+            for column in cast(Table, self.__table__).columns
         }
 
     def update_from_dict(self, data: dict[str, Any]) -> Self:
@@ -657,28 +657,52 @@ class Base(DeclarativeBase):
         ) as db:
             # 检查主键值来判断是插入还是更新
             pk_value = self.__class__._get_pk_value(self)
-            if pk_value is None:
-                # 新记录，执行插入（适用于自增主键）
-                db.add(self)
-            else:
-                # 主键值存在，需要检查记录是否已存在
-                existing = await db.get(self.__class__, pk_value)
-                if existing is None:
-                    # 记录不存在，执行插入
-                    db.add(self)
+            is_insert = pk_value is None
+            if not is_insert:
+                # 使用 SELECT ... FOR UPDATE 加行锁，防止并发 UPDATE 导致 lost update
+                # 场景：高并发成交回报、双花板同时下单、KillSwitch 与正常流程并发等。
+                # 行锁在事务内持有至 commit/rollback，临时 session 在退出时自动 commit 释放。
+                pk_columns = list(cast(Table, self.__class__.__table__).primary_key.columns)
+                if len(pk_columns) == 1:
+                    stmt = select(self.__class__).where(
+                        pk_columns[0] == pk_value
+                    ).with_for_update()
                 else:
-                    # 记录已存在，执行更新（merge）
-                    # merge 返回一个新的持久化对象，需要将其属性复制回原对象
-                    merged_instance = await db.merge(self)
-                    # 将 merge 返回的对象属性复制到 self
-                    for attr in [c.key for c in self.__table__.columns]:
-                        setattr(self, attr, getattr(merged_instance, attr, None))
+                    # 复合主键：pk_value 为 tuple（is_insert=False 保证非 None）
+                    pk_tuple = cast(tuple[Any, ...], pk_value)
+                    stmt = select(self.__class__).where(
+                        and_(*[col == val for col, val in zip(pk_columns, pk_tuple)])
+                    ).with_for_update()
+                result = await db.execute(stmt)
+                existing = result.scalar_one_or_none()
+                is_insert = existing is None
 
-            # flush 确保数据写入数据库（但不 commit，由事务管理器控制）
-            await db.flush()
-            # 对于非自增主键，不需要 refresh；对于自增主键，refresh 获取生成的 ID
-            if pk_value is None:
+            if is_insert:
+                # 新记录，执行插入
+                # db.add 将 self 加入 session（pending），flush 后变为 persistent，可直接 refresh
+                db.add(self)
+                await db.flush()
+                # refresh 加载 server_default 生成的字段（如自增主键 id、created_at）
                 await db.refresh(self)
+                return self
+
+            # UPDATE 分支：记录已存在，执行更新（merge）
+            # merge 返回 persistent 对象：
+            #   - 事务内 self 已 persistent：返回 self
+            #   - 事务外 self 是 detached：返回 identity map 中的新对象（非 self）
+            merged = await db.merge(self)
+            await db.flush()
+            # refresh 加载 onupdate 生成的字段（如 updated_at）。
+            # 关键：必须在 flush 之后 refresh，此时 DB 已包含 merge 写入的新值。
+            # 若不 refresh，flush 后 updated_at 等字段处于 expired 状态，
+            # sync getattr（如 to_dict）会触发 lazy load → greenlet_spawn 错误。
+            await db.refresh(merged)
+            # 事务外 self 是 detached，refresh(self) 会失败；
+            # 因此 refresh merged（一定是 persistent），再同步属性到 self。
+            # merged 刚被 refresh，属性非 expired，sync getattr 安全。
+            if merged is not self:
+                for column in cast(Table, self.__table__).columns:
+                    setattr(self, column.key, getattr(merged, column.key))
             return self
 
     async def update(self, data: dict[str, Any]) -> Self:

@@ -6,6 +6,8 @@ from typing import Any
 
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import ORMExecuteState
+from sqlalchemy.sql.expression import UpdateBase
 
 from framework.commons.exceptions import DatasourceConfigNotFoundError, DatasourceNotInitializedError
 from framework.dal.datasource import DatasourceConfig
@@ -162,46 +164,80 @@ class EnginesManager:
 
         核心逻辑：
         1. 检查是否存在活跃事务（通过 TransactionManager）
-        2. 如果存在，返回事务的 session（不关闭）
-        3. 如果不存在，创建临时 session（退出时自动关闭）
+        2. 若存在且 bind_key 匹配，返回事务的 session（不关闭）
+        3. 若不存在或 bind_key 不匹配，创建临时 session（退出时自动关闭）
+
+        bind_key 不匹配场景：跨 schema 只读查询（如 trading 事务内查询 stock CandlestickDaily）。
+        此时使用独立临时 session，保证查询能命中正确的 schema search_path。
+
+        跨 schema 写保护：当外层活跃事务存在且 bind_key 不匹配时，临时 session 强制只读，
+        防止调用方误用导致跨 schema 数据不一致（外层事务回滚无法回滚临时 session 的独立 commit）。
+        如需跨 schema 写操作，必须显式使用 @transactional(bind_key='...') 拆分到独立事务。
 
         Args:
             bind_key: 数据源标识
 
         Yields:
             AsyncSession: 事务感知的 session
-
-        Usage:
-            # 在 Base 层使用
-            async with cls._get_engines_manager().get_transaction_session(bind_key) as db:
-                db.add(instance)
-                await db.flush()
-                # 不需要 commit，由外层事务控制
-                # 如果没有外层事务，session 会自动关闭
         """
-        # 尝试获取当前事务的 session
         tx_session = self.transaction_manager.get_current_session()
+        requested_bind_key = bind_key or 'default'
+        in_active_tx = tx_session is not None
 
         if tx_session is not None:
-            # 存在活跃事务，直接使用事务的 session
-            logger.debug(f"使用事务 session: bind_key={bind_key}")
-            yield tx_session
-        else:
-            # 没有活跃事务，创建临时 session（不加入 active_sessions）
-            #logger.debug(f"创建临时 session: bind_key={bind_key}")
-            session_maker = self.get_session_maker(bind_key)
-            temp_session = session_maker()
-            try:
-                yield temp_session
-                # 临时 session 需要 commit 以持久化数据
-                await temp_session.commit()
-            except Exception:
-                # 发生异常时回滚
-                await temp_session.rollback()
-                raise
-            finally:
-                temp_session.expunge_all()
-                await temp_session.close()
+            tx_bind_key = getattr(tx_session, '_bind_key', None)
+            if tx_bind_key == requested_bind_key:
+                # bind_key 匹配，使用事务 session（保证事务一致性）
+                yield tx_session
+                return
+            # bind_key 不匹配：跨 schema 临时 session 不在事务内，
+            # 外层事务回滚无法回滚其独立 commit，故强制只读防止数据不一致。
+            logger.debug(
+                f"bind_key 不匹配 (tx={tx_bind_key}, requested={requested_bind_key})，"
+                f"创建只读独立 session"
+            )
+
+        # 没有活跃事务 或 bind_key 不匹配：创建临时 session
+        session_maker = self.get_session_maker(bind_key)
+        temp_session = session_maker()
+        setattr(temp_session, '_bind_key', requested_bind_key)  # type: ignore
+
+        # 跨 schema 写保护（双层覆盖）：
+        # 1. do_orm_execute 事件：拦截所有 db.execute(update/delete/insert) 等 Core 级 SQL 写
+        #    （Core 级 SQL 不污染 session.new/dirty/deleted，必须用事件机制才能拦截）
+        # 2. new/dirty/deleted 检查：拦截 ORM 级 db.add(self) 写
+        # 外层活跃事务存在时强制只读，避免外层事务回滚无法回滚临时 session 的独立 commit
+        def _enforce_read_only(execute_state: ORMExecuteState) -> None:
+            if isinstance(execute_state.statement, UpdateBase):
+                raise RuntimeError(
+                    f"跨 schema 写操作不允许在活跃事务内的临时 session 中执行 "
+                    f"(requested_bind_key={requested_bind_key})，"
+                    f"请使用 @transactional(bind_key='{requested_bind_key}') 拆分到独立事务"
+                )
+
+        if in_active_tx:
+            event.listen(temp_session.sync_session, "do_orm_execute", _enforce_read_only)
+
+        try:
+            yield temp_session
+            # 提交前校验只读约束：拦截 ORM 级 db.add(self) 写（Core 级 SQL 已被事件拦截）
+            if in_active_tx and (temp_session.new or temp_session.dirty or temp_session.deleted):
+                raise RuntimeError(
+                    f"跨 schema 写操作不允许在活跃事务内的临时 session 中执行 "
+                    f"(requested_bind_key={requested_bind_key})，"
+                    f"请使用 @transactional(bind_key='{requested_bind_key}') 拆分到独立事务"
+                )
+            # 临时 session 需要 commit 以持久化数据
+            await temp_session.commit()
+        except Exception:
+            # 发生异常时回滚
+            await temp_session.rollback()
+            raise
+        finally:
+            if in_active_tx:
+                event.remove(temp_session.sync_session, "do_orm_execute", _enforce_read_only)
+            temp_session.expunge_all()
+            await temp_session.close()
 
 
     async def dispose_all(self) -> None:

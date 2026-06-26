@@ -3,7 +3,22 @@
 from decimal import Decimal
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+def validate_operator_not_system(value: str) -> str:
+    """共享校验：操作人字段非空且禁止 system。
+
+    被 KillSwitchRequest.operator / ApprovalRequest.approved_by /
+    BatchApprovalRequest.approved_by / PreOrderSubmitRequest.operator /
+    BatchPreOrderSubmitRequest.operator 共用，避免逻辑重复。
+    """
+    normalized = value.strip().lower()
+    if not normalized:
+        raise ValueError("操作人不能为空")
+    if normalized == "system":
+        raise ValueError("操作人禁止使用 system，必须填写实际操作人")
+    return value.strip()
 
 
 # ---- 账户 ----
@@ -74,6 +89,16 @@ class RiskEventResolveRequest(BaseModel):
     resolved_by: str = Field(default="user", max_length=64, description="处理人")
 
 
+class KillSwitchRequest(BaseModel):
+    operator: str = Field(..., min_length=1, max_length=64, description="操作人(必填，禁止 system)")
+    reason: str = Field(default="manual_kill_switch", max_length=256, description="触发原因")
+
+    @field_validator("operator")
+    @classmethod
+    def _validate_operator(cls, value: str) -> str:
+        return validate_operator_not_system(value)
+
+
 class ManualDecisionWorkflowRequest(BaseModel):
     signal_date: str | None = Field(default=None, description="信号日 YYYY-MM-DD；不传则使用最新因子交易日")
     execution_date: str | None = Field(default=None, description="执行日 YYYY-MM-DD；不传则为信号日后一日")
@@ -88,16 +113,46 @@ class PreOrderUpdate(BaseModel):
     target_qty: int | None = Field(default=None, description="目标数量")
     order_type: str | None = Field(default=None, description="limit/market")
     limit_price: Decimal | None = Field(default=None, description="限价")
+    approval_execution: dict[str, object] | None = Field(default=None, description="审批执行参数")
+
+
+class PreOrderSubmitRequest(BaseModel):
+    operator: str = Field(..., min_length=1, max_length=64, description="下单操作人(必填，禁止 system)")
+
+    @field_validator("operator")
+    @classmethod
+    def _validate_operator(cls, value: str) -> str:
+        return validate_operator_not_system(value)
+
+
+class BatchPreOrderSubmitRequest(BaseModel):
+    pre_order_ids: list[int] = Field(..., min_length=1, description="预订单ID列表")
+    operator: str = Field(..., min_length=1, max_length=64, description="下单操作人(必填，禁止 system)")
+
+    @field_validator("operator")
+    @classmethod
+    def _validate_operator(cls, value: str) -> str:
+        return validate_operator_not_system(value)
 
 
 class ApprovalRequest(BaseModel):
     approved: bool = Field(..., description="true=批准, false=拒绝")
-    approved_by: str = Field(default="system", max_length=64, description="审批人")
+    approved_by: str = Field(..., min_length=1, max_length=64, description="审批人(必填，禁止 system)")
     comment: str = Field(default="", max_length=256, description="审批意见")
+
+    @field_validator("approved_by")
+    @classmethod
+    def _validate_approved_by(cls, value: str) -> str:
+        return validate_operator_not_system(value)
 
 
 class BatchApprovalRequest(BaseModel):
     pre_order_ids: list[int] = Field(..., description="预订单ID列表")
     approved: bool = Field(..., description="true=批准, false=拒绝")
-    approved_by: str = Field(default="system", max_length=64, description="审批人")
+    approved_by: str = Field(..., min_length=1, max_length=64, description="审批人(必填，禁止 system)")
     comment: str = Field(default="", max_length=256, description="审批意见")
+
+    @field_validator("approved_by")
+    @classmethod
+    def _validate_approved_by(cls, value: str) -> str:
+        return validate_operator_not_system(value)

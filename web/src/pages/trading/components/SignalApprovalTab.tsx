@@ -33,8 +33,33 @@ interface ApprovalFormValues {
   target_qty?: number | null
   target_weight?: number | null
   order_type: 'limit' | 'market'
+  price_mode: 'manual' | 'atr_offset'
   limit_price?: number | null
+  atr_multiplier?: number | null
+  slippage_type?: 'none' | 'percent' | 'tick' | 'atr'
+  slippage_rate?: number | null
+  slippage_ticks?: number | null
+  slippage_atr_multiplier?: number | null
   comment?: string
+  operator?: string
+}
+
+const OPERATOR_STORAGE_KEY = 'xqtrader:approval_operator';
+
+function loadStoredOperator(): string {
+  try {
+    return localStorage.getItem(OPERATOR_STORAGE_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function storeOperator(value: string): void {
+  try {
+    if (value) localStorage.setItem(OPERATOR_STORAGE_KEY, value);
+  } catch {
+    /* ignore quota errors */
+  }
 }
 
 // 信号依据区域
@@ -94,9 +119,52 @@ function SignalDetailSection({ detail }: { detail: SignalDetail }) {
 }
 
 function buildRiskAlertText(event: RiskEvent) {
-  const symbol = typeof event.detail?.symbol === 'string' ? event.detail.symbol : '账户';
-  const reasons = Array.isArray(event.detail?.reasons) ? event.detail.reasons.join(',') : event.event_type;
-  return `${symbol} ${reasons}`;
+  if (event.display?.summary) return event.display.summary;
+  const symbol = typeof event.detail?.symbol === 'string' ? event.detail.symbol : '账户级';
+  const reasons = event.display?.reasons_text ?? event.event_type;
+  return `${symbol}：${reasons}`;
+}
+
+function numberFromDetail(detail: Record<string, unknown> | null | undefined, key: string) {
+  if (!detail) return null;
+  const value = detail[key];
+  if (value === null || value === undefined || value === '') return null;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+function getEntryPriceDetail(po: PreOrder) {
+  return po.signal_detail?.entry_price_detail ?? null;
+}
+
+function calculateAtrLimitPrice(po: PreOrder, multiplier: number | null | undefined) {
+  const detail = getEntryPriceDetail(po);
+  const close = numberFromDetail(detail, 'close');
+  const atr = numberFromDetail(detail, 'atr_14');
+  if (close === null || atr === null) return null;
+  const direction = po.side === 'open' || po.side === 'add' ? 1 : -1;
+  return Number((close + direction * atr * Number(multiplier ?? 0)).toFixed(4));
+}
+
+function buildSlippage(values: ApprovalFormValues, po: PreOrder): Record<string, unknown> {
+  const slippageType = values.slippage_type ?? 'none';
+  if (slippageType === 'percent') {
+    return { type: slippageType, rate: Number(values.slippage_rate ?? 0) / 100 };
+  }
+  if (slippageType === 'tick') {
+    return { type: slippageType, ticks: Number(values.slippage_ticks ?? 0), tick_size: 0.01 };
+  }
+  if (slippageType === 'atr') {
+    const atr = numberFromDetail(getEntryPriceDetail(po), 'atr_14') ?? 0;
+    return { type: slippageType, multiplier: Number(values.slippage_atr_multiplier ?? 0), atr };
+  }
+  return { type: 'none' };
+}
+
+function riskPrecheckTag(po: PreOrder) {
+  if (po.risk_check_passed === true) return <Tag color="success" style={{ fontSize: 10 }}>风控预检通过</Tag>;
+  if (po.risk_check_passed === false) return <Tag color="error" style={{ fontSize: 10 }}>风控预检未通过</Tag>;
+  return <Tag color="default" style={{ fontSize: 10 }}>风控预检未知</Tag>;
 }
 
 function RiskAlertMarquee({ alerts }: { alerts: RiskEvent[] }) {
@@ -104,26 +172,38 @@ function RiskAlertMarquee({ alerts }: { alerts: RiskEvent[] }) {
   const items = alerts.map(buildRiskAlertText);
   const doubled = [...items, ...items];
   return (
-    <div className="risk-alert-marquee" data-component="Risk Alert Marquee">
-      <AlertTriangle size={13} style={{ color: 'var(--color-warning)', flexShrink: 0 }} />
-      <div className="risk-alert-marquee__track">
-        <div className="risk-alert-marquee__content">
-          {doubled.map((text, i) => (
-            <span key={`${text}-${i}`} className="risk-alert-marquee__item">{text}</span>
-          ))}
-        </div>
+    <div>
+      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6 }}>
+        这里展示账户未处理风控事件；当前待审批信号以卡片上的“风控预检”为准，二者不必然矛盾。
       </div>
-      <Tag color="warning" style={{ fontSize: 10, fontWeight: 600, flexShrink: 0 }}>{items.length}条告警</Tag>
+      <div className="risk-alert-marquee" data-component="Risk Alert Marquee">
+        <AlertTriangle size={13} style={{ color: 'var(--color-warning)', flexShrink: 0 }} />
+        <div className="risk-alert-marquee__track">
+          <div className="risk-alert-marquee__content">
+            {doubled.map((text, i) => (
+              <span key={`${text}-${i}`} className="risk-alert-marquee__item">{text}</span>
+            ))}
+          </div>
+        </div>
+        <Tag color="warning" style={{ fontSize: 10, fontWeight: 600, flexShrink: 0 }}>{items.length}条告警</Tag>
+      </div>
     </div>
   );
 }
 
 interface SignalApprovalTabProps {
   accountId: number | null;
+  instanceId: number | null;
+  onInstanceChange: (instanceId: number | null) => void;
   onOpenHistory: () => void;
 }
 
-export function SignalApprovalTab({ accountId, onOpenHistory }: SignalApprovalTabProps) {
+export function SignalApprovalTab({
+  accountId,
+  instanceId,
+  onInstanceChange,
+  onOpenHistory,
+}: SignalApprovalTabProps) {
   const [preOrders, setPreOrders] = useState<PreOrder[]>([]);
   const [riskEvents, setRiskEvents] = useState<RiskEvent[]>([]);
   const [loading, setLoading] = useState(false);
@@ -131,11 +211,23 @@ export function SignalApprovalTab({ accountId, onOpenHistory }: SignalApprovalTa
   const [approvalTarget, setApprovalTarget] = useState<PreOrder | null>(null);
   const [approvalSubmitting, setApprovalSubmitting] = useState(false);
   const [approvalForm] = Form.useForm<ApprovalFormValues>();
+  const [operator, setOperator] = useState<string>(() => loadStoredOperator());
 
-  const reloadPendingData = useCallback(async (targetAccountId: number) => {
+  const reloadPendingData = useCallback(async (targetAccountId: number, targetInstanceId?: number | null) => {
     const [preOrderRes, riskEventRes] = await Promise.all([
-      fetchPreOrders({ account_id: targetAccountId, status: 'pending_approval', approval_status: 'pending', page_size: 100 }),
-      fetchRiskEvents({ account_id: targetAccountId, resolved: false, page_size: 20 }),
+      fetchPreOrders({
+        account_id: targetAccountId,
+        instance_id: targetInstanceId ?? undefined,
+        status: 'pending_approval',
+        approval_status: 'pending',
+        page_size: 100,
+      }),
+      fetchRiskEvents({
+        account_id: targetAccountId,
+        instance_id: targetInstanceId ?? undefined,
+        resolved: false,
+        page_size: 20,
+      }),
     ]);
     setPreOrders(preOrderRes.items);
     setRiskEvents(riskEventRes.items);
@@ -154,7 +246,7 @@ export function SignalApprovalTab({ accountId, onOpenHistory }: SignalApprovalTa
       }
 
       setLoading(true);
-      return reloadPendingData(accountId).then(() => {
+      return reloadPendingData(accountId, instanceId).then(() => {
         if (cancelled) return;
       }).catch(() => {
         if (!cancelled) message.error('待审批信号加载失败');
@@ -163,14 +255,15 @@ export function SignalApprovalTab({ accountId, onOpenHistory }: SignalApprovalTa
       });
     });
     return () => { cancelled = true; };
-  }, [accountId, reloadPendingData]);
+  }, [accountId, instanceId, reloadPendingData]);
 
   const handleRunWorkflow = useCallback(async () => {
     if (accountId === null) return;
     setWorkflowRunning(true);
     try {
       const result = await runAccountDecisionWorkflow(accountId);
-      const items = await reloadPendingData(accountId);
+      onInstanceChange(result.instance_id);
+      const items = await reloadPendingData(accountId, result.instance_id);
       const runItems = items.filter(item => item.workflow_run_id === result.run.run_id);
       if (result.run.status !== 'succeeded') {
         message.error(`工作流未成功结束: ${result.run.status}`);
@@ -186,7 +279,7 @@ export function SignalApprovalTab({ accountId, onOpenHistory }: SignalApprovalTa
     } finally {
       setWorkflowRunning(false);
     }
-  }, [accountId, reloadPendingData]);
+  }, [accountId, onInstanceChange, reloadPendingData]);
 
   const openApprovalDialog = useCallback((po: PreOrder) => {
     setApprovalTarget(po);
@@ -194,27 +287,53 @@ export function SignalApprovalTab({ accountId, onOpenHistory }: SignalApprovalTa
       target_qty: po.target_qty,
       target_weight: po.target_weight === null ? null : Number((Number(po.target_weight) * 100).toFixed(4)),
       order_type: po.order_type,
+      price_mode: 'manual',
       limit_price: po.limit_price === null ? null : Number(po.limit_price),
+      atr_multiplier: 0,
+      slippage_type: 'none',
+      slippage_rate: 0.1,
+      slippage_ticks: 1,
+      slippage_atr_multiplier: 0.1,
       comment: po.approval_comment ?? '',
+      operator: operator || loadStoredOperator(),
     });
-  }, [approvalForm]);
+  }, [approvalForm, operator]);
 
   const handleConfirmApproval = useCallback(async () => {
     if (approvalTarget === null) return;
     const values = await approvalForm.validateFields();
+    const submitOperator = (values.operator ?? operator).trim();
+    if (!submitOperator) {
+      message.error('请填写操作人');
+      return;
+    }
+    storeOperator(submitOperator);
+    setOperator(submitOperator);
+    const limitPrice = values.order_type === 'market'
+      ? null
+      : values.price_mode === 'atr_offset'
+        ? calculateAtrLimitPrice(approvalTarget, values.atr_multiplier)
+        : values.limit_price;
+    if (values.order_type === 'limit' && limitPrice === null) {
+      message.error('无法根据 ATR 计算限价，请改用手动价格');
+      return;
+    }
     setApprovalSubmitting(true);
     try {
       await updatePreOrder(approvalTarget.id, {
         target_qty: values.target_qty ?? null,
         target_weight: values.target_weight == null ? null : Number(values.target_weight) / 100,
         order_type: values.order_type,
-        limit_price: values.order_type === 'market'
-          ? null
-          : (values.limit_price == null ? null : values.limit_price.toFixed(4)),
+        limit_price: values.order_type === 'market' ? null : limitPrice?.toFixed(4),
+        approval_execution: {
+          price_mode: values.order_type === 'market' ? 'market' : values.price_mode,
+          atr_multiplier: values.price_mode === 'atr_offset' ? Number(values.atr_multiplier ?? 0) : null,
+          slippage: buildSlippage(values, approvalTarget),
+        },
       });
       await approvePreOrder(approvalTarget.id, {
         approved: true,
-        approved_by: 'user',
+        approved_by: submitOperator,
         comment: values.comment ?? '',
       });
       setPreOrders(prev => prev.filter(po => po.id !== approvalTarget.id));
@@ -225,47 +344,62 @@ export function SignalApprovalTab({ accountId, onOpenHistory }: SignalApprovalTa
     } finally {
       setApprovalSubmitting(false);
     }
-  }, [approvalForm, approvalTarget]);
+  }, [approvalForm, approvalTarget, operator]);
 
   const handleReject = useCallback(async (preOrderId: number) => {
+    const submitOperator = operator.trim();
+    if (!submitOperator) {
+      message.error('请先在审批表单或顶部填写操作人');
+      return;
+    }
     try {
-      await approvePreOrder(preOrderId, { approved: false, approved_by: 'user' });
+      await approvePreOrder(preOrderId, { approved: false, approved_by: submitOperator });
       setPreOrders(prev => prev.filter(po => po.id !== preOrderId));
       message.success('已拒绝');
     } catch (error) {
       message.error(error instanceof ApiError ? error.message : '操作失败');
     }
-  }, []);
+  }, [operator]);
 
   const handleBatchApprove = useCallback(async () => {
     if (preOrders.length === 0) return;
+    const submitOperator = operator.trim();
+    if (!submitOperator) {
+      message.error('请先在顶部填写操作人');
+      return;
+    }
     try {
       const result = await batchApprovePreOrders({
         pre_order_ids: preOrders.map(po => po.id),
         approved: true,
-        approved_by: 'user',
+        approved_by: submitOperator,
       });
       message.success(`批量批准: ${result.approved}条`);
       setPreOrders([]);
-    } catch {
-      message.error('批量审批失败');
+    } catch (error) {
+      message.error(error instanceof ApiError ? error.message : '批量审批失败');
     }
-  }, [preOrders]);
+  }, [preOrders, operator]);
 
   const handleBatchReject = useCallback(async () => {
     if (preOrders.length === 0) return;
+    const submitOperator = operator.trim();
+    if (!submitOperator) {
+      message.error('请先在顶部填写操作人');
+      return;
+    }
     try {
       const result = await batchApprovePreOrders({
         pre_order_ids: preOrders.map(po => po.id),
         approved: false,
-        approved_by: 'user',
+        approved_by: submitOperator,
       });
       message.success(`批量拒绝: ${result.rejected}条`);
       setPreOrders([]);
-    } catch {
-      message.error('批量审批失败');
+    } catch (error) {
+      message.error(error instanceof ApiError ? error.message : '批量审批失败');
     }
-  }, [preOrders]);
+  }, [preOrders, operator]);
 
   return (
     <div className="signal-approval-tab" data-component="Signal & Approval Tab">
@@ -286,6 +420,17 @@ export function SignalApprovalTab({ accountId, onOpenHistory }: SignalApprovalTa
             </div>
           )}
           <Space>
+            <Input
+              size="small"
+              style={{ width: 120 }}
+              placeholder="操作人(必填)"
+              value={operator}
+              onChange={(e) => {
+                setOperator(e.target.value);
+                storeOperator(e.target.value);
+              }}
+              maxLength={64}
+            />
             <Button
               size="small"
               icon={<Zap size={12} />}
@@ -317,6 +462,7 @@ export function SignalApprovalTab({ accountId, onOpenHistory }: SignalApprovalTa
               <div className="signal-card__top">
                 <div className="signal-card__identity">
                   <span className="signal-card__symbol">{po.symbol}</span>
+                  {riskPrecheckTag(po)}
                 </div>
                 <Tag color={SIGNAL_SIDE_COLOR[po.side]} style={{ fontSize: 11, padding: '0 6px', borderRadius: 4, fontWeight: 600 }}>
                   {SIGNAL_SIDE_LABEL[po.side]}
@@ -379,15 +525,84 @@ export function SignalApprovalTab({ accountId, onOpenHistory }: SignalApprovalTa
           <Form.Item name="order_type" label="订单类型" rules={[{ required: true, message: '请选择订单类型' }]}>
             <Select options={[{ value: 'limit', label: '限价' }, { value: 'market', label: '市价' }]} />
           </Form.Item>
-          <Form.Item noStyle shouldUpdate={(prev, curr) => prev.order_type !== curr.order_type}>
-            {({ getFieldValue }) => getFieldValue('order_type') === 'limit' ? (
-              <Form.Item name="limit_price" label="限价" rules={[{ required: true, message: '请输入限价' }]}>
-                <InputNumber min={0.0001} precision={4} style={{ width: '100%' }} placeholder="委托限价" />
-              </Form.Item>
-            ) : null}
+          <Form.Item noStyle shouldUpdate={(prev, curr) => prev.order_type !== curr.order_type || prev.price_mode !== curr.price_mode || prev.atr_multiplier !== curr.atr_multiplier}>
+            {({ getFieldValue, setFieldValue }) => {
+              if (getFieldValue('order_type') !== 'limit') return null;
+              const priceMode = getFieldValue('price_mode');
+              const calculatedPrice = approvalTarget && priceMode === 'atr_offset'
+                ? calculateAtrLimitPrice(approvalTarget, getFieldValue('atr_multiplier'))
+                : null;
+              if (calculatedPrice !== null && getFieldValue('limit_price') !== calculatedPrice) {
+                setFieldValue('limit_price', calculatedPrice);
+              }
+              return (
+                <>
+                  <Form.Item name="price_mode" label="定价方式" rules={[{ required: true, message: '请选择定价方式' }]}>
+                    <Select options={[{ value: 'manual', label: '手动输入价格' }, { value: 'atr_offset', label: '+/- ATR 调整' }]} />
+                  </Form.Item>
+                  {priceMode === 'atr_offset' && (
+                    <Form.Item
+                      name="atr_multiplier"
+                      label="ATR调整倍数"
+                      extra="步长 0.1 ATR；负值表示回调买入/反向偏移。"
+                      rules={[{ required: true, message: '请输入ATR调整倍数' }]}
+                    >
+                      <InputNumber precision={1} step={0.1} style={{ width: '100%' }} placeholder="例如 -0.3 或 0.2" />
+                    </Form.Item>
+                  )}
+                  <Form.Item name="limit_price" label={priceMode === 'atr_offset' ? '计算限价' : '限价'} rules={[{ required: true, message: '请输入限价' }]}>
+                    <InputNumber min={0.0001} precision={4} style={{ width: '100%' }} placeholder="委托限价" disabled={priceMode === 'atr_offset'} />
+                  </Form.Item>
+                </>
+              );
+            }}
+          </Form.Item>
+          <Form.Item name="slippage_type" label="模拟成交滑点">
+            <Select
+              options={[
+                { value: 'none', label: '不设置' },
+                { value: 'percent', label: '百分比滑点' },
+                { value: 'tick', label: 'Tick滑点' },
+                { value: 'atr', label: 'ATR滑点' },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item noStyle shouldUpdate={(prev, curr) => prev.slippage_type !== curr.slippage_type}>
+            {({ getFieldValue }) => {
+              const slippageType = getFieldValue('slippage_type');
+              if (slippageType === 'percent') {
+                return (
+                  <Form.Item name="slippage_rate" label="滑点比例(%)">
+                    <InputNumber min={0} precision={4} step={0.01} style={{ width: '100%' }} />
+                  </Form.Item>
+                );
+              }
+              if (slippageType === 'tick') {
+                return (
+                  <Form.Item name="slippage_ticks" label="滑点Tick数">
+                    <InputNumber min={0} precision={0} step={1} style={{ width: '100%' }} />
+                  </Form.Item>
+                );
+              }
+              if (slippageType === 'atr') {
+                return (
+                  <Form.Item name="slippage_atr_multiplier" label="滑点ATR倍数">
+                    <InputNumber min={0} precision={2} step={0.01} style={{ width: '100%' }} />
+                  </Form.Item>
+                );
+              }
+              return null;
+            }}
           </Form.Item>
           <Form.Item name="comment" label="审批意见">
             <Input.TextArea rows={2} maxLength={256} placeholder="可填写调价或调仓原因" />
+          </Form.Item>
+          <Form.Item
+            name="operator"
+            label="操作人"
+            rules={[{ required: true, message: '请填写操作人' }]}
+          >
+            <Input maxLength={64} placeholder="实际审批人姓名（必填）" />
           </Form.Item>
         </Form>
       </Modal>
