@@ -48,6 +48,7 @@ class QmtDataCollector:
     """
 
     _LOCK_TIMEOUT = 300             # 锁等待超时（connect/get_full_tick/get_market_data_ex 等）
+    _DOWNLOAD_TIMEOUT = 120         # download_history_data2 超时（秒），防止废弃代码导致永久挂起
     _xtdata_lock = threading.Lock()
 
     @classmethod
@@ -112,7 +113,15 @@ class QmtDataCollector:
             len(stock_list), sd, ed, dividend_type,
         )
 
-        raw = await asyncio.to_thread(self._download_and_get_kline, stock_list, sd, dividend_type)
+        try:
+            raw = await asyncio.wait_for(
+                asyncio.to_thread(self._download_and_get_kline, stock_list, sd, dividend_type),
+                timeout=self._DOWNLOAD_TIMEOUT,
+            )
+        except TimeoutError as e:
+            raise DataCollectionError(
+                f"下载超时 stocks={stock_list} start={sd} timeout={self._DOWNLOAD_TIMEOUT}s"
+            ) from e
 
         out: dict[str, pd.DataFrame] = {}
         nonempty = 0

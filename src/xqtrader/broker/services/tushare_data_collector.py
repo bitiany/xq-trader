@@ -2,7 +2,12 @@
 
 核心模式：通过 tushare pro_api 获取数据，asyncio.to_thread 适配异步框架。
 所有 tushare 接口调用均为同步 HTTP 请求，通过线程池桥接为异步。
-内置令牌桶限流器，控制 API 调用频率（默认 500 次/分钟）。
+
+限流策略：按 Tushare 接口独立限流。不同接口的频率上限不同（5000 积分用户）：
+  - sw_daily / fina_indicator / moneyflow：硬限 200 次/分钟
+  - daily_basic / income / balancesheet / cashflow / moneyflow_dc：500 次/分钟
+  - 其他接口：默认 480 次/分钟（500 次/分钟留 20 余量）
+每个接口对应独立的 SlidingWindowLimiter 实例，互不干扰。
 """
 
 from __future__ import annotations
@@ -21,10 +26,9 @@ from framework.commons.utils.rate_limiter import SlidingWindowLimiter
 
 logger = get_logger(__name__)
 
-# tushare 限流：500 次/分钟（滑动窗口）
-# 任意60秒内请求数不超过480（留20次余量避免边界误差）
-_TUSHARE_MAX_REQUESTS = 480
-_TUSHARE_WINDOW_SECONDS = 60.0
+# 默认限流参数：5000 积分用户理论上限 500 次/分钟，留 20 次余量避免边界误差
+_DEFAULT_MAX_REQUESTS = 480
+_DEFAULT_WINDOW_SECONDS = 60.0
 
 
 class TushareDataCollector:
@@ -32,27 +36,47 @@ class TushareDataCollector:
 
     封装 tushare pro_api，提供个股资金流向等数据采集能力。
     tushare 接口为同步 HTTP 调用，通过 asyncio.to_thread 适配异步框架。
-    内置滑动窗口限流器，每次 API 调用前自动 acquire 许可。
-    使用独立线程池（max_workers=3），避免默认线程池过大导致并发超限。
+    内置按接口的滑动窗口限流器注册表，每次 API 调用前自动 acquire 对应接口许可。
+    使用独立线程池（max_workers=20），避免默认线程池过大导致并发超限。
     """
+
+    # Tushare 各接口实际频率上限（5000 积分用户）
+    # 仅显式注册严格限制接口（硬限 200/min）；其他接口走默认限流器
+    _ENDPOINT_LIMITS: dict[str, tuple[int, float]] = {
+        "sw_daily": (200, 60.0),         # 申万行业日线：硬限 200/min
+        "fina_indicator": (200, 60.0),   # 财务指标：硬限 200/min
+        "moneyflow": (200, 60.0),       # 个股资金流向：硬限 200/min
+    }
 
     _THREAD_POOL: ThreadPoolExecutor | None = None
 
-    def __init__(
-        self,
-        max_requests: int = _TUSHARE_MAX_REQUESTS,
-        window_seconds: float = _TUSHARE_WINDOW_SECONDS,
-    ) -> None:
+    def __init__(self) -> None:
         token = os.getenv("TUSHARE_TOKEN", "")
         if not token:
             logger.warning("TUSHARE_TOKEN 未配置，tushare 接口将不可用")
         ts.set_token(token)
         self._pro = ts.pro_api()
-        self._limiter = SlidingWindowLimiter(max_requests=max_requests, window_seconds=window_seconds)
+
+        # 按接口构建独立限流器（注册表模式）
+        self._limiters: dict[str, SlidingWindowLimiter] = {
+            endpoint: SlidingWindowLimiter(max_req, win)
+            for endpoint, (max_req, win) in self._ENDPOINT_LIMITS.items()
+        }
+        self._default_limiter = SlidingWindowLimiter(_DEFAULT_MAX_REQUESTS, _DEFAULT_WINDOW_SECONDS)
+
         logger.info(
-            "TushareDataCollector 初始化: 滑动窗口限流 max=%d/%.0fs",
-            max_requests, window_seconds,
+            "TushareDataCollector 初始化: 按接口限流 endpoints=%s default=%d/%.0fs",
+            {ep: f"{m}/{w:.0f}s" for ep, (m, w) in self._ENDPOINT_LIMITS.items()},
+            _DEFAULT_MAX_REQUESTS, _DEFAULT_WINDOW_SECONDS,
         )
+
+    def _get_limiter(self, endpoint: str) -> SlidingWindowLimiter:
+        """根据 Tushare 接口名获取对应限流器。
+
+        已注册接口（sw_daily/fina_indicator/moneyflow）使用专属 200/min 限流器；
+        其他接口使用默认 480/min 限流器。
+        """
+        return self._limiters.get(endpoint, self._default_limiter)
 
     @classmethod
     def _get_executor(cls) -> ThreadPoolExecutor:
@@ -86,7 +110,7 @@ class TushareDataCollector:
             raise DataCollectionError("ts_code 和 trade_date 至少输入一个")
 
         try:
-            await self._limiter.acquire()
+            await self._get_limiter("moneyflow_dc").acquire()
             loop = asyncio.get_running_loop()
             func = partial(
                 self._pro.moneyflow_dc,
@@ -140,7 +164,7 @@ class TushareDataCollector:
             raise DataCollectionError("ts_code 和 trade_date 至少输入一个")
 
         try:
-            await self._limiter.acquire()
+            await self._get_limiter("moneyflow").acquire()
             loop = asyncio.get_running_loop()
             func = partial(
                 self._pro.moneyflow,
@@ -204,7 +228,7 @@ class TushareDataCollector:
         )
 
         try:
-            await self._limiter.acquire()
+            await self._get_limiter("daily_basic").acquire()
             loop = asyncio.get_running_loop()
             func = partial(
                 self._pro.daily_basic,
@@ -319,7 +343,7 @@ class TushareDataCollector:
         )
 
         try:
-            await self._limiter.acquire()
+            await self._get_limiter("fina_indicator").acquire()
             loop = asyncio.get_running_loop()
             kwargs: dict[str, str] = {}
             if ts_code:
@@ -398,7 +422,7 @@ class TushareDataCollector:
         )
 
         try:
-            await self._limiter.acquire()
+            await self._get_limiter("income").acquire()
             loop = asyncio.get_running_loop()
             kwargs: dict[str, str] = {}
             if ts_code:
@@ -486,7 +510,7 @@ class TushareDataCollector:
         )
 
         try:
-            await self._limiter.acquire()
+            await self._get_limiter("balancesheet").acquire()
             loop = asyncio.get_running_loop()
             kwargs: dict[str, str] = {}
             if ts_code:
@@ -573,7 +597,7 @@ class TushareDataCollector:
         )
 
         try:
-            await self._limiter.acquire()
+            await self._get_limiter("cashflow").acquire()
             loop = asyncio.get_running_loop()
             kwargs: dict[str, str] = {}
             if ts_code:
@@ -636,7 +660,7 @@ class TushareDataCollector:
             "is_hs,act_name,act_ent_type"
         )
         try:
-            await self._limiter.acquire()
+            await self._get_limiter("stock_basic").acquire()
             loop = asyncio.get_running_loop()
             func = partial(
                 self._pro.stock_basic,
@@ -691,7 +715,7 @@ class TushareDataCollector:
             raise DataCollectionError("ts_code、trade_date、start_date 至少输入一个")
 
         try:
-            await self._limiter.acquire()
+            await self._get_limiter("suspend_d").acquire()
             loop = asyncio.get_running_loop()
             kwargs: dict[str, str] = {}
             if ts_code:
@@ -749,7 +773,7 @@ class TushareDataCollector:
             raise DataCollectionError("ts_code 和 trade_date 至少输入一个")
 
         try:
-            await self._limiter.acquire()
+            await self._get_limiter("sw_daily").acquire()
             loop = asyncio.get_running_loop()
             func = partial(
                 self._pro.sw_daily,
