@@ -217,9 +217,9 @@ class IndexDailyIncrementalStage:
         Returns:
             persisted_count - 持久化行数
         """
-        # 采集（fetch_index_kline_daily 自动处理 Tushare ↔ QMT 格式转换）
-        raw = await _collector.fetch_index_kline_daily(
-            index_list=shard,
+        # 采集（xtdata 对指数代码使用 Tushare 格式，直接传入即可）
+        raw = await _collector.fetch_kline_daily(
+            stock_list=shard,
             start_time=sd,
             end_time=ed,
         )

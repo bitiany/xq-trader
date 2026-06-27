@@ -62,21 +62,29 @@ class DownloadStage(Stage):
         end_date = ctx.get("end_date", "")
 
         if ctx.get("is_up_to_date"):
+            logger.info("[index_daily.collect] 跳过(水位最新): %s", index_code)
             return StageResult.ok(data={"index_code": index_code, "rows": 0, "skipped": True})
 
         if not start_date:
             return StageResult.fail(f"缺少 start_date，跳过 {index_code}")
 
+        effective_end_date = end_date if end_date else date_type.today().strftime("%Y%m%d")
+        logger.info(
+            "[index_daily.collect] 下载: %s range=%s~%s",
+            index_code, start_date, effective_end_date,
+        )
         try:
-            effective_end_date = end_date if end_date else "20991231"
-            result = await _collector.fetch_index_kline_daily(
-                index_list=[index_code],
+            result = await _collector.fetch_kline_daily(
+                stock_list=[index_code],
                 start_time=start_date,
                 end_time=effective_end_date,
             )
             df = result.get(index_code)
             if df is None or df.empty:
-                logger.debug("[index_daily.collect] 无数据: %s range=%s~%s", index_code, start_date, end_date)
+                logger.info(
+                    "[index_daily.collect] 无数据: %s range=%s~%s",
+                    index_code, start_date, effective_end_date,
+                )
                 ctx.set("download_data", None)
                 ctx.set("row_count", 0)
                 ctx.set("skip_persist", True)
@@ -84,6 +92,10 @@ class DownloadStage(Stage):
                 ctx.set("download_data", df)
                 ctx.set("row_count", len(df))
                 ctx.set("skip_persist", False)
+                logger.info(
+                    "[index_daily.collect] 下载完成: %s rows=%d range=%s~%s",
+                    index_code, len(df), start_date, effective_end_date,
+                )
 
             return StageResult.ok(data={"index_code": index_code, "rows": ctx.get("row_count", 0)})
         except Exception as e:

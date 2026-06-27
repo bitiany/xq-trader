@@ -62,21 +62,29 @@ class DownloadStage(Stage):
         end_date = ctx.get("end_date", "")
 
         if ctx.get("is_up_to_date"):
+            logger.info("[sw_daily.collect] 跳过(水位最新): %s", ts_code)
             return StageResult.ok(data={"ts_code": ts_code, "rows": 0, "skipped": True})
 
         if not start_date:
             return StageResult.fail(f"缺少 start_date，跳过 {ts_code}")
 
+        sd = start_date.replace("-", "")
+        ed = end_date.replace("-", "") if end_date else ""
+        logger.info(
+            "[sw_daily.collect] 下载: %s range=%s~%s",
+            ts_code, sd, ed or "now",
+        )
         try:
-            sd = start_date.replace("-", "")
-            ed = end_date.replace("-", "") if end_date else ""
             df = await _collector.fetch_sw_daily(
                 ts_code=ts_code,
                 start_date=sd,
                 end_date=ed,
             )
             if df is None or df.empty:
-                logger.debug("[sw_daily.collect] 无数据: %s range=%s~%s", ts_code, start_date, end_date)
+                logger.info(
+                    "[sw_daily.collect] 无数据: %s range=%s~%s",
+                    ts_code, sd, ed or "now",
+                )
                 ctx.set("download_data", None)
                 ctx.set("row_count", 0)
                 ctx.set("skip_persist", True)
@@ -84,6 +92,10 @@ class DownloadStage(Stage):
                 ctx.set("download_data", df)
                 ctx.set("row_count", len(df))
                 ctx.set("skip_persist", False)
+                logger.info(
+                    "[sw_daily.collect] 下载完成: %s rows=%d range=%s~%s",
+                    ts_code, len(df), sd, ed or "now",
+                )
 
             return StageResult.ok(data={"ts_code": ts_code, "rows": ctx.get("row_count", 0)})
         except Exception as e:

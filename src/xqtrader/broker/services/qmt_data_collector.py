@@ -44,14 +44,10 @@ class QmtDataCollector:
     """QMT 行情数据采集服务。
 
     封装 xtdata 模块，提供 K线、Tick、财务数据等采集能力。
-    xtdata 是同步 API，通过 asyncio.to_thread 适配异步框架。
-
     核心模式：先 download_history_data2 补缓存，再 get_market_data_ex 获取数据，
-    确保返回完整的历史数据。全程加锁避免多线程并发 xtdata。
     """
 
-    _LOCK_TIMEOUT = 60
-    _DOWNLOAD_TIMEOUT = 60
+    _LOCK_TIMEOUT = 300             # 锁等待超时（connect/get_full_tick/get_market_data_ex 等）
     _xtdata_lock = threading.Lock()
 
     @classmethod
@@ -82,41 +78,6 @@ class QmtDataCollector:
 
     # ── 日线行情 ──────────────────────────────────────────
 
-    async def fetch_index_kline_daily(
-        self,
-        index_list: list[str],
-        start_time: str = "",
-        end_time: str = "",
-        dividend_type: str = "front",
-    ) -> dict[str, pd.DataFrame]:
-        """获取指数日线行情数据。
-
-        接口与 fetch_kline_daily 相同，但输入/输出使用 Tushare 格式代码，
-        内部自动转换为 QMT 格式调用 xtdata。
-
-        Args:
-            index_list: 指数代码列表（Tushare 格式），如 ["000001.SH", "399006.SZ"]
-            start_time: 起始日期 YYYYMMDD
-            end_time: 结束日期 YYYYMMDD
-            dividend_type: 复权方式 none/front/back/front_ratio/back_ratio
-
-        Returns:
-            {index_code: pd.DataFrame}，key 为 Tushare 格式代码
-        """
-        if not index_list:
-            return {}
-
-        # xtdata 对指数代码使用 Tushare 格式（000001.SH）而非 QMT 格式（SH.000001），
-        # 直接传入即可，无需转换。
-        raw = await self.fetch_kline_daily(
-            stock_list=index_list,
-            start_time=start_time,
-            end_time=end_time,
-            dividend_type=dividend_type,
-        )
-
-        return raw
-
     async def fetch_kline_daily(
         self,
         stock_list: list[str],
@@ -127,11 +88,13 @@ class QmtDataCollector:
         """获取日线行情数据（先下载补缓存，再获取）。
 
         单支与批量统一入口，单支传 [code]，批量传 [code1, code2, ...]。
+        QMT download 不指定 end_time，默认下载到最新交易日；end_time 参数仅用于
+        API 层日志展示，底层实际不限制结束日期。
 
         Args:
             stock_list: 证券代码列表，如 ["600000.SH"] 或 ["600000.SH", "000001.SZ"]
             start_time: 起始日期 YYYYMMDD
-            end_time: 结束日期 YYYYMMDD
+            end_time: 结束日期 YYYYMMDD（仅日志展示，底层不限制）
             dividend_type: 复权方式 none/front/back/front_ratio/back_ratio
 
         Returns:
@@ -142,17 +105,14 @@ class QmtDataCollector:
             return {}
 
         sd = start_time.replace("-", "")
-        ed = end_time.replace("-", "")
-        if sd > ed:
-            logger.warning("fetch_kline_daily 忽略倒置区间 start=%s end=%s", sd, ed)
-            return {s: pd.DataFrame() for s in stock_list}
+        ed = end_time.replace("-", "") if end_time else "latest"
 
         logger.debug(
-            "获取日线: stocks=%d range=%s~%s dividend=%s",
+            "获取日线: stocks=%d start=%s end=%s dividend=%s",
             len(stock_list), sd, ed, dividend_type,
         )
 
-        raw = await asyncio.to_thread(self._download_and_get_kline, stock_list, sd, ed, dividend_type)
+        raw = await asyncio.to_thread(self._download_and_get_kline, stock_list, sd, dividend_type)
 
         out: dict[str, pd.DataFrame] = {}
         nonempty = 0
@@ -167,8 +127,8 @@ class QmtDataCollector:
                 out[sym] = pd.DataFrame()
 
         logger.debug(
-            "获取日线完成: range=%s~%s 请求=%d 有数据=%d 总行数=%d",
-            sd, ed, len(stock_list), nonempty, row_sum,
+            "获取日线完成: start=%s 请求=%d 有数据=%d 总行数=%d",
+            sd, len(stock_list), nonempty, row_sum,
         )
         return out
 
@@ -209,57 +169,29 @@ class QmtDataCollector:
         self,
         stock_list: list[str],
         start_time: str,
-        end_time: str,
         dividend_type: str = "front",
     ) -> dict[str, Any]:
-        """同步方法：先下载补缓存，再获取K线数据。全程加锁。
+        """同步方法：先下载补缓存，再获取K线数据。
 
-        download_history_data2 是异步下载，通过 callback 通知完成，
-        使用 threading.Event 等待回调，避免固定 sleep 盲等。
+        download_history_data2 不指定 end_time，QMT 默认下载到最新交易日；
+        get_market_data_ex 读取已下载缓存。底层同步，并发由上层业务控制。
         """
-        acquired = self._xtdata_lock.acquire(timeout=self._LOCK_TIMEOUT)
-        if not acquired:
-            raise TimeoutError(
-                f"QMT lock acquire timed out after {self._LOCK_TIMEOUT}s for batch {start_time}~{end_time}"
-            )
-        try:
-            download_done = threading.Event()
+        # 阶段 1: 下载补缓存（不指定 end_time，QMT 默认下载到最新交易日）
+        xtdata.download_history_data2(stock_list, "1d", start_time)
 
-            def _on_download_done(data: Any) -> None:
-                """download_history_data2 完成回调。"""
-                download_done.set()
-
-            try:
-                xtdata.download_history_data2(
-                    stock_list, "1d", start_time, end_time,
-                    callback=_on_download_done,
-                )
-            except Exception as e:
-                raise DataCollectionError(
-                    f"下载历史数据失败 range={start_time}~{end_time} count={len(stock_list)}: {e}"
-                ) from e
-
-            if not download_done.wait(timeout=self._DOWNLOAD_TIMEOUT):
-                raise TimeoutError(
-                    f"QMT 下载超时 {self._DOWNLOAD_TIMEOUT}s: "
-                    f"range={start_time}~{end_time} count={len(stock_list)}"
-                )
-
-            raw = xtdata.get_market_data_ex(
-                field_list=[],
-                stock_list=stock_list,
-                period="1d",
-                start_time=start_time,
-                end_time=end_time,
-                count=-1,
-                dividend_type=dividend_type,
-                fill_data=True,
-            )
-        finally:
-            self._xtdata_lock.release()
+        # 阶段 2: 读取数据
+        raw = xtdata.get_market_data_ex(
+            field_list=[],
+            stock_list=stock_list,
+            period="1d",
+            start_time=start_time,
+            count=-1,
+            dividend_type=dividend_type,
+            fill_data=True,
+        )
 
         if not isinstance(raw, dict):
-            logger.warning("get_market_data_ex 非 dict range=%s~%s", start_time, end_time)
+            logger.warning("get_market_data_ex 非 dict start=%s", start_time)
             return {s: pd.DataFrame() for s in stock_list}
 
         return raw
