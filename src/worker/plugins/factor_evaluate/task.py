@@ -30,6 +30,7 @@ from xqtrader.domain.factor.services.grade_evaluator import GradeEvaluator
 from xqtrader.domain.factor.services.ic_calculator import ICCalculator
 from xqtrader.domain.factor.services.layered_backtest import LayeredBacktester
 from xqtrader.domain.factor.services.pool_init import PoolInitService
+from xqtrader.domain.factor.services.registry import auto_discover_factors, register_factor_variants
 
 logger = get_logger("factor.evaluate")
 
@@ -51,7 +52,14 @@ class FactorEvaluateTask(BaseTask):
         end_date = str(kwargs.get("end_date", ""))
         window = int(kwargs.get("window", _DEFAULT_WINDOW))
 
-        # 从 DB 加载样本池配置（样本池数据由 SQL 脚本初始化，无需代码同步）
+        # 同步默认样本池配置（含 status 收敛至 all + idx_300）
+        await PoolInitService().sync_default_pools()
+
+        # 加载因子插件（估值/财务类因子依赖 FactorPlugin.compute）
+        auto_discover_factors()
+        register_factor_variants()
+
+        # 从 DB 加载样本池配置
         if pool_ids:
             pools = await FacFactorPool.filter(
                 pool_id__in=pool_ids,
@@ -162,7 +170,8 @@ class FactorEvaluateTask(BaseTask):
         # 预加载样本池标的列表、行业映射和市值映射（所有因子共用）
         symbols = await reader.load_pool_symbols(pool_id)
         industry_map = await reader.load_industry_map(symbols)
-        market_cap_map = await reader.load_market_cap_map(symbols)
+        market_cap_panel = await reader.load_market_cap_panel(symbols, start_date, end_date)
+        membership = await reader.build_pool_membership(pool_id, start_date, end_date)
 
         if not symbols:
             logger.warning("[factor.evaluate] 样本池 %s 无标的，跳过", pool_id)
@@ -174,6 +183,7 @@ class FactorEvaluateTask(BaseTask):
             end_date=end_date,
             symbols=symbols,
         )
+        returns_panel = reader.filter_panel_by_membership(returns_panel, membership)
         if returns_panel.empty:
             logger.warning("[factor.evaluate] 样本池 %s 收益率数据为空，跳过", pool_id)
             return 0
@@ -192,8 +202,9 @@ class FactorEvaluateTask(BaseTask):
                     symbols=symbols,
                     factor_id=factor_id,
                     industry_map=industry_map,
-                    market_cap_map=market_cap_map,
+                    market_cap_panel=market_cap_panel,
                 )
+                factor_panel = reader.filter_panel_by_membership(factor_panel, membership)
 
                 if factor_panel.empty or factor_id not in factor_panel.columns:
                     logger.debug("[factor.evaluate] 因子 %s 数据为空，跳过", factor_id)
@@ -229,7 +240,15 @@ class FactorEvaluateTask(BaseTask):
                 model = self._build_stats_model(stats)
                 await FacFactorStats.bulk_create_or_update(
                     [model],
-                    on_conflict=None,
+                    on_conflict=["factor_id", "pool_id", "calc_date", "window"],
+                    update_fields=[
+                        "ic_mean", "ic_std", "icir", "ic_win_rate",
+                        "ic_mean_5d", "ic_mean_10d", "ic_mean_20d",
+                        "ic_tstat", "ic_pvalue",
+                        "turnover", "decay_half_life",
+                        "long_short_annual_ret", "long_short_sharpe",
+                        "coverage", "factor_grade",
+                    ],
                 )
                 total_stats += 1
 
@@ -258,7 +277,11 @@ class FactorEvaluateTask(BaseTask):
         """计算单个因子的统计指标。"""
         # IC 序列与统计
         ic_series = ic_calc.calc_ic_series(factor_panel, returns_panel, window=window)
-        ic_stats = ic_calc.calc_ic_stats(ic_series)
+        ic_stats = ic_calc.calc_ic_stats(ic_series, window=window)
+        ic_sig = ic_calc.calc_ic_significance(ic_series, window=window)
+        multi_ic = ic_calc.calc_multi_horizon_ic(
+            factor_panel, returns_panel, window=window,
+        )
 
         # 分层回测
         backtest_result = backtester.run(factor_panel, returns_panel)
@@ -274,6 +297,11 @@ class FactorEvaluateTask(BaseTask):
             "ic_std": ic_stats.get("ic_std"),
             "icir": ic_stats.get("icir"),
             "ic_win_rate": ic_stats.get("ic_win_rate"),
+            "ic_mean_5d": multi_ic.get("ic_mean_5d"),
+            "ic_mean_10d": multi_ic.get("ic_mean_10d"),
+            "ic_mean_20d": multi_ic.get("ic_mean_20d"),
+            "ic_tstat": ic_sig.get("ic_tstat"),
+            "ic_pvalue": ic_sig.get("ic_pvalue"),
             "long_short_annual_ret": backtest_result.get("long_short_annual_ret"),
             "long_short_sharpe": backtest_result.get("long_short_sharpe"),
             "turnover": turnover,
@@ -304,6 +332,11 @@ class FactorEvaluateTask(BaseTask):
             ic_std=_f(stats.get("ic_std")),
             icir=_f(stats.get("icir")),
             ic_win_rate=_f(stats.get("ic_win_rate")),
+            ic_mean_5d=_f(stats.get("ic_mean_5d")),
+            ic_mean_10d=_f(stats.get("ic_mean_10d")),
+            ic_mean_20d=_f(stats.get("ic_mean_20d")),
+            ic_tstat=_f(stats.get("ic_tstat")),
+            ic_pvalue=_f(stats.get("ic_pvalue")),
             turnover=_f(stats.get("turnover")),
             decay_half_life=_f(stats.get("decay_half_life")),
             long_short_annual_ret=_f(stats.get("long_short_annual_ret")),

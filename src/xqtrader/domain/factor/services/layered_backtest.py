@@ -10,6 +10,9 @@ from framework.commons.logger import get_logger
 
 logger = get_logger(__name__)
 
+# A 股单次调仓双边成本约 0.3%（佣金+印花税近似）
+_DEFAULT_ROUND_TRIP_COST = 0.003
+
 
 class LayeredBacktester:
     """因子分层回测服务，通过分位数分组检验因子单调性与多空收益。"""
@@ -19,6 +22,7 @@ class LayeredBacktester:
         factor_panel: pd.DataFrame,
         returns_panel: pd.DataFrame,
         n_groups: int = 5,
+        round_trip_cost: float = _DEFAULT_ROUND_TRIP_COST,
     ) -> dict:
         """对单个因子执行分层回测。
 
@@ -63,6 +67,7 @@ class LayeredBacktester:
             q5_mask = group_labels == n_groups
             if q1_mask.any() and q5_mask.any():
                 ls_ret = float(fwd_rets[q5_mask].mean() - fwd_rets[q1_mask].mean())
+                ls_ret -= round_trip_cost
                 ls_daily_rets.append(ls_ret)
 
         # 各组年化收益

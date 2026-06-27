@@ -8,7 +8,7 @@ description_en: Compute per-security factors (tech/volume/money-flow) and persis
 category: compute
 task_type: on_demand
 queue: celery
-timeout: 43200
+timeout: 86400  # 24h
 retry_config:
   max_retries: 2
   retry_backoff: true

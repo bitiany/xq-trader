@@ -28,6 +28,7 @@ from worker.scheduler.context import set_context
 from worker.scheduler.cron_scheduler import CronScheduler
 from worker.scheduler.cycle_manager import CycleManager
 from worker.scheduler.dag_builder import build_dag
+from worker.timeouts import LONG_TASK_TIMEOUT
 
 logger = get_logger("ENTRY")
 
@@ -60,7 +61,7 @@ def on_worker_init(**kwargs: object) -> None:
         bind=True,
         name="worker.orchestration.trigger_pipeline",
         max_retries=1,
-        time_limit=43200,
+        time_limit=LONG_TASK_TIMEOUT,
     )
     def trigger_pipeline_task(self: Any, pipeline_name: str) -> dict:
         return _trigger_pipeline(pipeline_name)
@@ -70,7 +71,7 @@ def on_worker_init(**kwargs: object) -> None:
         bind=True,
         name="worker.orchestration.recover_pipeline",
         max_retries=1,
-        time_limit=43200,
+        time_limit=LONG_TASK_TIMEOUT,
     )
     def recover_pipeline_task(self: Any, orchestration_id: str) -> dict:
         return _recover_pipeline(orchestration_id)

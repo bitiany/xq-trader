@@ -21,6 +21,7 @@ from scipy.stats import spearmanr  # type: ignore[import-untyped]
 
 from framework.commons.logger import get_logger
 from xqtrader.domain.factor.services.cross_section_reader import CrossSectionReader
+from xqtrader.domain.factor.services.factor_dedup import dedup_by_correlation
 
 logger = get_logger(__name__)
 
@@ -44,8 +45,11 @@ async def build_group_factor_ids() -> dict[str, list[str]]:
     from xqtrader.domain.factor.models.factor_registry import FacFactorRegistry
 
     result: dict[str, list[str]] = {}
+    registry_groups: set[str] = set()
     composites = await FacFactorRegistry.filter(is_composite=1)
     for c in composites:
+        if not c.factor_id.startswith("composite_"):
+            continue
         # 从 composite_factor_id 反推组名
         group_name = None
         for gname, composite_fid in GROUP_FACTOR_ID_MAP.items():
@@ -58,23 +62,25 @@ async def build_group_factor_ids() -> dict[str, list[str]]:
         child_ids_str = c.composite_factor_ids or ""
         if child_ids_str:
             result[group_name] = [fid.strip() for fid in child_ids_str.split(",") if fid.strip()]
+            registry_groups.add(group_name)
 
     # 补充注册表中无血缘配置的组（按 category 推断）
-    if len(result) < len(GROUP_FACTOR_ID_MAP):
-        # category → group_name 映射
-        category_map: dict[str, str] = {
-            "value": "value", "momentum": "momentum", "volatility": "volatility",
-            "liquidity": "liquidity", "technical": "technical", "fund_flow": "fund_flow",
-            "fundamental": "value", "risk": "volatility",
-        }
-        all_factors = await FacFactorRegistry.filter(
-            status__in=["active", "testing", "draft"],
-            category__in=list(category_map.keys()),
-        )
-        for f in all_factors:
-            mapped_group: str | None = category_map.get(f.category or "")
-            if mapped_group and mapped_group not in result:
-                result.setdefault(mapped_group, []).append(f.factor_id)
+    category_map: dict[str, str] = {
+        "value": "value", "momentum": "momentum", "volatility": "volatility",
+        "liquidity": "liquidity", "technical": "technical", "fund_flow": "fund_flow",
+        "fundamental": "value", "risk": "volatility",
+        "tech_volatility": "volatility", "tech_oscillator": "technical",
+        "tech_trend": "technical", "tech_volume": "liquidity",
+    }
+    all_factors = await FacFactorRegistry.filter(
+        status__in=["active", "testing", "draft"],
+        category__in=list(category_map.keys()),
+    )
+    for f in all_factors:
+        mapped_group: str | None = category_map.get(f.category or "")
+        if not mapped_group or mapped_group in registry_groups:
+            continue
+        result.setdefault(mapped_group, []).append(f.factor_id)
 
     return result
 
@@ -114,6 +120,9 @@ class AlphaSynthesizer:
         Returns:
             {factor_id: MultiIndex(trade_date, symbol) DataFrame}
         """
+        if composite_configs is not None and not composite_configs:
+            composite_configs = None
+
         # 1. 加载样本池标的 + 行业映射 + 市值映射
         symbols = await self._reader.load_pool_symbols(pool_id)
         if not symbols:
@@ -121,7 +130,7 @@ class AlphaSynthesizer:
             return {}
 
         industry_map = await self._reader.load_industry_map(symbols)
-        market_cap_map = await self._reader.load_market_cap_map(symbols)
+        market_cap_panel = await self._reader.load_market_cap_panel(symbols, start_date, end_date)
 
         # 2. 加载收益率面板
         returns_panel = await self._reader.load_returns_panel(
@@ -143,7 +152,7 @@ class AlphaSynthesizer:
                 symbols=symbols,
                 factor_id=fid,
                 industry_map=industry_map,
-                market_cap_map=market_cap_map,
+                market_cap_panel=market_cap_panel,
             )
             if panel.empty or fid not in panel.columns:
                 logger.debug("[alpha.synth] 因子 %s 数据为空，跳过", fid)
@@ -173,22 +182,23 @@ class AlphaSynthesizer:
             logger.warning("[alpha.synth] pool=%s 合并后面板为空", pool_id)
             return {}
 
+        composite_configs = self._resolve_composite_configs(
+            composite_configs, set(factor_panels.keys()),
+        )
+
         # 5. 第一阶段：组内等权合成（独立落库）
+        icir_rank = await self._load_icir_rank(pool_id, list(factor_panels.keys()))
         group_factor_ids = await build_group_factor_ids() if not composite_configs else None
-        group_alphas = self._synthesize_within_groups(combined, composite_configs, group_factor_ids)
+        group_alphas = self._synthesize_within_groups(
+            combined, composite_configs, group_factor_ids, icir_rank,
+        )
         if not group_alphas:
             return {}
 
         results: dict[str, pd.DataFrame] = {}
-        # 组内 Alpha 独立落库
-        # composite_configs 路径：group_alphas 的 key 已经是 composite_fid（如 "composite_value"），直接使用
-        # 默认分组路径：group_alphas 的 key 是组名（如 "value"），需通过 GROUP_FACTOR_ID_MAP 转换
-        for group_key, group_series in group_alphas.items():
-            if composite_configs:
-                factor_id = group_key  # key 已经是 composite_fid
-            else:
-                factor_id = GROUP_FACTOR_ID_MAP.get(group_key, f"composite_{group_key}")
-            results[factor_id] = group_series.to_frame(factor_id)
+        # 组内 Alpha 独立落库（group_alphas 的 key 均为 composite_fid）
+        for composite_fid, group_series in group_alphas.items():
+            results[composite_fid] = group_series.to_frame(composite_fid)
 
         # 6. 第二阶段：跨组加权合成最终 alpha
         group_combined = pd.DataFrame(group_alphas)
@@ -220,10 +230,53 @@ class AlphaSynthesizer:
         return results
 
     @staticmethod
+    async def _load_icir_rank(pool_id: str, factor_ids: list[str]) -> dict[str, float]:
+        """从 fac_factor_stats 加载样本池内因子 ICIR，供去冗余排序。"""
+        from xqtrader.domain.factor.models.factor_stats import FacFactorStats
+
+        if not factor_ids:
+            return {}
+        stats = await FacFactorStats.filter(
+            pool_id=pool_id,
+            factor_id__in=factor_ids,
+        )
+        rank: dict[str, float] = {}
+        for s in stats:
+            if s.icir is not None:
+                rank[s.factor_id] = float(s.icir)
+        return rank
+
+    @staticmethod
+    def _resolve_composite_configs(
+        composite_configs: dict[str, dict] | None,
+        loaded_factor_ids: set[str],
+    ) -> dict[str, dict] | None:
+        """将注册表血缘与本次实际加载的输入因子对齐，无交集时返回 None 走默认分组。"""
+        if not composite_configs:
+            return None
+        effective: dict[str, dict] = {}
+        for composite_fid, cfg in composite_configs.items():
+            if composite_fid == "composite_alpha":
+                continue
+            child_ids = [
+                fid.strip()
+                for fid in (cfg.get("composite_factor_ids") or "").split(",")
+                if fid.strip()
+            ]
+            matched = [fid for fid in child_ids if fid in loaded_factor_ids]
+            if matched:
+                effective[composite_fid] = {
+                    **cfg,
+                    "composite_factor_ids": ",".join(matched),
+                }
+        return effective or None
+
+    @staticmethod
     def _synthesize_within_groups(
         factor_panel: pd.DataFrame,
         composite_configs: dict[str, dict] | None = None,
         group_factor_ids: dict[str, list[str]] | None = None,
+        icir_rank: dict[str, float] | None = None,
     ) -> dict[str, pd.Series]:
         """组内等权合成：同类别因子等权平均，消除组内共线性。
 
@@ -248,8 +301,12 @@ class AlphaSynthesizer:
                 if not child_ids_str:
                     continue
                 child_ids = [fid.strip() for fid in child_ids_str.split(",") if fid.strip()]
-                # 只取因子面板中存在的因子
+                # 只取因子面板中存在的因子，组内去冗余
                 available = [fid for fid in child_ids if fid in factor_panel.columns]
+                if icir_rank:
+                    available = dedup_by_correlation(
+                        available, factor_panel, icir_rank,
+                    )
                 if not available:
                     continue
                 group_alpha = factor_panel[available].mean(axis=1)
@@ -268,6 +325,10 @@ class AlphaSynthesizer:
             for group_name, default_fids in group_factor_ids.items():
                 composite_fid = GROUP_FACTOR_ID_MAP.get(group_name, f"composite_{group_name}")
                 available = [fid for fid in default_fids if fid in factor_panel.columns]
+                if icir_rank:
+                    available = dedup_by_correlation(
+                        available, factor_panel, icir_rank,
+                    )
                 if available:
                     group_factors[composite_fid] = available
 

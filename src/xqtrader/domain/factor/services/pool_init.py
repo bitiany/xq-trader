@@ -23,6 +23,9 @@ from xqtrader.domain.factor.services.registry import get_factor_definitions
 
 logger = get_logger("factor.pool_init")
 
+# 个人版默认评估/合成样本池：全 A + 目标交易池
+DEFAULT_ACTIVE_POOL_IDS: tuple[str, ...] = ("all", "idx_300")
+
 # 默认样本池配置 — 评估任务启动时自动同步到 DB
 _DEFAULT_POOLS: list[dict[str, Any]] = [
     {
@@ -31,6 +34,7 @@ _DEFAULT_POOLS: list[dict[str, Any]] = [
         "pool_type": "market",
         "definition": {"source": "sdc_security", "filter": {"list_status": "L"}},
         "factor_scope": None,
+        "status": "active",
     },
     {
         "pool_id": "idx_50",
@@ -38,6 +42,7 @@ _DEFAULT_POOLS: list[dict[str, Any]] = [
         "pool_type": "index",
         "definition": {"index_code": "000016.SH"},
         "factor_scope": None,
+        "status": "deprecated",
     },
     {
         "pool_id": "idx_300",
@@ -45,6 +50,7 @@ _DEFAULT_POOLS: list[dict[str, Any]] = [
         "pool_type": "index",
         "definition": {"index_code": "000300.SH"},
         "factor_scope": None,
+        "status": "active",
     },
     {
         "pool_id": "idx_500",
@@ -52,6 +58,7 @@ _DEFAULT_POOLS: list[dict[str, Any]] = [
         "pool_type": "index",
         "definition": {"index_code": "000905.SH"},
         "factor_scope": None,
+        "status": "deprecated",
     },
     {
         "pool_id": "idx_1000",
@@ -59,6 +66,7 @@ _DEFAULT_POOLS: list[dict[str, Any]] = [
         "pool_type": "index",
         "definition": {"index_code": "000852.SH"},
         "factor_scope": None,
+        "status": "deprecated",
     },
     {
         "pool_id": "idx_kcb50",
@@ -66,6 +74,7 @@ _DEFAULT_POOLS: list[dict[str, Any]] = [
         "pool_type": "index",
         "definition": {"index_code": "000688.SH"},
         "factor_scope": None,
+        "status": "deprecated",
     },
     {
         "pool_id": "idx_cybz",
@@ -73,6 +82,7 @@ _DEFAULT_POOLS: list[dict[str, Any]] = [
         "pool_type": "index",
         "definition": {"index_code": "399006.SZ"},
         "factor_scope": None,
+        "status": "deprecated",
     },
 ]
 
@@ -95,13 +105,13 @@ class PoolInitService:
                 definition=cfg.get("definition"),
                 factor_scope=cfg.get("factor_scope"),
                 refresh_freq="daily",
-                status="active",
+                status=cfg.get("status", "active"),
             ))
 
         await FacFactorPool.bulk_create_or_update(
             records,
             on_conflict=["pool_id"],
-            update_fields=["pool_name", "pool_type", "definition", "factor_scope", "refresh_freq"],
+            update_fields=["pool_name", "pool_type", "definition", "factor_scope", "refresh_freq", "status"],
             batch_size=100,
         )
         logger.info("样本池初始化完成: %d 个样本池已同步", len(records))
@@ -139,3 +149,9 @@ class PoolInitService:
             ]
 
         return all_factor_ids
+
+    @staticmethod
+    async def list_active_pool_ids() -> list[str]:
+        """返回 status=active 的样本池 ID 列表。"""
+        pools = await FacFactorPool.filter(status="active")
+        return [p.pool_id for p in pools]

@@ -10,6 +10,7 @@ from celery import Celery
 
 from framework.config.settings import settings
 from framework.scheduler.cron_utils import parse_cron_to_crontab
+from worker.timeouts import BROKER_VISIBILITY_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
@@ -83,10 +84,9 @@ celery_app.conf.update(
     task_reject_on_worker_lost=True,
     worker_prefetch_multiplier=1,
 
-    # Redis broker 消息可见性超时（必须远大于最长任务 time_limit）
-    # time_limit 默认 43200s（12h），设 86400s（24h）确保任务完成前不会重新投递
+    # Redis broker 消息可见性超时（必须大于最长任务 time_limit）
     broker_transport_options={
-        "visibility_timeout": 86400,
+        "visibility_timeout": BROKER_VISIBILITY_TIMEOUT,
     },
 
     # 结果

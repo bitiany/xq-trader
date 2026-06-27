@@ -8,7 +8,7 @@ description_en: Synthesize Alpha factors per sample pool (equal-weight/IC/ICIR),
 category: compute
 task_type: on_demand
 queue: celery
-timeout: 43200
+timeout: 86400  # 24h，全 A 池合成+落库可能超过 12h
 retry_config:
   max_retries: 2
   retry_backoff: true

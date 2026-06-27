@@ -18,9 +18,10 @@ import numpy as np
 import pandas as pd
 
 from framework.commons.logger import get_logger
-from xqtrader.domain.factor.models.factor_value import FacFactorValue
+from xqtrader.domain.factor.services import factor_data_loader as fdl
 from xqtrader.domain.index.models.index import IndexWeight
 from xqtrader.domain.market.models.candlestick import CandlestickDaily
+from xqtrader.domain.market.models.daily_indicator import DailyIndicator
 from xqtrader.domain.security.models import Security
 
 logger = get_logger(__name__)
@@ -79,7 +80,7 @@ class CrossSectionReader:
         symbols: list[str],
         factor_id: str,
         industry_map: dict[str, str],
-        market_cap_map: dict[str, float] | None = None,
+        market_cap_panel: pd.Series | None = None,
     ) -> pd.DataFrame:
         """加载单因子截面面板并完成截面预处理。
 
@@ -96,7 +97,7 @@ class CrossSectionReader:
             symbols: 样本池标的列表
             factor_id: 单个因子 ID
             industry_map: 行业映射 {symbol: industry_name}
-            market_cap_map: 市值映射 {symbol: total_mv}，用于市值中性化
+            market_cap_panel: 市值面板 Series(MultiIndex)，按截面日 PIT 中性化
 
         Returns:
             MultiIndex(trade_date, symbol), columns=[factor_id]
@@ -117,7 +118,9 @@ class CrossSectionReader:
                 month_start = date(month_start.year + (month_start.month // 12), (month_start.month % 12) + 1, 1)
                 continue
 
-            factor_df = await self._load_per_security_factors(chunk_start, chunk_end, [factor_id], symbols)
+            factor_df = await fdl.load_factor_raw_chunk(
+                chunk_start, chunk_end, factor_id, symbols, pool_id,
+            )
 
             if not factor_df.empty:
                 # 月内：缺失值填充 → MAD去极值 → Z-score
@@ -136,7 +139,9 @@ class CrossSectionReader:
 
         # 跨月合并：行业+市值中性化 → 再Z-score
         factor_panel = pd.concat(factor_parts)
-        factor_panel = self._industry_market_cap_neutralize(factor_panel, industry_map, market_cap_map)
+        factor_panel = self._industry_market_cap_neutralize(
+            factor_panel, industry_map, market_cap_panel,
+        )
         factor_panel = self._zscore_standardize(factor_panel)
 
         logger.debug(
@@ -159,7 +164,7 @@ class CrossSectionReader:
             symbols: 样本池标的列表
 
         Returns:
-            MultiIndex(trade_date, symbol), column='fwd_ret_1d'
+            MultiIndex(trade_date, symbol), columns fwd_ret_1d/5d/10d/20d
         """
         returns_parts: list[pd.DataFrame] = []
 
@@ -211,7 +216,8 @@ class CrossSectionReader:
 
         index_code = _POOL_INDEX_MAP.get(pool_id, pool_id)
         weights = await IndexWeight.filter(index_code=index_code)
-        symbols = list({w.stock_code for w in weights})
+        # 取历史全部成分并集，评估时按 PIT membership 过滤截面
+        symbols = list({w.stock_code for w in weights if w.stock_code})
         logger.debug("样本池 %s (index=%s): %d 只标的", pool_id, index_code, len(symbols))
         return symbols
 
@@ -220,13 +226,105 @@ class CrossSectionReader:
         securities = await Security.filter(symbol__in=symbols)
         return {s.symbol: s.industry for s in securities if s.industry}
 
-    async def load_market_cap_map(self, symbols: list[str]) -> dict[str, float]:
-        """获取标的最新总市值映射，用于市值中性化。
+    async def load_market_cap_panel(
+        self,
+        symbols: list[str],
+        start_date: date,
+        end_date: date,
+    ) -> pd.Series:
+        """加载 PIT 市值面板 Series(MultiIndex: trade_date, symbol)。"""
+        if not symbols:
+            return pd.Series(dtype=float)
 
-        批量查询后按 symbol 分组取最新日期记录，避免逐标的串行查询。
+        rows: list[tuple] = []
+        for i in range(0, len(symbols), _QUERY_BATCH_SIZE):
+            batch = symbols[i:i + _QUERY_BATCH_SIZE]
+            records = await DailyIndicator.filter(
+                symbol__in=batch,
+                trade_date__gte=start_date,
+                trade_date__lte=end_date,
+            )
+            for r in records:
+                if r.total_mv is not None:
+                    rows.append((r.trade_date, r.symbol, float(r.total_mv)))
+
+        if not rows:
+            return pd.Series(dtype=float)
+
+        df = pd.DataFrame(rows, columns=["trade_date", "symbol", "total_mv"])
+        return df.set_index(["trade_date", "symbol"])["total_mv"]
+
+    async def build_pool_membership(
+        self,
+        pool_id: str,
+        start_date: date,
+        end_date: date,
+    ) -> dict[date, frozenset[str]]:
+        """构建样本池 PIT 成分映射 {trade_date: symbols}。
+
+        指数池按 report_date PIT 取成分；全 A 池返回空 dict（不做日期过滤）。
         """
-        from xqtrader.domain.market.models.daily_indicator import DailyIndicator
+        if pool_id == "all":
+            return {}
 
+        index_code = _POOL_INDEX_MAP.get(pool_id)
+        if not index_code:
+            return {}
+
+        weights = await IndexWeight.filter(index_code=index_code)
+        if not weights:
+            return {}
+
+        # report_date -> constituents
+        batches: dict[date, set[str]] = {}
+        for w in weights:
+            if not w.report_date or not w.stock_code:
+                continue
+            try:
+                rd = date.fromisoformat(str(w.report_date)[:10])
+            except ValueError:
+                continue
+            batches.setdefault(rd, set()).add(w.stock_code)
+
+        if not batches:
+            return {}
+
+        sorted_reports = sorted(batches.keys())
+        trade_dates = await fdl.load_trade_dates(start_date, end_date, list(next(iter(batches.values()))))
+        membership: dict[date, frozenset[str]] = {}
+        for td in trade_dates:
+            active_report = None
+            for rd in sorted_reports:
+                if rd <= td:
+                    active_report = rd
+                else:
+                    break
+            if active_report is not None:
+                membership[td] = frozenset(batches[active_report])
+        return membership
+
+    @staticmethod
+    def filter_panel_by_membership(
+        panel: pd.DataFrame,
+        membership: dict[date, frozenset[str]],
+    ) -> pd.DataFrame:
+        """按 PIT 成分过滤截面面板行。"""
+        if panel.empty or not membership:
+            return panel
+
+        keep_idx = []
+        for idx in panel.index:
+            td = idx[0] if isinstance(idx, tuple) else idx
+            sym = idx[1] if isinstance(idx, tuple) else None
+            if hasattr(td, "date"):
+                td = td.date()  # type: ignore[union-attr]
+            allowed = membership.get(td)
+            if allowed is None or sym in allowed:
+                keep_idx.append(idx)
+        return panel.loc[keep_idx] if keep_idx else panel.iloc[0:0]
+
+    async def load_market_cap_map(self, symbols: list[str]) -> dict[str, float]:
+        """获取标的最新总市值映射（兼容旧调用，评估/合成应优先用 load_market_cap_panel）。"""
         if not symbols:
             return {}
 
@@ -248,40 +346,6 @@ class CrossSectionReader:
         return market_cap
 
     # ==================== 数据加载 ====================
-
-    async def _load_per_security_factors(
-        self,
-        start_date: date,
-        end_date: date,
-        factor_ids: list[str],
-        symbols: list[str],
-    ) -> pd.DataFrame:
-        """加载逐标的因子值（窄表转宽表），按样本池标的过滤。"""
-        if not factor_ids or not symbols:
-            return pd.DataFrame()
-
-        all_rows: list[dict] = []
-        for i in range(0, len(symbols), _QUERY_BATCH_SIZE):
-            batch = symbols[i:i + _QUERY_BATCH_SIZE]
-            records = await FacFactorValue.filter(
-                trade_date__gte=start_date,
-                trade_date__lte=end_date,
-                pool_id="all",
-                factor_id__in=factor_ids,
-                symbol__in=batch,
-            )
-            all_rows.extend(
-                {"trade_date": r.trade_date, "symbol": r.symbol, r.factor_id: r.factor_value}
-                for r in records
-            )
-
-        if not all_rows:
-            return pd.DataFrame()
-
-        df = pd.DataFrame(all_rows)
-        df = df.groupby(["trade_date", "symbol"]).agg("first").reset_index()
-        df = df.set_index(["trade_date", "symbol"])
-        return df
 
     async def _load_returns(
         self,
@@ -307,9 +371,13 @@ class CrossSectionReader:
             return pd.DataFrame()
 
         df = pd.DataFrame(all_rows).sort_values(["symbol", "trade_date"])
-        df["fwd_ret_1d"] = df.groupby("symbol")["close"].shift(-1) / df["close"] - 1
+        for horizon in (1, 5, 10, 20):
+            df[f"fwd_ret_{horizon}d"] = (
+                df.groupby("symbol")["close"].shift(-horizon) / df["close"] - 1
+            )
         df = df.dropna(subset=["fwd_ret_1d"])
-        df = df.set_index(["trade_date", "symbol"])[["fwd_ret_1d"]]
+        ret_cols = [f"fwd_ret_{h}d" for h in (1, 5, 10, 20)]
+        df = df.set_index(["trade_date", "symbol"])[ret_cols]
         return df
 
     # ==================== 截面预处理 ====================
@@ -413,14 +481,11 @@ class CrossSectionReader:
     def _industry_market_cap_neutralize(
         df: pd.DataFrame,
         industry_map: dict[str, str],
-        market_cap_map: dict[str, float] | None = None,
+        market_cap_panel: pd.Series | None = None,
     ) -> pd.DataFrame:
         """行业+市值中性化：对每个因子回归行业虚拟变量 + log(市值)，取残差。
 
-        Barra CNE6 标准做法：同时剥离行业暴露和规模暴露。
-        小盘股偏高的因子值（如换手率、波动率）含规模因子残差，需通过市值中性化剥离。
-
-        无市值数据时退化为纯行业中性化。
+        market_cap_panel 为 PIT 市值（与 df 同 MultiIndex）；缺失时仅行业中性化。
         """
         if df.empty or not industry_map:
             return df
@@ -432,14 +497,9 @@ class CrossSectionReader:
         )
         dummies = pd.get_dummies(industry_series, drop_first=True)
 
-        # 构造 log(市值) 列
-        if market_cap_map:
-            log_mv_series = pd.Series(
-                [np.log1p(market_cap_map.get(s, 0.0)) for s in symbols_in_index],
-                index=df.index,
-            )
-            # 合并行业虚拟变量和 log(市值)
-            x_all = pd.concat([dummies, log_mv_series.rename("log_mv")], axis=1)
+        if market_cap_panel is not None and not market_cap_panel.empty:
+            log_mv = np.log1p(market_cap_panel.reindex(df.index).fillna(0.0))
+            x_all = pd.concat([dummies, log_mv.rename("log_mv")], axis=1)
         else:
             x_all = dummies
 
@@ -451,7 +511,6 @@ class CrossSectionReader:
             y = df.loc[valid, col].values.astype(float)
             x_mat = x_all.loc[valid].values.astype(float)
 
-            # 移除全零列（某行业在该截面无标的）
             nonzero_cols = ~np.all(x_mat == 0, axis=0)
             if nonzero_cols.sum() == 0:
                 continue

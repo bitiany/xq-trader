@@ -28,12 +28,12 @@ class GradeEvaluator:
             )
             return "D"
 
-        # 按等级从高到低判定，满足全部条件则返回（此时 icir/ret/turnover 均非 None）
-        if icir > 1.0 and long_short_annual_ret > 10 and turnover < 50:
+        # 阈值口径：long_short_annual_ret / turnover 均为小数（10% = 0.10，换手 50% = 0.50）
+        if icir > 1.0 and long_short_annual_ret > 0.10 and turnover < 0.50:
             return "A"
-        if icir > 0.5 and long_short_annual_ret > 5 and turnover < 70:
+        if icir > 0.5 and long_short_annual_ret > 0.05 and turnover < 0.70:
             return "B"
-        if icir > 0.3 and long_short_annual_ret > 3:
+        if icir > 0.3 and long_short_annual_ret > 0.03:
             return "C"
         return "D"
 

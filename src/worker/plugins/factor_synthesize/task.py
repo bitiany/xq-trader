@@ -21,13 +21,19 @@ from xqtrader.domain.factor.models.factor_pool import FacFactorPool
 from xqtrader.domain.factor.models.factor_registry import FacFactorRegistry
 from xqtrader.domain.factor.models.factor_stats import FacFactorStats
 from xqtrader.domain.factor.models.factor_value import FacFactorValue
-from xqtrader.domain.factor.services.alpha_synthesizer import AlphaSynthesizer
+from xqtrader.domain.factor.services.alpha_synthesizer import (
+    GROUP_FACTOR_ID_MAP,
+    AlphaSynthesizer,
+    build_group_factor_ids,
+)
+from xqtrader.domain.factor.services.pool_init import PoolInitService
+from xqtrader.domain.factor.services.registry import auto_discover_factors, register_factor_variants
 
 logger = get_logger("factor.synthesize")
 
 _RETENTION_YEARS = 5
 _DEFAULT_WINDOW = 252
-_DEFAULT_POOL_IDS = ["idx_300", "idx_1000"]
+_PERSIST_BATCH_SIZE = 5000
 _COMPOSITE_FACTOR_IDS = [
     "composite_value", "composite_momentum", "composite_volatility",
     "composite_liquidity", "composite_technical", "composite_fund_flow",
@@ -43,17 +49,26 @@ class AlphaSynthesizeTask(BaseTask):
     prevent_concurrent = True
 
     async def _run_impl(self, **kwargs: Any) -> dict[str, Any]:
-        pool_ids = parse_list_param(kwargs.get("pool_ids")) or _DEFAULT_POOL_IDS
+        pool_ids = parse_list_param(kwargs.get("pool_ids"))
         factor_ids = parse_list_param(kwargs.get("factor_ids"))
         start_date = str(kwargs.get("start_date", ""))
         end_date = str(kwargs.get("end_date", ""))
         window = int(kwargs.get("window", _DEFAULT_WINDOW))
 
+        # 同步默认样本池配置（与评估任务共用 status=active 的 all + idx_300）
+        await PoolInitService().sync_default_pools()
+
+        auto_discover_factors()
+        register_factor_variants()
+
         # 从 DB 加载样本池
-        pools = await FacFactorPool.filter(
-            pool_id__in=pool_ids,
-            status="active",
-        )
+        if pool_ids:
+            pools = await FacFactorPool.filter(
+                pool_id__in=pool_ids,
+                status="active",
+            )
+        else:
+            pools = await FacFactorPool.filter(status="active")
         if not pools:
             return {"status": "FAILED", "message": "No active pools found"}
 
@@ -196,8 +211,8 @@ class AlphaSynthesizeTask(BaseTask):
         pool_id: str,
         results: dict[str, Any],
     ) -> int:
-        """将合成结果持久化到 fac_factor_value。"""
-        rows: list[FacFactorValue] = []
+        """将合成结果持久化到 fac_factor_value（分因子、分片 upsert，控制内存峰值）。"""
+        total = 0
 
         for method, df in results.items():
             if df.empty:
@@ -205,34 +220,44 @@ class AlphaSynthesizeTask(BaseTask):
 
             col = df.columns[0]
             reset_df = df.reset_index()
-
-            # 向量化过滤 NaN/Inf
-            vals = reset_df[col].values
+            vals = reset_df[col].to_numpy(dtype=float)
             valid_mask = np.isfinite(vals)
+            if not valid_mask.any():
+                continue
 
-            for idx in np.where(valid_mask)[0]:
-                td = reset_df.iloc[idx]["trade_date"]
-                if hasattr(td, "date"):
-                    td = td.date()  # type: ignore[union-attr]
+            reset_df = reset_df.loc[valid_mask]
+            vals = vals[valid_mask]
+            n = len(reset_df)
 
-                rows.append(FacFactorValue(
-                    symbol=str(reset_df.iloc[idx]["symbol"]),
-                    trade_date=td,
-                    factor_id=method,
-                    pool_id=pool_id,
-                    factor_value=float(vals[idx]),
-                ))
+            for start in range(0, n, _PERSIST_BATCH_SIZE):
+                end = min(start + _PERSIST_BATCH_SIZE, n)
+                chunk = reset_df.iloc[start:end]
+                chunk_vals = vals[start:end]
+                rows: list[FacFactorValue] = []
+                for idx in range(len(chunk)):
+                    row = chunk.iloc[idx]
+                    td = row["trade_date"]
+                    if hasattr(td, "date"):
+                        td = td.date()  # type: ignore[union-attr]
+                    rows.append(FacFactorValue(
+                        symbol=str(row["symbol"]),
+                        trade_date=td,
+                        factor_id=method,
+                        pool_id=pool_id,
+                        factor_value=float(chunk_vals[idx]),
+                    ))
 
-        if not rows:
-            return 0
+                total += await FacFactorValue.bulk_create_or_update(
+                    rows,
+                    on_conflict=["symbol", "trade_date", "factor_id", "pool_id"],
+                    update_fields=["factor_value"],
+                )
+                logger.info(
+                    "[alpha.synth] pool=%s factor=%s persist progress=%d/%d",
+                    pool_id, method, end, n,
+                )
 
-        # 批量 upsert（复合主键冲突时更新 factor_value）
-        await FacFactorValue.bulk_create_or_update(
-            rows,
-            on_conflict=["symbol", "trade_date", "factor_id", "pool_id"],
-            update_fields=["factor_value"],
-        )
-        return len(rows)
+        return total
 
     @staticmethod
     async def _load_composite_configs() -> dict[str, dict]:
@@ -242,6 +267,8 @@ class AlphaSynthesizeTask(BaseTask):
         )
         configs: dict[str, dict] = {}
         for c in composites:
+            if not c.factor_id.startswith("composite_"):
+                continue
             configs[c.factor_id] = {
                 "composite_factor_ids": c.composite_factor_ids or "",
                 "composite_method": c.composite_method or "equal_weight",
@@ -258,6 +285,18 @@ class AlphaSynthesizeTask(BaseTask):
 
         从 composite_configs 中提取实际合成时的分组关系，确保注册表血缘与合成逻辑一致。
         """
+        if not composite_configs:
+            group_ids = await build_group_factor_ids()
+            composite_configs = {}
+            for group_name, fids in group_ids.items():
+                composite_fid = GROUP_FACTOR_ID_MAP.get(group_name, f"composite_{group_name}")
+                actual = sorted(fid for fid in fids if fid in input_factor_ids)
+                if actual:
+                    composite_configs[composite_fid] = {
+                        "composite_factor_ids": ",".join(actual),
+                        "composite_method": "equal_weight",
+                    }
+
         # 从 composite_configs 提取每个合成因子实际使用的输入因子
         for composite_fid, config in composite_configs.items():
             if composite_fid == "composite_alpha":

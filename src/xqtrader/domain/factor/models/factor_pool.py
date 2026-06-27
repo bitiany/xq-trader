@@ -26,7 +26,7 @@ class FacFactorPool(AuditedBase):
         comment="因子评估范围 JSON: null=全量, {include:[...]}/{exclude:[...]}/{category:[...]}",
     )
     refresh_freq: Mapped[str] = mapped_column(String(16), nullable=True, default="daily", comment="刷新频率")
-    status: Mapped[str] = mapped_column(String(8), nullable=True, default="active", comment="状态 active/deprecated")
+    status: Mapped[str] = mapped_column(String(16), nullable=True, default="active", comment="状态 active/deprecated")
 
     __table_args__ = (
         {"comment": "样本池配置表 — 定义因子评估的标的范围和因子范围"},
