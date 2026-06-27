@@ -4,6 +4,7 @@
 > 日期：2026-06-26
 > 状态：现行设计（取代 v1.0，原文档已归档至 `docs/archive/ai-agent-v1.0-20260520/`）
 > 定位：**个人单机**量化平台的 AI Agent 子系统
+> 关联：[ai-in-trading-design.md](./ai-in-trading-design.md)（AI 在交易决策流中的应用边界与 LLM 旁路设计）
 
 ---
 

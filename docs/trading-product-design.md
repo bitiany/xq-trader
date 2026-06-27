@@ -1,224 +1,172 @@
-# xq-trader 交易模块前端产品设计
+# xq-trader 交易模块前端产品设计（个人版）
 
-> **更新**: 2026-06-23
+> **版本**: v2.0
+> **更新**: 2026-06-26（取代旧版，原文档已归档至 `docs/archive/trading-product-20260623/`）
 > **关联**: [trading-system-design.md](./trading-system-design.md)（后端架构）、[factor-architecture.md](./factor-architecture.md)（因子管线）
+> **定位**: **个人**量化交易终端前端，本文档为前端**权威口径**
+
+---
+
+## 0. 修订说明（据实对齐 + 个人版裁剪）
+
+旧版定义了多个独立交易页面与导航项，与实际前端**严重不符**。实际为**单页交易工作台 + 账户切换 + 内嵌 Tab**。本版据实重写，并据此统一全项目导航口径。
+
+| 维度 | 旧版（设计稿） | v2.0（据实） | 代码现状 |
+|------|----------------|--------------|----------|
+| 交易入口 | `/trading/live` + `/trading/paper` 双页 | **单页 `/trading`** + 账户下拉切换 live/paper | ✅ `router/index.tsx` 仅 `{path:'trading'}` |
+| 独立页 | `/trading/orders`、`/trading/risk`、`/trading/workflow` | **全部内嵌为 Tab / 侧栏**，无独立路由 | ✅ 无对应路由 |
+| 导航项 | liveTrading/paperTrading/orders/risk/workflow 等 6~7 项 | **单项 `nav.trading`** | ✅ `navigation.ts` 仅 1 项 |
+| 页面结构 | 多页线框 | 工作台 = 仪表盘 + 信号审批/风控双栏 + 4 内嵌 Tab | ✅ `LiveCockpitPage.tsx` |
+| 前端 API 类型 | ⏳ `api/trading` 待实现 | ✅ 已实现 | ✅ `web/src/api/trading` |
+
+> 个人版原则：**单工作台、不跳页、账户切换覆盖实盘/模拟**。删除多页拆分（个人无需多页并行操作），保留设计令牌、审批 HITL、组件规范等有效内容。
 
 ---
 
 ## 一、设计原则
 
-### 1.1 业界参考
+### 1.1 与现有 Web 一致
 
-| 产品/平台 | UI 模式 | xq-trader 采纳 |
-|-----------|---------|----------------|
-| **Bloomberg Terminal** | 多面板、状态栏实时推送、快捷键 | StatusBar 连接/资产；TopBar 信号铃铛 |
-| **QuantConnect** | 策略实例 + Paper/Live 切换 + 订单流 | 策略实例卡片 + run_mode 标签 |
-| **VeighNa Trader** | 左侧导航 + 中央工作区 + 日志/委托面板 | 现有 AppLayout 三段式 |
-| **衡泰 xQuant** | 策略生命周期 + 前中后风控仪表盘 | 风控中心独立页 |
-| **CASE-AI 量化系统** | sim/real 双视图 + 授权面板 | 实盘/模拟 Tab + 预订单审批抽屉 |
-| **QuantConnect PCM** | PortfolioConstruction 仓位层 | 策略实例配置 position_sizing |
+沿用 `web/src/styles/themes.css` 设计令牌，**不引入新色板**；组件库 Ant Design 5；图标 Lucide React；布局沿用 `AppLayout`（TopBar + SideNav + Workspace + StatusBar + 可选 AgentPanel）。
 
-### 1.3 决策与执行分层（必读）
+| 令牌 | 用途 |
+|------|------|
+| `--accent-primary` | 主操作、Live 标签、链接、running 状态 |
+| `--color-rise` | 涨/盈利/买入/open/add（A 股红涨）、熔断 |
+| `--color-fall` | 跌/亏损/卖出/reduce/close、succeeded |
+| `--color-warning` | 告警、paused、部分成交、偏离超阈值 |
+| `--color-live` | 实盘标识 |
+| `--bg-card` / `--bg-workspace` / `--border-subtle` | 卡片/工作区/边框 |
+
+### 1.2 决策与执行分层（必读）
 
 | 层次 | 何时 | 用户可见 | 分钟 K 线用途 |
 |------|------|----------|---------------|
-| **日频决策** | T 日收盘后 17:00–18:30 | 工作流 Run、预订单审批 | **不用** |
-| **盘内执行** | T+1 日 9:30–15:00 | 委托成交、持仓刷新、日内告警 | 成交监控、PnL 刷新 |
+| **日频决策** | T 日收盘后 | 工作流 Run、预订单审批 | 不用 |
+| **盘内执行** | T+1 9:30–15:00 | 委托成交、持仓刷新、日内告警 | 成交监控、PnL 刷新 |
 
-- 日线因子/Alpha 信号在 **T 日收盘后** 批量计算（见 [factor-architecture.md](./factor-architecture.md)），**不在盘内重算**。
-- 实盘页展示的分钟级行情变化用于 **持仓市值、订单状态、日内风控**，不是新的选股/配仓信号。
-- 预订单 `signal_date=T`，`execution_date=T+1`；审批抽屉需展示两日期，避免用户误以为「当晚立即成交」。
-
----
-
-### 1.2 与现有 Web 一致
-
-沿用 [`web/src/styles/themes.css`](../web/src/styles/themes.css) 设计令牌，**不引入新色板**。
-
-| 令牌 | Dark | Light | 用途 |
-|------|------|-------|------|
-| `--accent-primary` | `#1677ff` | `#1677ff` | 主操作、Live 标签、链接 |
-| `--bg-card` | `#131820` | `#ffffff` | 卡片背景 |
-| `--bg-workspace` | `#0f1218` | `#f1f5f9` | 工作区背景 |
-| `--text-primary` | `#eef2f8` | `#0f172a` | 主文字 |
-| `--text-secondary` | `#9aaabe` | `#475569` | 次要文字 |
-| `--color-rise` | `#e03e3e` | `#cf1322` | 涨/盈利/买入（A 股） |
-| `--color-fall` | `#2eaa67` | `#389e0d` | 跌/亏损/卖出 |
-| `--color-warning` | `#faad14` | `#d48806` | 告警、部分成交 |
-| `--color-live` | `#1677ff` | `#1677ff` | 实盘标识 |
-| `--border-subtle` | `rgba(255,255,255,0.07)` | `rgba(15,23,42,0.08)` | 卡片边框 |
-
-**组件库**: Ant Design 5（与回测页 [`BacktestPage`](../web/src/pages/backtest/BacktestPage.tsx) 一致）  
-**图标**: Lucide React（与 SideNav 一致）  
-**布局**: 现有 `AppLayout`（TopBar + SideNav + Workspace + StatusBar + 可选 AgentPanel）
+- 因子/Alpha 信号在 T 日收盘后批量计算，**不在盘内重算**。
+- 预订单 `signal_date=T`，`execution_date=T+1`；审批界面须同时展示两日期，避免误以为「当晚立即成交」。
 
 ---
 
-## 二、信息架构
+## 二、信息架构（据实）
 
-### 2.1 导航扩展
+### 2.1 单一交易入口
 
-在 [`navigation.ts`](../web/src/config/navigation.ts) 新增交易域入口：
+`navigation.ts` 中交易域仅一项：
+
+```
+{ id: 'trading', labelKey: 'nav.trading', path: '/trading', icon: Radio }
+```
+
+`router/index.tsx` 中交易域仅一条路由：`{ path: 'trading', element: <LiveCockpitPage /> }`。
+
+> **无** `/trading/live`、`/trading/paper`、`/trading/orders`、`/trading/risk`、`/trading/workflow`。实盘/模拟通过**账户下拉**切换；订单/风控/工作流为**内嵌 Tab / 侧栏**。
+
+### 2.2 页面内结构
 
 ```mermaid
 flowchart TB
-    subgraph nav [SideNav 新增项]
-        Dashboard[总览 /]
-        Backtest[回测 /backtest]
-        Live[实盘交易 /trading/live]
-        Paper[模拟盘 /trading/paper]
-        Orders[订单管理 /trading/orders]
-        Risk[风控中心 /trading/risk]
-        Workflow[工作流 /trading/workflow]
-        Data[数据 /data]
-        Monitor[监控 /monitor]
-        Settings[设置 /settings]
+    subgraph page ["/trading — 交易工作台 (LiveCockpitPage)"]
+        Header[标题 + 账户下拉切换 live/paper + 账户类型 Tag]
+        Dashboard[CockpitDashboard 顶部仪表盘]
+        subgraph main [主区双栏]
+            Signal[SignalApprovalTab 信号审批]
+            Risk[RiskSidePanel 风控侧栏]
+        end
+        subgraph tabs [次级内嵌 Tabs]
+            T1[自选&策略 WatchlistStrategyTab]
+            T2[持仓&收益 PositionPnLTab]
+            T3[订单&成交 OrderFlowTab]
+            T4[工作流 WorkflowRunTab]
+        end
+        Modal[历史信号 Modal]
     end
-```
-
-| 路由 | 页面 | 图标建议 |
-|------|------|----------|
-| `/trading/live` | 实盘交易 | `Radio` / `Zap` |
-| `/trading/paper` | 模拟盘 | `FlaskConical` |
-| `/trading/orders` | 订单管理 | `ListOrdered` |
-| `/trading/risk` | 风控中心 | `Shield` |
-| `/trading/workflow` | 工作流监控 | `GitBranch` |
-| `/trading/instances` | 策略实例 | `Cpu`（可合入 paper 子 Tab） |
-
-i18n 键已存在于 [`zh-CN.json`](../web/src/i18n/locales/zh-CN.json)（`nav.liveTrading`, `nav.paperTrading` 等）。
-
-### 2.2 页面关系
-
-```mermaid
-flowchart LR
-    Instances[策略实例] --> Paper[模拟盘会话]
-    Instances --> Live[实盘交易]
-    Paper & Live --> WorkflowRun[工作流 Run 详情]
-    WorkflowRun --> Approval[预订单审批]
-    Approval --> Orders[订单管理]
-    Live & Paper --> Risk[风控中心]
-    TopBarBell[TopBar 信号铃铛] --> Approval
+    Header --> Dashboard --> main --> tabs
 ```
 
 ---
 
 ## 三、全局组件
 
-### 3.1 TopBar 信号铃铛（已有占位，需对接 Workflow）
+### 3.1 TopBar 信号铃铛（占位，待对接）
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│ [≡] XQ Trader  [🔍 全局搜索]          [📓] [🌙] [🌐] [🔔 3] [Agent] │
-└─────────────────────────────────────────────────────────────────┘
-                                              │
-                                              ▼ Popover
-                              ┌───────────────────────────────┐
-                              │ 待审批预订单 (3)    [查看全部 →] │
-                              ├───────────────────────────────┤
-                              │ ● 600519.SH  开仓  +10%  2分钟前 │
-                              │ ● 000858.SZ  减仓  -5%   5分钟前 │
-                              │ ● 601318.SH  平仓       1分钟前 │
-                              ├───────────────────────────────┤
-                              │        [批量审批 →]            │
-                              └───────────────────────────────┘
-```
+- 徽章数：`td_pre_order.approval_status=pending` 计数，WS `ws.trading.signals` 推送。
+- 点击条目 → 打开工作台信号审批（见 §4.3）。
+- 条目左侧色条：`open/add` → `--color-rise`，`reduce/close` → `--color-fall`。
 
-- 徽章数：`pre_order.status=pending_approval` 计数，WS `ws.trading.signals` 推送
-- 点击条目 → 打开「预订单审批抽屉」（见 5.2）
-- 配色：条目左侧色条，`open/add` 用 `--color-rise`，`reduce/close` 用 `--color-fall`
+### 3.2 StatusBar（已有 broker + pnl）
 
-### 3.2 StatusBar 扩展（已有 broker + pnl）
-
-```
-┌──────────────────────────────────────────────────────────────────────────┐
-│ ● QMT 已连接 │ 总资产 ¥1,234,567 │ 当日 +1.2% │ Workflow: paused @审批 │
-└──────────────────────────────────────────────────────────────────────────┘
-```
-
-- 新增 Workflow 状态段：running / paused / succeeded / failed
-- 颜色：running=`--accent-primary`，paused=`--color-warning`，failed=`--color-rise`
+`● QMT 已连接 │ 总资产 │ 当日 +x% │ 风控:正常 │ WF: pending`。新增风控段、Workflow 状态段，点击跳转工作台对应区域。
 
 ---
 
-## 四、页面线框
+## 四、交易工作台页面 `/trading`（据实）
 
-### 4.1 实盘交易 `/trading/live`
+> 实现：`web/src/pages/trading/LiveCockpitPage.tsx`，标题「交易工作台」。
 
-**参考**: CASE-AI real 视图 + Bloomberg 账户面板
+### 4.1 整体布局
 
 ```
 ┌──────────┬──────────────────────────────────────────────────────────────┐
-│ SideNav  │  实盘交易                    [账户 ▼ 实盘-001] [● Live]        │
+│ SideNav  │ 交易工作台   [账户 ▼ LIVE/PAPER #id 名称 (broker)] [类型 Tag] │
 │          ├──────────────────────────────────────────────────────────────┤
-│          │ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐              │
-│          │ │总资产    │ │可用资金  │ │持仓市值  │ │当日收益  │  ← 4 卡 KPI │
-│          │ │¥1.23M   │ │¥456K    │ │¥778K    │ │+1.2% ↑  │              │
-│          │ └─────────┘ └─────────┘ └─────────┘ └─────────┘              │
+│          │  CockpitDashboard（KPI + 风险状态 + Workflow 状态）            │
 │          ├───────────────────────────────┬──────────────────────────────┤
-│          │  持仓收益明细 (Table)          │  收益日历 (Heatmap)           │
-│          │  代码 名称 权重 成本 现价 盈亏   │  ■ ■ □ ■ ...                │
+│          │  SignalApprovalTab 信号审批    │  RiskSidePanel 风控侧栏       │
 │          ├───────────────────────────────┴──────────────────────────────┤
-│          │  [委托成交] [工作流 Run] [信号面板] [盘内监控]    ← Tabs       │
-│          │  ┌─────────────────────────────────────────────────────┐  │
-│          │  │ 时间  代码  方向  数量  价格  状态  策略              │  │
-│          │  │ ...                                                  │  │
-│          │  └─────────────────────────────────────────────────────┘  │
-└──────────┴──────────────────────────────────────────────────────────────┘
-```
-
-| 区域 | 组件 | 数据源 |
-|------|------|--------|
-| KPI 四卡 | Ant Design `Statistic` + `Card` | `account_snapshot` / WS pnl |
-| 持仓表 | `Table`，涨红跌绿 | `position_snapshot` |
-| 收益日历 | 日历热力图（参考 backtest EquityCurve 色系） | `account_snapshot` 按日 |
-| 委托成交 Tab | `Table` + 状态 Tag | `order` / `trade` |
-| 工作流 Run Tab | Run 列表 + 节点进度 Step | `t_workflow_run` |
-| 信号面板 Tab | 待审批列表 + 操作按钮 | `pre_order` |
-| 盘内监控 Tab | 当日执行进度、偏离目标权重告警、QMT 连接 | `order` + WS pnl/positions |
-
-**盘内监控 Tab**（T+1 9:30–15:00 活跃）：展示已批准预订单的执行状态、部分成交进度、相对 `position_sizing_result` 的权重偏离；**不**展示新因子信号。
-
-**Live 标签**: `Tag` color=`--color-live`，与 paper 的 `Tag` default 区分。
-
-### 4.2 模拟盘 `/trading/paper`
-
-**参考**: QuantConnect Paper Trading + vnpy PaperAccount
-
-```
-┌──────────┬──────────────────────────────────────────────────────────────┐
-│ SideNav  │  模拟盘                                                      │
-│          ├──────────────────────────────────────────────────────────────┤
-│          │  [策略实例] [会话列表] [收益分析]                    ← Tabs     │
-│          ├──────────────────────────────────────────────────────────────┤
-│          │  ┌─ 策略实例卡片 ─────────────────────────────────────────┐  │
-│          │  │ Alpha-Rebalance-01    [模拟盘] [运行中]               │  │
-│          │  │ 账户: paper-001  │  配仓: ATR风险  │  [停止]         │  │
-│          │  │ 累计收益 +8.3%  │  最大回撤 -2.1%                      │  │
-│          │  │ [查看 Run 详情]  [Promote → 实盘]                     │  │
-│          │  └──────────────────────────────────────────────────────┘  │
-│          │  ┌─ 会话卡片 ───────────────────────────────────────────┐  │
-│          │  │ session-20260609  │  循环 12 次  │  [查看]             │  │
-│          │  └──────────────────────────────────────────────────────┘  │
-│          │  [+ 新建实例]  [+ 新建会话]                                 │
+│          │  [自选&策略] [持仓&收益] [订单&成交] [工作流]   ← 内嵌 Tabs   │
+│          │  （Tab 内容区）                                                │
 │          └──────────────────────────────────────────────────────────────┘
 ```
 
-- 卡片背景：`--bg-card`，边框：`--border-subtle`，hover：`--bg-hover`
-- Promote 按钮：二次确认 Modal，引用 `paper_to_live` 流程
-- 实例卡片展示 `position_sizing.strategy`（如 ATR风险 / 等权 / 凯利半仓）
+### 4.2 顶部：账户切换 + 仪表盘
 
-### 4.2.1 仓位管理配置（策略实例）
+| 元素 | 说明 | 数据源 |
+|------|------|--------|
+| 账户下拉 | `LIVE/PAPER #id 名称 (broker)`，切换即切换全页上下文 | `fetchAccounts` |
+| 类型 Tag | `live` 红 / `paper` 蓝 | account.account_type |
+| `CockpitDashboard` | KPI 四卡（总资产/可用/市值/当日收益）+ 风险状态 + Workflow 状态 | `account_snapshot` + WS `ws.trading.pnl` |
 
-**参考**: QuantConnect Portfolio Construction + vnpy 目标仓位模块
+> 默认选中 paper 账户（无则取第一个）。资产数据经 `tradingStore` 由 WS `ws.trading.pnl` 实时更新。
 
-```
-┌─ 策略实例 — 仓位管理 ────────────────────────────────────────┐
-│  配仓策略:  [ATR 风险定仓 ▼]                                  │
-│  ATR 周期:  [14]   风险预算: [2%]   单票上限: [10%]           │
-│  降级策略:  [等权 ▼]  （主策略缺数据时使用，必填）              │
-│  [保存]                                                       │
-└──────────────────────────────────────────────────────────────┘
-```
+### 4.3 主区双栏：信号审批 + 风控
+
+| 区域 | 组件 | 职责 |
+|------|------|------|
+| 信号审批 | `SignalApprovalTab` | 展示当前决策实例待审批预订单，逐条/批量审批；绑定 `activeDecisionInstanceId` |
+| 风控侧栏 | `RiskSidePanel` | 风控状态、规则、事件；打开历史信号 |
+
+**预订单审批交互（核心 HITL）**：
+
+| 元素 | 规范 |
+|------|------|
+| side 标签 | `open/add` 红底；`reduce/close` 绿底（`SIGNAL_SIDE_COLOR`/`SIGNAL_SIDE_LABEL`，见 `pages/trading/utils/trading.ts`） |
+| 信号/执行日 | 同时展示 `signal_date` → `execution_date` |
+| 配仓依据 | 展示 `sizing_strategy` + `target_weight` + 当前权重 |
+| 逐条审批 | `POST /trading/approval/{id}` body `{action: approve/reject, comment}` |
+| 批量审批 | `POST /trading/approval/batch` |
+| 修改后审批 | `PUT /trading/pre-orders/{id}` → `POST /trading/approval/{id}` |
+
+### 4.4 内嵌 Tabs（4 个）
+
+| Tab key | 组件 | 内容 | 数据源 |
+|---------|------|------|--------|
+| watchlist 自选&策略 | `WatchlistStrategyTab` | 自选池管理 + 策略实例卡片 + 仓位配置入口 + Promote | watchlist / strategy_instance |
+| positions 持仓&收益 | `PositionPnLTab` | 持仓明细（目标 vs 实际权重偏离）+ 收益曲线 + 收益日历 | position_snapshot / account_snapshot |
+| orders 订单&成交 | `OrderFlowTab` | 当日委托/成交/历史订单，撤单 | td_order / td_trade |
+| workflow 工作流 | `WorkflowRunTab` | 决策/执行流 Run 列表 + 节点进度 + 手动触发 | t_workflow_run |
+
+> 持仓表偏离列：实际 - 目标，超阈值（±1%）`--color-warning` 高亮。订单方向行：买红卖绿左边框（`utils/trading.ts` 的 `SIDE_ROW_CLASS`/`STATUS_COLOR`）。
+
+### 4.5 历史信号 Modal
+
+工作台内 `Modal`（非独立页），表格展示历史 `td_pre_order`（信号日/标的/方向/审批状态/审批人/目标权重/审批时间），由信号审批或风控侧栏触发。
+
+### 4.6 仓位管理配置抽屉
+
+> `PositionSizingConfigDrawer`，从「自选&策略」Tab 打开。
 
 | 策略 | UI 暴露参数 |
 |------|-------------|
@@ -229,107 +177,7 @@ flowchart LR
 | 波动率目标 | target_vol / 估计窗口 |
 | 固定比例 | fixed_pct |
 
-配置写入 `strategy_instance.config.position_sizing`，Paper 与 Live Promote 时 **整包复制**。
-
-### 4.3 预订单审批抽屉（核心 HITL）
-
-**参考**: CASE-AI 授权面板 + 衡泰审批流
-
-```
-                    ┌─ 预订单审批 ───────────────── × ─┐
-                    │ Workflow: run-abc  │  剩余 4:32   │
-                    │ 信号日 T: 2026-06-09  →  执行日 T+1: 2026-06-10 │
-                    ├──────────────────────────────────┤
-                    │ ☑ 全选                           │
-                    │ ┌──────────────────────────────┐ │
-                    │ │☑ 600519.SH 贵州茅台  [开仓]  │ │
-                    │ │  建议 100股 @ ¥1680  限价     │ │
-                    │ │  目标权重 12%  当前 0%         │ │
-                    │ │  配仓: ATR风险(14)  可用现金 ¥500K │ │
-                    │ │  依据: Alpha信号 Top1         │ │
-                    │ └──────────────────────────────┘ │
-                    │ ┌──────────────────────────────┐ │
-                    │ │☑ 000858.SZ 五粮液   [减仓]    │ │
-                    │ │  建议 200股 @ 市价            │ │
-                    │ └──────────────────────────────┘ │
-                    │ 备注: [________________]          │
-                    ├──────────────────────────────────┤
-                    │  [拒绝]              [确认下单 →] │
-                    └──────────────────────────────────┘
-```
-
-| 元素 | 规范 |
-|------|------|
-| side 标签 | open/add → Tag 红底；reduce/close → Tag 绿底 |
-| 倒计时 | TTL 剩余秒数，`≤60s` 时文字变 `--color-warning` |
-| 信号/执行日 | 醒目展示 `signal_date` → `execution_date` |
-| 配仓依据 | 展示 `sizing_strategy` + `target_weight` |
-| 确认下单 | `Button type="primary"` 色 `--accent-primary` |
-| 拒绝 | `Button danger` |
-| 提交 | `POST /trading/approval/{id}` |
-
-### 4.4 订单管理 `/trading/orders`
-
-**参考**: 券商交易终端委托查询
-
-```
-┌──────────┬──────────────────────────────────────────────────────────────┐
-│          │  订单管理                                                    │
-│          │  [当日委托] [当日成交] [历史订单]              ← Tabs         │
-│          │  筛选: [账户▼] [状态▼] [日期范围]  [刷新]                    │
-│          ├──────────────────────────────────────────────────────────────┤
-│          │  Table                                                       │
-│          │  委托号  代码  方向  数量  成交价  状态  时间  策略  [撤单]   │
-│          └──────────────────────────────────────────────────────────────┘
-```
-
-- 方向列：使用 [`SIDE_ROW_CLASS`](../web/src/utils/trading.ts) 红买绿卖行样式
-- 状态 Tag：复用 [`STATUS_COLOR`](../web/src/utils/trading.ts) 映射
-- 撤单：仅 `submitted/partial_filled` 可撤，调 `/trading/orders/{id}/cancel`
-
-### 4.5 风控中心 `/trading/risk`
-
-**参考**: 衡泰 xQuant 前中后一体化风控
-
-```
-┌──────────┬──────────────────────────────────────────────────────────────┐
-│          │  风控中心                                                    │
-│          ├──────────────────────────────────────────────────────────────┤
-│          │ ┌─ 熔断器 ──────┐ ┌ KPI ──────────────────────────────────┐ │
-│          │ │ ⚠ 已触发       │ │ 今日拦截 3 │ 告警 1 │ 活跃规则 12     │ │
-│          │ │ 日亏损 -2.3%   │ └─────────────────────────────────────┘ │
-│          │ │ [解除熔断]     │                                         │
-│          │ └───────────────┘                                         │
-│          │  [规则配置] [事件日志]                           ← Tabs     │
-│          │  Table: 规则代码  名称  级别  启用  参数  [编辑]            │
-│          └──────────────────────────────────────────────────────────────┘
-```
-
-- 熔断触发：卡片边框 `--color-rise`，背景 `color-mix(--color-rise 8%)`
-- 级别 Tag：info=default, warn=warning, critical/fatal=error
-
-### 4.6 工作流监控 `/trading/workflow`
-
-**参考**: Dify 工作流运行详情
-
-```
-┌──────────┬──────────────────────────────────────────────────────────────┐
-│          │  工作流监控                     [+ 手动触发 trading_decision]   │
-│          ├──────────────────────────────────────────────────────────────┤
-│          │  Run 列表                                                    │
-│          │  run_id  flow  状态  当前节点  开始时间  耗时  [详情]        │
-│          ├──────────────────────────────────────────────────────────────┤
-│          │  Run 详情: run-abc                                           │
-│          │  Steps: ● load → ● select → ● signal → ● fusion → ● sizing → ○ intent → ... │
-│          │  ┌─ 节点输出 ──────────────────────────────────────────┐   │
-│          │  │ cross_select: { symbols: [600519.SH, ...] }          │   │
-│          │  └──────────────────────────────────────────────────────┘   │
-│          │  [停止]                                                       │
-│          └──────────────────────────────────────────────────────────────┘
-```
-
-- Steps 组件：Ant Design `Steps`，当前节点 `--accent-primary`，失败 `--color-rise`
-- 节点输出：JSON 折叠面板，完整数据链接到 trading 表记录
+配置写入 `strategy_instance.config.position_sizing`；含必填 `fallback`（降级策略）。Paper → Live Promote 时整包复制。
 
 ---
 
@@ -339,58 +187,41 @@ flowchart LR
 
 ```mermaid
 sequenceDiagram
-    actor User as 交易员
+    actor User as 个人用户
     participant Factor as 因子管线 T17:00
-    participant WF as trading_cycle T18:00
+    participant WF as 决策流 盘后
     participant Bell as TopBar 铃铛
-    participant Drawer as 审批抽屉
-    participant Live as 实盘页
-    participant Orders as 订单页
+    participant Cockpit as 交易工作台
+    participant Exec as 执行流 T+1
 
-    Note over Factor: T日收盘后
-    Factor->>Factor: 因子计算 + Alpha信号 (fac_signal_value)
-    WF->>WF: 选股 → 仓位管理 → 预订单
-    WF->>Bell: WS 推送待审批信号
-
-    Note over User,Drawer: T日 18:30 ~ T+1 09:25
-    Bell->>User: 徽章 +1
-    User->>Drawer: 审批 (signal_date=T, execution_date=T+1)
-
-    Note over Live,Orders: T+1 盘内 9:30~15:00
-    Drawer->>Orders: 批准后 BrokerSubmit
-    User->>Live: 盘内监控 Tab 查看成交
-    User->>Orders: 查看成交结果
+    Factor->>Factor: 因子计算 + Alpha 信号
+    WF->>WF: 自选池信号 → 融合 → 配仓 → 生成预订单
+    WF->>Bell: WS ws.trading.signals
+    Bell->>User: 徽章 +N
+    User->>Cockpit: 信号审批（signal_date=T → execution_date=T+1）
+    Cockpit->>Exec: 批准后逐单触发执行流
+    User->>Cockpit: 订单&成交 / 持仓&收益 Tab 监控
 ```
 
-### 5.2 Paper → Live Promote
+### 5.2 Paper → Live Promote（个人版：提示而非强制）
 
 ```mermaid
 flowchart TD
-    A[模拟盘实例卡片] --> B[Promote → 实盘]
-    B --> C{确认 Modal}
-    C -->|确认| D[创建 live 实例 同配置]
+    A[自选&策略 Tab 实例卡片] --> B[Promote → 实盘]
+    B --> C[确认 Modal: 展示参考指标<br/>运行天数/回撤/胜率/Sizing 是否配置]
+    C -->|用户确认| D[创建 live 实例 同配置]
     D --> E[首次 Run 强制 manual 审批]
-    E --> F[Live 页可监控]
 ```
+
+> 验证指标仅作 **warning 提示**，不强制 block，由用户自行判断（个人版裁剪机构级晋升门禁）。
 
 ---
 
 ## 六、组件规范
 
-### 6.1 卡片 KPI 四格
+### 6.1 KPI 卡
 
-复用 backtest [`PerformanceGrid`](../web/src/pages/backtest/components/PerformanceGrid.tsx) 栅格思路：
-
-```css
-.trading-kpi-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  padding: 16px;
-}
-.trading-kpi-card__value--profit { color: var(--color-profit); }
-.trading-kpi-card__value--loss   { color: var(--color-loss); }
-```
+复用 backtest `PerformanceGrid` 栅格思路；盈亏色 `--color-rise`/`--color-fall`。
 
 ### 6.2 表格行样式
 
@@ -401,18 +232,17 @@ flowchart TD
 
 ### 6.3 状态 Tag 映射
 
-| 业务状态 | Ant Design Tag | 色 |
-|----------|----------------|-----|
-| 运行中 running | processing | `--accent-primary` |
-| 暂停 paused | warning | `--color-warning` |
-| 成功 succeeded | success | `--color-fall` |
-| 失败 failed | error | `--color-rise` |
-| 待审批 pending | gold | `--color-warning` |
-| 已成交 filled | success | `--color-fall` |
+| 业务状态 | Ant Tag | 色 |
+|----------|---------|-----|
+| running | processing | `--accent-primary` |
+| paused | warning | `--color-warning` |
+| succeeded / filled | success | `--color-fall` |
+| failed | error | `--color-rise` |
+| pending | gold | `--color-warning` |
 
 ### 6.4 空状态
 
-使用 Ant Design `Empty`，文案走 i18n（如 `trading.paper.noSessions`）。
+Ant Design `Empty`，文案走 i18n。
 
 ---
 
@@ -420,123 +250,64 @@ flowchart TD
 
 | 断点 | 行为 |
 |------|------|
-| ≥1280px | KPI 四卡横排；持仓表 + 日历双栏 |
-| 1024-1279px | KPI 2×2；日历下移 |
-| <1024px | 单栏堆叠；SideNav 折叠（现有行为） |
+| ≥1280px | KPI 横排；双栏 + 多 Tab |
+| 1024–1279px | KPI 2×2；双栏可堆叠 |
+| <1024px | 单栏堆叠；SideNav 折叠 |
 
-与 [`AppLayout`](../web/src/layouts/AppLayout.tsx) 一致，不单独做移动端交易终端。
+沿用 `AppLayout`，**不单独做移动端交易终端**（个人桌面使用为主）。
 
 ---
 
 ## 八、API 对接清单
 
-| 页面 | API | WS Topic |
+> 前端 API 类型已实现：`web/src/api/trading/`（`fetchAccounts` / `fetchAccountSnapshot` / `fetchPreOrders` / `fetchAccountDecisionWorkflowInstance` 等）。
+
+| 区域 | API | WS Topic |
 |------|-----|----------|
-| 实盘 KPI | `GET /trading/accounts/{id}/snapshot` | `ws.trading.pnl` |
+| 仪表盘 KPI | `GET /trading/accounts/{id}/snapshot` | `ws.trading.pnl` |
 | 持仓表 | `GET /trading/positions` | `ws.trading.positions` |
-| 预订单审批 | `GET /trading/pre-orders?status=pending` | `ws.trading.signals` |
-| 审批提交 | `POST /trading/approval/{id}` | — |
-| 订单列表 | `GET /trading/orders` | `ws.trading.orders` |
-| 成交列表 | `GET /trading/trades` | `ws.trading.trades` |
-| 风控规则 | `GET /trading/risk/rules` | — |
-| 工作流 Run | `GET /workflow/run/{id}` | `ws.trading.workflow` |
-| 仓位管理结果 | `GET /trading/position-sizing?run_id=` | — |
-| 策略配仓配置 | `PUT /trading/instances/{id}/position-sizing` | — |
-| 手动触发 | `POST /workflow/run` | — |
+| 信号审批 | `GET /trading/pre-orders?status=pending` | `ws.trading.signals` |
+| 审批提交 | `POST /trading/approval/{id}` · `approval/batch` | — |
+| 订单/成交 | `GET /trading/orders` · `/trading/trades` | `ws.trading.orders` · `trades` |
+| 风控 | `GET /trading/risk/rules` · `risk/events` | `ws.trading.risk` |
+| 工作流 | `GET /workflow/run/{id}` · `POST /workflow/run` | `ws.trading.workflow` |
+| 仓位配置 | `PUT /trading/instances/{id}/position-sizing` | — |
 
 ---
 
-## 九、文件结构（前端当前状态）
+## 九、文件结构（据实）
 
 ```
 web/src/
-├── pages/
-│   ├── backtest/                        # ✅ 已实现
-│   │   ├── BacktestPage.tsx
-│   │   └── components/
-│   │       ├── BasicConfigPanel.tsx      # 基础配置面板
-│   │       ├── BuiltinStrategyPicker.tsx # 内置策略选择器
-│   │       ├── EquityCurveChart.tsx      # 净值曲线图
-│   │       ├── PerformanceGrid.tsx       # 绩效指标网格
-│   │       ├── TradeListTable.tsx        # 交易记录表
-│   │       └── PositionListTable.tsx     # 持仓快照表
-│   ├── trading/                         # 🔧 骨架已搭建
-│   │   ├── LiveCockpitPage.tsx          # 实盘驾驶舱
-│   │   ├── types.ts                     # 交易域类型定义
-│   │   └── components/
-│   │       ├── AccountKpiCards.tsx       # KPI 四卡
-│   │       ├── CockpitDashboard.tsx      # 驾驶舱仪表盘
-│   │       ├── OrderFlowTab.tsx          # 委托成交 Tab
-│   │       ├── PnlCalendar.tsx           # 收益日历
-│   │       ├── PositionPnLTab.tsx        # 持仓收益 Tab
-│   │       ├── PositionSizingConfigDrawer.tsx  # 仓位配置抽屉
-│   │       ├── PreOrderApprovalDrawer.tsx      # 预订单审批抽屉
-│   │       ├── RiskSidePanel.tsx         # 风控侧边栏
-│   │       ├── SignalApprovalTab.tsx     # 信号审批 Tab
-│   │       ├── SingleApprovalPopover.tsx # 单条审批气泡
-│   │       ├── WatchlistStrategyTab.tsx  # 自选策略 Tab
-│   │       └── WorkflowRunTab.tsx        # 工作流 Tab
-│   │   # ⏳ 待实现: PaperTradingPage, OrdersPage, RiskPage, WorkflowMonitorPage
-│   ├── strategy/                        # ✅ 已实现
-│   └── stock/                           # ✅ 已实现
-├── api/
-│   └── backtest/index.ts                # ✅ 回测 API 类型
-│   # ⏳ 待实现: api/trading/index.ts
-├── components/stock/
-│   └── StockKlineChart.tsx              # ✅ K线组件（支持 tradeMarkers 交易标记叠加）
-└── hooks/
-    └── useStockKline.ts                 # ✅ K线数据 hook
+├── pages/trading/                       # 🔧 交易工作台（单页 + 内嵌组件）
+│   ├── LiveCockpitPage.tsx              # ✅ 工作台主页（账户切换 + 双栏 + 4 Tab + 历史 Modal）
+│   ├── utils/trading.ts                 # ✅ SIGNAL_SIDE_LABEL/COLOR、STATUS_COLOR 等
+│   └── components/
+│       ├── CockpitDashboard.tsx         # ✅ 顶部仪表盘
+│       ├── AccountKpiCards.tsx          # ✅ KPI 四卡
+│       ├── SignalApprovalTab.tsx        # ✅ 信号审批（主区左）
+│       ├── RiskSidePanel.tsx            # ✅ 风控侧栏（主区右）
+│       ├── WatchlistStrategyTab.tsx     # ✅ 自选&策略 Tab
+│       ├── PositionPnLTab.tsx           # ✅ 持仓&收益 Tab
+│       ├── OrderFlowTab.tsx             # ✅ 订单&成交 Tab
+│       ├── WorkflowRunTab.tsx           # ✅ 工作流 Tab
+│       ├── PnlCalendar.tsx              # ✅ 收益日历
+│       └── PositionSizingConfigDrawer.tsx  # ✅ 仓位配置抽屉
+├── api/trading/                         # ✅ 交易 API 类型（已实现）
+├── stores/tradingStore.ts               # ✅ 交易状态（资产/PnL）
+└── config/navigation.ts · router/index.tsx  # ✅ 单一 /trading 入口
 ```
 
 ---
 
-## 十、实施优先级
+## 十、实施状态与待完善
 
-| 优先级 | 页面/组件 | 依赖后端 |
-|--------|-----------|----------|
-| P0 | PreOrderApprovalDrawer + TopBar 铃铛 | T2 Workflow + pre_order |
-| P0 | LiveTradingPage KPI + 持仓 | T1 account_snapshot |
-| P1 | OrdersPage | T1 OMS |
-| P1 | WorkflowMonitorPage | T4 WorkflowRunner |
-| P1 | PositionSizingForm（实例配置） | T4 PositionSizingTool |
-| P2 | PaperTradingPage 实例/会话 | T3 PaperEngine |
-| P2 | RiskPage | T2 RiskGateway |
-| P3 | PnlCalendar 热力图 | T1 历史 snapshot |
+| 状态 | 项 |
+|------|-----|
+| ✅ 已实现 | 工作台主页、账户切换、信号审批、风控侧栏、4 内嵌 Tab、KPI、收益日历、仓位配置抽屉、交易 API 类型 |
+| 🔧 待完善 | TopBar 铃铛对接 `ws.trading.signals`、StatusBar 风控/WF 段、盘内实时数据（依赖后端 §9 盘内监控） |
+| ⏳ 依赖后端 | 持仓/订单实时刷新依赖盘内监控服务（见 trading-system-design §9） |
 
 ---
 
-## 十一、视觉参考板
-
-```mermaid
-block-beta
-    columns 3
-
-    block:darkTheme:3
-        columns 1
-        dTitle["Dark Theme 预览"]
-        dCard["Card #131820 | border subtle"]
-        dAccent["Primary #1677ff"]
-        dRise["Rise #e03e3e"]
-        dFall["Fall #2eaa67"]
-    end
-
-    block:components:3
-        columns 1
-        cTitle["组件示例"]
-        cLive["Live Tag: 蓝"]
-        cBuy["Buy Row: 左边框红"]
-        cSell["Sell Row: 左边框绿"]
-        cWarn["Paused: 黄"]
-    end
-
-    block:layout:3
-        columns 1
-        lTitle["布局"]
-        l1["TopBar 48px"]
-        l2["SideNav 56/200px"]
-        l3["StatusBar 28px"]
-        l4["Workspace flex-1"]
-    end
-```
-
-配色以 [`themes.css`](../web/src/styles/themes.css) 为唯一来源；图表（收益曲线、日历）复用 backtest 页 ECharts 主题，series 色使用 `--color-rise` / `--color-fall` / `--accent-primary`。
+*本文档为个人版交易前端权威设计（单页工作台口径）。后端架构见 trading-system-design.md；机构级多页旧版见归档目录。*
