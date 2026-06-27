@@ -800,3 +800,72 @@ class TushareDataCollector:
             raise DataCollectionError(
                 f"sw_daily 采集失败 ts_code={ts_code} trade_date={trade_date}: {e}"
             ) from e
+
+    async def fetch_index_daily(
+        self,
+        ts_code: str = "",
+        trade_date: str = "",
+        start_date: str = "",
+        end_date: str = "",
+    ) -> pd.DataFrame:
+        """获取指数日线行情数据。
+
+        接口：index_daily
+        限制：单次最大 4000 条，需 2000 积分
+
+        Args:
+            ts_code: 指数代码，如 "000001.SH"
+            trade_date: 交易日期 YYYYMMDD
+            start_date: 开始日期 YYYYMMDD
+            end_date: 结束日期 YYYYMMDD
+
+        Returns:
+            DataFrame，字段格式与 QmtDataCollector._format_kline 对齐：
+            trade_date(YYYY-MM-DD)/open/close/high/low/volume/amount/change/pre_close/pct_chg
+        """
+        if not ts_code and not trade_date:
+            raise DataCollectionError("ts_code 和 trade_date 至少输入一个")
+
+        try:
+            await self._get_limiter("index_daily").acquire()
+            loop = asyncio.get_running_loop()
+            func = partial(
+                self._pro.index_daily,
+                ts_code=ts_code,
+                trade_date=trade_date,
+                start_date=start_date,
+                end_date=end_date,
+            )
+            result = await loop.run_in_executor(self._get_executor(), func)
+            df = pd.DataFrame() if result is None else pd.DataFrame(result)
+            if df.empty:
+                logger.debug(
+                    "index_daily 无数据: ts_code=%s trade_date=%s range=%s~%s",
+                    ts_code, trade_date, start_date, end_date,
+                )
+                return pd.DataFrame()
+
+            # trade_date 格式 YYYYMMDD → YYYY-MM-DD（对齐 QMT _format_kline）
+            df["trade_date"] = pd.to_datetime(df["trade_date"]).dt.strftime("%Y-%m-%d")
+
+            # volume → int（对齐 QMT _format_kline；Tushare 缺失时填 0）
+            if "volume" in df.columns:
+                df["volume"] = pd.to_numeric(df["volume"], errors="coerce").fillna(0).astype(int)
+
+            # 字段对齐 QMT _format_kline 输出列
+            keep_cols = [
+                "trade_date", "open", "close", "high", "low",
+                "volume", "amount", "change", "pre_close", "pct_chg",
+            ]
+            existing = [c for c in keep_cols if c in df.columns]
+            df = df[existing]
+
+            logger.debug(
+                "index_daily 获取完成: ts_code=%s rows=%d",
+                ts_code, len(df),
+            )
+            return df
+        except Exception as e:
+            raise DataCollectionError(
+                f"index_daily 采集失败 ts_code={ts_code} trade_date={trade_date}: {e}"
+            ) from e
