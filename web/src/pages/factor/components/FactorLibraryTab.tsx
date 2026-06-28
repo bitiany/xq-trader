@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Alert, Button, Input, Select, Space, Table, Tag } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
@@ -7,7 +7,7 @@ import { fetchFactors, type Factor, type FactorCategoryStat, type FactorStatus }
 import { extractPageItems } from '@/api/types'
 import { AsyncSection } from '@/components/common/AsyncSection'
 import { useRequest } from '@/hooks/useRequest'
-import { GRADE_COLOR, STATUS_COLOR, isUsableGrade, type FactorGrade } from '../utils/factor'
+import { GRADE_COLOR, STATUS_COLOR, type FactorGrade } from '../utils/factor'
 
 interface FactorLibraryTabProps {
   categories: FactorCategoryStat[]
@@ -28,21 +28,21 @@ export function FactorLibraryTab({ categories, onSelectFactor }: FactorLibraryTa
   const [page, setPage] = useState(1)
 
   const { data, loading, error, reload } = useRequest(
-    () => fetchFactors({ page, page_size: PAGE_SIZE, category, status, keyword: keyword || undefined }),
-    { deps: [page, category, status, keyword] },
+    () =>
+      fetchFactors({
+        page,
+        page_size: PAGE_SIZE,
+        category,
+        status,
+        keyword: keyword || undefined,
+        factor_grade: grade,
+        usable_only: onlyUsable || undefined,
+      }),
+    { deps: [page, category, status, keyword, grade, onlyUsable] },
   )
 
-  const allItems = useMemo(() => (data ? extractPageItems<Factor>(data) : []), [data])
+  const items = data ? extractPageItems<Factor>(data) : []
   const total = data?.total ?? 0
-
-  // grade / onlyUsable 为客户端过滤（注册表列表 API 暂不支持等级过滤）
-  const items = useMemo(() => {
-    return allItems.filter((f) => {
-      if (onlyUsable && !isUsableGrade(f.factor_grade)) return false
-      if (grade && f.factor_grade !== grade) return false
-      return true
-    })
-  }, [allItems, grade, onlyUsable])
 
   const columns: ColumnsType<Factor> = [
     {
@@ -131,7 +131,7 @@ export function FactorLibraryTab({ categories, onSelectFactor }: FactorLibraryTa
           style={{ width: 130 }}
           placeholder={t('factor.library.allGrades')}
           value={grade}
-          onChange={(v) => setGrade(v)}
+          onChange={(v) => { setGrade(v); setPage(1) }}
           options={GRADE_OPTIONS.map((g) => ({ value: g, label: g }))}
         />
         <Select
@@ -146,7 +146,7 @@ export function FactorLibraryTab({ categories, onSelectFactor }: FactorLibraryTa
         <Button
           size="small"
           type={onlyUsable ? 'primary' : 'default'}
-          onClick={() => setOnlyUsable((v) => !v)}
+          onClick={() => { setOnlyUsable((v) => !v); setPage(1) }}
         >
           {t('factor.library.onlyUsable')}
         </Button>

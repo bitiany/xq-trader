@@ -24,19 +24,50 @@ async def list_factors(
     page_size: int = Query(default=50, ge=1, le=200),
     category: str | None = Query(default=None, description="因子分类"),
     status: str | None = Query(default=None, description="状态过滤"),
+    factor_grade: str | None = Query(default=None, description="等级过滤 A/B/C/D"),
+    usable_only: bool = Query(default=False, description="仅 A/B 级可用因子"),
     keyword: str | None = Query(default=None, description="按名称/ID模糊搜索"),
 ) -> dict:
     skip, limit = paginate(page, page_size)
-    filters: dict = {}
+    and_filters: dict = {}
     if category:
-        filters["category"] = category
+        and_filters["category"] = category
     if status:
-        filters["status"] = status
-    if keyword:
-        filters["display_name__like"] = f"%{keyword}%"
+        and_filters["status"] = status
+    if factor_grade:
+        and_filters["factor_grade"] = factor_grade
+    if usable_only:
+        and_filters["factor_grade__in"] = ["A", "B"]
 
-    items = await FacFactorRegistry.filter(skip=skip, limit=limit, **filters)
-    total = await FacFactorRegistry.count(**filters)
+    or_conditions: list | None = None
+    if keyword:
+        kw = f"%{keyword}%"
+        or_conditions = [
+            FacFactorRegistry.display_name.like(kw),
+            FacFactorRegistry.factor_id.like(kw),
+        ]
+
+    if or_conditions:
+        items = await FacFactorRegistry.filter_with_or(
+            or_conditions=or_conditions,
+            and_filters=and_filters,
+            skip=skip,
+            limit=limit,
+            order_by=FacFactorRegistry.factor_id,
+        )
+        total = await FacFactorRegistry.count_with_or(
+            or_conditions=or_conditions,
+            and_filters=and_filters,
+        )
+    else:
+        items = await FacFactorRegistry.filter(
+            skip=skip,
+            limit=limit,
+            order_by=FacFactorRegistry.factor_id,
+            **and_filters,
+        )
+        total = await FacFactorRegistry.count(**and_filters)
+
     return build_paginated_response(
         [f.to_dict() for f in items], total, page, page_size,
     )

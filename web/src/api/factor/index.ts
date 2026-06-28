@@ -37,6 +37,8 @@ export interface FactorListParams {
   page_size?: number
   category?: string
   status?: FactorStatus
+  factor_grade?: string
+  usable_only?: boolean
   keyword?: string
 }
 
