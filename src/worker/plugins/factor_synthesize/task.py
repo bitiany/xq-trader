@@ -14,6 +14,7 @@ from typing import Any
 
 import numpy as np
 
+from framework.commons.concurrent import ConcurrentRunner
 from framework.commons.logger import get_logger
 from framework.scheduler.base_task import BaseTask
 from worker.plugins.utils import parse_list_param
@@ -34,10 +35,14 @@ logger = get_logger("factor.synthesize")
 _RETENTION_YEARS = 5
 _DEFAULT_WINDOW = 252
 _PERSIST_BATCH_SIZE = 5000
+_SYNTH_CONCURRENCY = 4  # 合成持久化消费者数量
 _COMPOSITE_FACTOR_IDS = [
     "composite_value", "composite_momentum", "composite_volatility",
     "composite_liquidity", "composite_technical", "composite_fund_flow",
     "composite_alpha",
+    # D4 交互因子（合成产物，不作为输入因子加载）
+    "mom_vol_cross", "adx_rsi_cross", "vol_ratio_mom_cross",
+    "rsi_bbands_cross", "macd_adx_cross", "vol_mom_accel_cross",
 ]
 
 
@@ -170,7 +175,7 @@ class AlphaSynthesizeTask(BaseTask):
         # 回退：从注册表读取全局 A/B 级因子
         registry = await FacFactorRegistry.filter(
             factor_grade__in=["A", "B"],
-            status__in=["active", "testing", "draft"],
+            status="active",
         )
         if registry:
             factor_ids = [f.factor_id for f in registry]
@@ -180,13 +185,13 @@ class AlphaSynthesizeTask(BaseTask):
             )
             return factor_ids
 
-        # 最终回退：使用注册表中非 return/composite 类的活跃因子，按 ICIR 降序取 top N
+        # 最终回退：使用注册表中非 return/composite/chanlun 类的活跃因子，按 ICIR 降序取 top N
         registry = await FacFactorRegistry.filter(
-            status__in=["active", "testing", "draft"],
+            status="active",
         )
         candidate_ids = [
             f.factor_id for f in registry
-            if f.category not in ("return", "composite_group", "composite_cross")
+            if f.category not in ("return", "chanlun", "composite_group", "composite_cross", "interaction")
             and f.factor_id not in _COMPOSITE_FACTOR_IDS
         ]
 
@@ -206,52 +211,73 @@ class AlphaSynthesizeTask(BaseTask):
         )
         return candidate_ids
 
-    @staticmethod
     async def _persist_results(
+        self,
         pool_id: str,
         results: dict[str, Any],
     ) -> int:
-        """将合成结果持久化到 fac_factor_value（分因子、分片 upsert，控制内存峰值）。"""
+        """将合成结果持久化到 fac_factor_value（分因子并发 upsert）。
+
+        各合成因子的 DataFrame 相互独立，通过 ConcurrentRunner 并发持久化，
+        单因子内仍按 _PERSIST_BATCH_SIZE 分片写入以控制内存峰值。
+        """
+        # 筛选非空且有效数值的合成因子
+        items: list[tuple[str, Any]] = [
+            (method, df) for method, df in results.items() if not df.empty
+        ]
+        if not items:
+            return 0
+
+        runner = ConcurrentRunner[tuple[str, Any], int](
+            concurrency=_SYNTH_CONCURRENCY,
+            log_name=f"factor.synth.persist[{pool_id}]",
+        )
+        result = await runner.run_items(
+            items=items,
+            processor=lambda item: self._persist_single_factor(pool_id, item[0], item[1]),
+        )
+        return sum(result.succeeded)
+
+    async def _persist_single_factor(
+        self, pool_id: str, method: str, df: Any,
+    ) -> int:
+        """持久化单个合成因子的 DataFrame（分片 upsert）。"""
+        col = df.columns[0]
+        reset_df = df.reset_index()
+        vals = reset_df[col].to_numpy(dtype=float)
+        valid_mask = np.isfinite(vals)
+        if not valid_mask.any():
+            return 0
+
+        reset_df = reset_df.loc[valid_mask]
+        vals = vals[valid_mask]
+        n = len(reset_df)
         total = 0
 
-        for method, df in results.items():
-            if df.empty:
-                continue
+        for start in range(0, n, _PERSIST_BATCH_SIZE):
+            end = min(start + _PERSIST_BATCH_SIZE, n)
+            chunk = reset_df.iloc[start:end]
+            chunk_vals = vals[start:end]
+            rows: list[FacFactorValue] = []
+            for idx in range(len(chunk)):
+                row = chunk.iloc[idx]
+                td = row["trade_date"]
+                if hasattr(td, "date"):
+                    td = td.date()  # type: ignore[union-attr]
+                rows.append(FacFactorValue(
+                    symbol=str(row["symbol"]),
+                    trade_date=td,
+                    factor_id=method,
+                    pool_id=pool_id,
+                    factor_value=float(chunk_vals[idx]),
+                ))
 
-            col = df.columns[0]
-            reset_df = df.reset_index()
-            vals = reset_df[col].to_numpy(dtype=float)
-            valid_mask = np.isfinite(vals)
-            if not valid_mask.any():
-                continue
-
-            reset_df = reset_df.loc[valid_mask]
-            vals = vals[valid_mask]
-            n = len(reset_df)
-
-            for start in range(0, n, _PERSIST_BATCH_SIZE):
-                end = min(start + _PERSIST_BATCH_SIZE, n)
-                chunk = reset_df.iloc[start:end]
-                chunk_vals = vals[start:end]
-                rows: list[FacFactorValue] = []
-                for idx in range(len(chunk)):
-                    row = chunk.iloc[idx]
-                    td = row["trade_date"]
-                    if hasattr(td, "date"):
-                        td = td.date()  # type: ignore[union-attr]
-                    rows.append(FacFactorValue(
-                        symbol=str(row["symbol"]),
-                        trade_date=td,
-                        factor_id=method,
-                        pool_id=pool_id,
-                        factor_value=float(chunk_vals[idx]),
-                    ))
-
-                total += await FacFactorValue.bulk_create_or_update(
-                    rows,
-                    on_conflict=["symbol", "trade_date", "factor_id", "pool_id"],
-                    update_fields=["factor_value"],
-                )
+            total += await FacFactorValue.bulk_create_or_update(
+                rows,
+                on_conflict=["symbol", "trade_date", "factor_id", "pool_id"],
+                update_fields=["factor_value"],
+            )
+            if end == n or end % (_PERSIST_BATCH_SIZE * 10) == 0:
                 logger.info(
                     "[alpha.synth] pool=%s factor=%s persist progress=%d/%d",
                     pool_id, method, end, n,
@@ -267,7 +293,9 @@ class AlphaSynthesizeTask(BaseTask):
         )
         configs: dict[str, dict] = {}
         for c in composites:
-            if not c.factor_id.startswith("composite_"):
+            # 合成因子 = 组内等权(composite_group) + 跨组ICIR(composite_cross) + 交互(interaction)
+            # 不能用 factor_id 前缀过滤，否则 6 个 interaction 因子会被跳过
+            if c.category not in ("composite_group", "composite_cross", "interaction"):
                 continue
             configs[c.factor_id] = {
                 "composite_factor_ids": c.composite_factor_ids or "",

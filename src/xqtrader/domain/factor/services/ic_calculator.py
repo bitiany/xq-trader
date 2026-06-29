@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import pandas as pd
 from scipy.optimize import curve_fit  # type: ignore[import-untyped]
@@ -149,16 +151,16 @@ class ICCalculator:
         return result
 
     @staticmethod
-    def calc_decay_half_life(
+    def _calc_ic_decay_values(
         factor_panel: pd.DataFrame,
         returns_panel: pd.DataFrame,
         max_horizon: int = 20,
         min_periods: int = 20,
-    ) -> float | None:
-        """计算 IC 衰减半衰期。
+    ) -> list[tuple[int, float]]:
+        """计算 IC 衰减序列 [(h, ic_mean), ...]，h=0..max_horizon。
 
-        对 h = 1..max_horizon，将收益率前移 h 天后计算截面 IC，
-        拟合指数衰减 IC(h) = IC(0) * exp(-lambda * h)，半衰期 = ln(2) / lambda。
+        对每个 h，将收益率前移 h 天后计算截面 IC 的均值。
+        共享方法：calc_ic_decay_curve 与 calc_decay_half_life 共用。
 
         Args:
             factor_panel: MultiIndex (trade_date, symbol), columns = factor_ids
@@ -167,16 +169,18 @@ class ICCalculator:
             min_periods: 最小有效截面数
 
         Returns:
-            半衰期（天），拟合失败返回 None
+            [(h, ic_mean), ...]，ic_mean 为 NaN 表示该 horizon 无有效截面
         """
         factor_col = factor_panel.columns[0]
         dates = sorted(factor_panel.index.get_level_values("trade_date").unique())
         if len(dates) < max_horizon + 1:
-            logger.warning("Insufficient dates for decay half-life calc: %d < %d", len(dates), max_horizon + 1)
-            return None
+            logger.warning(
+                "Insufficient dates for IC decay calc: %d < %d",
+                len(dates), max_horizon + 1,
+            )
+            return []
 
-        ic_values: list[float] = []
-
+        result: list[tuple[int, float]] = []
         for h in range(max_horizon + 1):
             ic_sum = 0.0
             ic_count = 0
@@ -206,11 +210,68 @@ class ICCalculator:
                     ic_count += 1
 
             if ic_count > 0:
-                ic_values.append(ic_sum / ic_count)
+                result.append((h, ic_sum / ic_count))
             else:
-                ic_values.append(np.nan)
+                result.append((h, float("nan")))
+        return result
 
-        ic_arr = np.array(ic_values)
+    @staticmethod
+    def calc_ic_decay_curve(
+        factor_panel: pd.DataFrame,
+        returns_panel: pd.DataFrame,
+        max_horizon: int = 20,
+        min_periods: int = 20,
+    ) -> list[dict[str, Any]]:
+        """计算 IC 衰减曲线，返回 [{"h": h, "ic": ic_value}, ...]。
+
+        用于持久化到 fac_factor_stats.ic_decay_curve JSONB 列。
+        无有效截面时返回空列表。
+
+        Args:
+            factor_panel: MultiIndex (trade_date, symbol), columns = factor_ids
+            returns_panel: MultiIndex (trade_date, symbol), column = 'fwd_ret_1d'
+            max_horizon: 最大前移天数
+            min_periods: 最小有效截面数
+
+        Returns:
+            [{"h": 0, "ic": 0.05}, {"h": 1, "ic": 0.04}, ...]
+        """
+        decay_values = ICCalculator._calc_ic_decay_values(
+            factor_panel, returns_panel, max_horizon, min_periods,
+        )
+        return [
+            {"h": h, "ic": float(ic) if np.isfinite(ic) else None}
+            for h, ic in decay_values
+        ]
+
+    @staticmethod
+    def calc_decay_half_life(
+        factor_panel: pd.DataFrame,
+        returns_panel: pd.DataFrame,
+        max_horizon: int = 20,
+        min_periods: int = 20,
+    ) -> float | None:
+        """计算 IC 衰减半衰期。
+
+        基于 _calc_ic_decay_values 得到 IC(h) 序列后，
+        拟合指数衰减 IC(h) = IC(0) * exp(-lambda * h)，半衰期 = ln(2) / lambda。
+
+        Args:
+            factor_panel: MultiIndex (trade_date, symbol), columns = factor_ids
+            returns_panel: MultiIndex (trade_date, symbol), column = 'fwd_ret_1d'
+            max_horizon: 最大前移天数
+            min_periods: 最小有效截面数
+
+        Returns:
+            半衰期（天），拟合失败返回 None
+        """
+        decay_values = ICCalculator._calc_ic_decay_values(
+            factor_panel, returns_panel, max_horizon, min_periods,
+        )
+        if not decay_values:
+            return None
+
+        ic_arr = np.array([ic for _, ic in decay_values])
         valid_mask = np.isfinite(ic_arr)
         if valid_mask.sum() < 3:
             return None

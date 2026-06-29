@@ -23,8 +23,11 @@ from xqtrader.domain.factor.services.registry import get_factor_definitions
 
 logger = get_logger("factor.pool_init")
 
-# 个人版默认评估/合成样本池：全 A + 目标交易池
-DEFAULT_ACTIVE_POOL_IDS: tuple[str, ...] = ("all", "idx_300")
+# 个人版默认评估/合成样本池：全 A + 主要指数 + 风格池
+DEFAULT_ACTIVE_POOL_IDS: tuple[str, ...] = (
+    "all", "idx_300", "idx_500", "idx_1000",
+    "style_growth", "style_value", "style_blue_chip", "style_large_cap",
+)
 
 # 默认样本池配置 — 评估任务启动时自动同步到 DB
 _DEFAULT_POOLS: list[dict[str, Any]] = [
@@ -58,7 +61,7 @@ _DEFAULT_POOLS: list[dict[str, Any]] = [
         "pool_type": "index",
         "definition": {"index_code": "000905.SH"},
         "factor_scope": None,
-        "status": "deprecated",
+        "status": "active",
     },
     {
         "pool_id": "idx_1000",
@@ -66,7 +69,7 @@ _DEFAULT_POOLS: list[dict[str, Any]] = [
         "pool_type": "index",
         "definition": {"index_code": "000852.SH"},
         "factor_scope": None,
-        "status": "deprecated",
+        "status": "active",
     },
     {
         "pool_id": "idx_kcb50",
@@ -83,6 +86,39 @@ _DEFAULT_POOLS: list[dict[str, Any]] = [
         "definition": {"index_code": "399006.SZ"},
         "factor_scope": None,
         "status": "deprecated",
+    },
+    # 风格池（基于 sdc_stock_tag，标的相对稳定，不做 PIT 过滤）
+    {
+        "pool_id": "style_growth",
+        "pool_name": "成长股",
+        "pool_type": "style",
+        "definition": {"tag_key": "growth"},
+        "factor_scope": None,
+        "status": "active",
+    },
+    {
+        "pool_id": "style_value",
+        "pool_name": "价值股",
+        "pool_type": "style",
+        "definition": {"tag_key": "value"},
+        "factor_scope": None,
+        "status": "active",
+    },
+    {
+        "pool_id": "style_blue_chip",
+        "pool_name": "蓝筹股",
+        "pool_type": "style",
+        "definition": {"tag_key": "blue_chip"},
+        "factor_scope": None,
+        "status": "active",
+    },
+    {
+        "pool_id": "style_large_cap",
+        "pool_name": "大盘股",
+        "pool_type": "style",
+        "definition": {"tag_key": "large_cap"},
+        "factor_scope": None,
+        "status": "active",
     },
 ]
 

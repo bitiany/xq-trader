@@ -18,11 +18,13 @@ import numpy as np
 import pandas as pd
 
 from framework.commons.logger import get_logger
+from xqtrader.domain.factor.models.factor_pool import FacFactorPool
 from xqtrader.domain.factor.services import factor_data_loader as fdl
 from xqtrader.domain.index.models.index import IndexWeight
 from xqtrader.domain.market.models.candlestick import CandlestickDaily
 from xqtrader.domain.market.models.daily_indicator import DailyIndicator
 from xqtrader.domain.security.models import Security
+from xqtrader.domain.security.stock_tag import StockTag
 
 logger = get_logger(__name__)
 
@@ -90,6 +92,10 @@ class CrossSectionReader:
         按月滚动加载，降低单次查询数据量。每月内先做 MAD 去极值和 Z-score，
         合并后再做行业+市值中性化和再 Z-score（中性化需要跨月截面数据）。
 
+        对于 cross_section_beta / cross_section_compute 类因子（beta_250、stom 等），
+        其计算本身需要全量历史数据做滚动回归/派生，按月分片会导致重复全量计算。
+        因此这类因子一次性计算全量面板，再统一做截面预处理。
+
         Args:
             start_date: 起始日期
             end_date: 结束日期
@@ -102,9 +108,20 @@ class CrossSectionReader:
         Returns:
             MultiIndex(trade_date, symbol), columns=[factor_id]
         """
+        # 需要全量计算的 data_origin 类型 — 按月分片会重复加载历史数据
+        full_range_origins = {"cross_section_beta", "cross_section_compute"}
+        origin = await fdl.resolve_data_origin(factor_id)
+
+        if origin in full_range_origins:
+            return await self._load_full_range_factor_panel(
+                start_date, end_date, pool_id, symbols, factor_id,
+                industry_map, market_cap_panel,
+            )
+
         factor_parts: list[pd.DataFrame] = []
 
         month_start = date(start_date.year, start_date.month, 1)
+        month_idx = 0
         while month_start <= end_date:
             if month_start.month == 12:
                 month_end = date(month_start.year + 1, 1, 1) - timedelta(days=1)
@@ -129,12 +146,25 @@ class CrossSectionReader:
                 month_panel = self._zscore_standardize(winsorized)
                 factor_parts.append(month_panel)
 
+            month_idx += 1
+            # 每年输出一次进度（避免日志爆炸，但能让用户感知任务在推进）
+            if month_idx % 12 == 0:
+                logger.info(
+                    "[cross_section] pool=%s factor=%s 月度加载进度: %d 月已完成, 累计 rows=%d",
+                    pool_id, factor_id, month_idx,
+                    sum(len(p) for p in factor_parts),
+                )
+
             if month_start.month == 12:
                 month_start = date(month_start.year + 1, 1, 1)
             else:
                 month_start = date(month_start.year, month_start.month + 1, 1)
 
         if not factor_parts:
+            logger.info(
+                "[cross_section] pool=%s factor=%s 月度加载完成但数据为空 (0 月有数据)",
+                pool_id, factor_id,
+            )
             return pd.DataFrame()
 
         # 跨月合并：行业+市值中性化 → 再Z-score
@@ -144,8 +174,43 @@ class CrossSectionReader:
         )
         factor_panel = self._zscore_standardize(factor_panel)
 
+        logger.info(
+            "[cross_section] pool=%s factor=%s 月度加载完成: %d 月 rows=%d",
+            pool_id, factor_id, month_idx, len(factor_panel),
+        )
+        return factor_panel
+
+    async def _load_full_range_factor_panel(
+        self,
+        start_date: date,
+        end_date: date,
+        pool_id: str,
+        symbols: list[str],
+        factor_id: str,
+        industry_map: dict[str, str],
+        market_cap_panel: pd.Series | None,
+    ) -> pd.DataFrame:
+        """全量计算因子面板（用于 beta/stom 等需全量历史的因子）。
+
+        一次性加载全期面板 → 缺失值填充 → MAD去极值 → Z-score → 行业+市值中性化 → 再Z-score。
+        """
+        factor_df = await fdl.load_factor_raw_chunk(
+            start_date, end_date, factor_id, symbols, pool_id,
+        )
+        if factor_df.empty:
+            logger.debug("[full_range] 因子 %s 数据为空", factor_id)
+            return pd.DataFrame()
+
+        filled = self._fill_missing_industry_mean(factor_df, industry_map)
+        winsorized = self._winsorize_mad(filled)
+        zscored = self._zscore_standardize(winsorized)
+        factor_panel = self._industry_market_cap_neutralize(
+            zscored, industry_map, market_cap_panel,
+        )
+        factor_panel = self._zscore_standardize(factor_panel)
+
         logger.debug(
-            "单因子面板加载完成: pool=%s factor=%s rows=%d",
+            "全量因子面板加载完成: pool=%s factor=%s rows=%d",
             pool_id, factor_id, len(factor_panel),
         )
         return factor_panel
@@ -201,7 +266,13 @@ class CrossSectionReader:
     async def load_pool_symbols(self, pool_id: str) -> list[str]:
         """获取样本池标的列表。
 
-        全市场样本池(pool_id='all')仅保留 list_status='L' 的上市标的，
+        支持四种样本池类型：
+          - market: 全市场池，从 sdc_security 加载（过滤 ST/*ST/PT）
+          - index: 指数池，从 sdc_index_weight 加载历史成分并集
+          - style: 风格池，从 sdc_stock_tag 按 tag_key 加载
+          - industry: 行业池（预留）
+
+        全市场样本池仅保留 list_status='L' 的上市标的，
         并排除 ST/*ST/PT 风险警示股。指数成分股池无需过滤（指数本身不含 ST）。
         """
         if pool_id == "all":
@@ -214,7 +285,37 @@ class CrossSectionReader:
             )
             return symbols
 
-        index_code = _POOL_INDEX_MAP.get(pool_id, pool_id)
+        # 查询池配置获取 pool_type 和 definition
+        pool = await FacFactorPool.get_or_none(pool_id=pool_id)
+        if pool is None:
+            # 池不存在，按 index 兼容处理
+            index_code = _POOL_INDEX_MAP.get(pool_id, pool_id)
+            weights = await IndexWeight.filter(index_code=index_code)
+            symbols = list({w.stock_code for w in weights if w.stock_code})
+            logger.debug("样本池 %s (fallback index=%s): %d 只标的", pool_id, index_code, len(symbols))
+            return symbols
+
+        pool_type = pool.pool_type or "index"
+        definition = pool.definition or {}
+
+        if pool_type == "style":
+            tag_key = definition.get("tag_key")
+            if not tag_key:
+                logger.warning("风格池 %s 缺少 tag_key 配置", pool_id)
+                return []
+            tags = await StockTag.filter(tag_key=tag_key)
+            symbols = list({t.symbol for t in tags if t.symbol})
+            logger.debug("样本池 %s (style tag=%s): %d 只标的", pool_id, tag_key, len(symbols))
+            return symbols
+
+        if pool_type == "market":
+            securities = await Security.filter(list_status="L")
+            symbols = [s.symbol for s in securities if not is_risk_warning_name(s.name)]
+            logger.debug("样本池 %s (market): %d 只标的", pool_id, len(symbols))
+            return symbols
+
+        # index 类型（默认）
+        index_code = definition.get("index_code") or _POOL_INDEX_MAP.get(pool_id, pool_id)
         weights = await IndexWeight.filter(index_code=index_code)
         # 取历史全部成分并集，评估时按 PIT membership 过滤截面
         symbols = list({w.stock_code for w in weights if w.stock_code})
@@ -262,10 +363,18 @@ class CrossSectionReader:
     ) -> dict[date, frozenset[str]]:
         """构建样本池 PIT 成分映射 {trade_date: symbols}。
 
-        指数池按 report_date PIT 取成分；全 A 池返回空 dict（不做日期过滤）。
+        指数池按 report_date PIT 取成分；
+        全 A 池/风格池/行业池返回空 dict（不做日期过滤，标的相对稳定）。
         """
         if pool_id == "all":
             return {}
+
+        # 查询池配置：style/market 类型不做 PIT 过滤
+        pool = await FacFactorPool.get_or_none(pool_id=pool_id)
+        if pool is not None:
+            pool_type = pool.pool_type or "index"
+            if pool_type in ("style", "market", "industry"):
+                return {}
 
         index_code = _POOL_INDEX_MAP.get(pool_id)
         if not index_code:
@@ -437,28 +546,29 @@ class CrossSectionReader:
         if df.empty:
             return df
 
-        result = df.copy()
+        # 矢量化截面 MAD 去极值：按 trade_date 分组计算 median/mad，
+        # 一次性得到与 df 同 shape 的 lower/upper 边界 DataFrame，
+        # 避免 groupby.transform(func) 在 fast/slow path 切换时
+        # 把 Series 误传给期望 DataFrame 的回调。
+        median = df.groupby(level="trade_date").transform("median")
+        deviation = (df - median).abs()
+        mad = deviation.groupby(level="trade_date").transform("median")
 
-        def _winsorize_group(group: pd.DataFrame) -> pd.DataFrame:
-            median = group.median(skipna=True)
-            mad = (group - median).abs().median(skipna=True)
+        # 0 值替换为 NaN（避免 lower=upper=median 的退化情况）
+        mad = mad.replace(0, np.nan)
 
-            # 处理零值和 NaN
-            if isinstance(mad, pd.Series):
-                mad = mad.replace(0, np.nan)
-            elif mad == 0 or np.isnan(mad):
-                mad = np.nan
+        upper = median + n * _MAD_TO_STD_FACTOR * mad
+        lower = median - n * _MAD_TO_STD_FACTOR * mad
 
-            if isinstance(mad, pd.Series) and mad.isna().all():
-                return group
-            elif not isinstance(mad, pd.Series) and (np.isnan(mad) if isinstance(mad, float) else False):
-                return group
-
-            upper = median + n * _MAD_TO_STD_FACTOR * mad
-            lower = median - n * _MAD_TO_STD_FACTOR * mad
-            return group.clip(lower=lower, upper=upper, axis=0)
-
-        return result.groupby(level="trade_date").transform(_winsorize_group)
+        # numpy 矢量化 clip：NaN 边界不裁剪（NaN 与任何数比较为 False，原 NaN 保留）
+        arr = df.to_numpy(dtype=float)
+        lower_arr = lower.to_numpy(dtype=float)
+        upper_arr = upper.to_numpy(dtype=float)
+        mask_lo = ~np.isnan(lower_arr) & (arr < lower_arr)
+        mask_hi = ~np.isnan(upper_arr) & (arr > upper_arr)
+        result_arr = np.where(mask_lo, lower_arr, arr)
+        result_arr = np.where(mask_hi, upper_arr, result_arr)
+        return pd.DataFrame(result_arr, index=df.index, columns=df.columns)
 
     @staticmethod
     def _zscore_standardize(df: pd.DataFrame) -> pd.DataFrame:
@@ -466,16 +576,12 @@ class CrossSectionReader:
         if df.empty:
             return df
 
-        def _zscore(group: pd.DataFrame) -> pd.DataFrame:
-            mean = group.mean(skipna=True)
-            std = group.std(skipna=True)
-            if isinstance(std, pd.Series):
-                std = std.replace(0, np.nan)
-            elif std == 0:
-                std = np.nan
-            return (group - mean) / std
-
-        return df.groupby(level="trade_date").transform(_zscore)
+        # 矢量化截面 Z-score：transform 命名聚合走 fast path，
+        # 避免自定义 func 在 slow_path 下收到 Series 触发属性错误。
+        mean = df.groupby(level="trade_date").transform("mean")
+        std = df.groupby(level="trade_date").transform("std")
+        std = std.replace(0, np.nan)
+        return (df - mean) / std
 
     @staticmethod
     def _industry_market_cap_neutralize(

@@ -180,7 +180,10 @@ class CdlUpperShadowRatioFactor(FactorPlugin):
         c = df["close"].values.astype(float)
         body_high = np.maximum(o, c)
         hl_range = h - low_
-        upper_shadow = np.where(hl_range != 0, (h - body_high) / hl_range, np.nan)
+        # 避免 hl_range=0 时除法产生 RuntimeWarning（涨停/跌停 H==L）
+        upper_shadow = np.full_like(hl_range, np.nan, dtype=float)
+        mask = hl_range != 0
+        upper_shadow[mask] = (h - body_high)[mask] / hl_range[mask]
         ratio = pd.Series(upper_shadow).rolling(window=20, min_periods=self.min_periods).mean().values
         return pd.DataFrame({self.factor_id: ratio}, index=df.index)
 
@@ -210,7 +213,10 @@ class CdlLowerShadowRatioFactor(FactorPlugin):
         c = df["close"].values.astype(float)
         body_low = np.minimum(o, c)
         hl_range = h - low_
-        lower_shadow = np.where(hl_range != 0, (body_low - low_) / hl_range, np.nan)
+        # 避免 hl_range=0 时除法产生 RuntimeWarning（涨停/跌停 H==L）
+        lower_shadow = np.full_like(hl_range, np.nan, dtype=float)
+        mask = hl_range != 0
+        lower_shadow[mask] = (body_low - low_)[mask] / hl_range[mask]
         ratio = pd.Series(lower_shadow).rolling(window=20, min_periods=self.min_periods).mean().values
         return pd.DataFrame({self.factor_id: ratio}, index=df.index)
 

@@ -283,6 +283,99 @@ async def load_factor_raw_chunk(
     if origin in ("daily_indicator", "daily_derived"):
         return await load_daily_indicator_factor_panel(start_date, end_date, factor_id, symbols)
 
+    if origin == "derived":
+        return await load_derived_factor_panel(
+            start_date, end_date, factor_id, symbols, pool_id,
+        )
+
+    if origin == "cross_section_beta":
+        return await load_beta_factor_panel(
+            start_date, end_date, factor_id, symbols,
+        )
+
+    if origin == "cross_section_compute":
+        return await load_cross_section_compute_panel(
+            start_date, end_date, factor_id, symbols,
+        )
+
     return await load_from_factor_value(
         start_date, end_date, [factor_id], symbols, pool_id,
+    )
+
+
+async def load_derived_factor_panel(
+    start_date: date,
+    end_date: date,
+    factor_id: str,
+    symbols: list[str],
+    pool_id: str,
+) -> pd.DataFrame:
+    """派生因子加载 — 从 base_factor 原值加载并重命名列为 factor_id。
+
+    用于 z_ 前缀截面 Z-score 因子（z_main_net_pct, z_turnover）。
+    CrossSectionReader 后续会做截面 Z-score。
+    """
+    reg = await FacFactorRegistry.get_or_none(factor_id=factor_id)
+    if reg is None or not reg.base_factor:
+        logger.warning("[derived] 因子 %s 未配置 base_factor，回退到 fac_factor_value", factor_id)
+        return await load_from_factor_value(start_date, end_date, [factor_id], symbols, pool_id)
+
+    base_factor_id = reg.base_factor
+    df = await load_from_factor_value(
+        start_date, end_date, [base_factor_id], symbols, pool_id,
+    )
+    if df.empty or base_factor_id not in df.columns:
+        return df
+
+    # z_ 因子：直接重命名列，CrossSectionReader 后续做 Z-score
+    return df.rename(columns={base_factor_id: factor_id})
+
+
+async def load_beta_factor_panel(
+    start_date: date,
+    end_date: date,
+    factor_id: str,
+    symbols: list[str],
+) -> pd.DataFrame:
+    """Beta 因子加载 — 个股收益 + 市场收益滚动回归。
+
+    支持 beta_250（全样本）和 beta_down（仅负收益日）。
+    """
+    from xqtrader.domain.factor.services.cross_section_factor_calculator import (
+        compute_beta_panel,
+    )
+
+    reg = await FacFactorRegistry.get_or_none(factor_id=factor_id)
+    params = reg.params if reg and reg.params else {}
+    index_code = params.get("index_code", "000300.SH")
+    window = params.get("window", 250)
+    downside_only = params.get("downside_only", False)
+
+    return await compute_beta_panel(
+        start_date=start_date,
+        end_date=end_date,
+        factor_id=factor_id,
+        symbols=symbols,
+        index_code=index_code,
+        window=window,
+        downside_only=downside_only,
+    )
+
+
+async def load_cross_section_compute_panel(
+    start_date: date,
+    end_date: date,
+    factor_id: str,
+    symbols: list[str],
+) -> pd.DataFrame:
+    """截面计算因子加载 — nl_size/stom 等需要专门计算的因子。"""
+    from xqtrader.domain.factor.services.cross_section_factor_calculator import (
+        compute_cross_section_factor,
+    )
+
+    return await compute_cross_section_factor(
+        start_date=start_date,
+        end_date=end_date,
+        factor_id=factor_id,
+        symbols=symbols,
     )

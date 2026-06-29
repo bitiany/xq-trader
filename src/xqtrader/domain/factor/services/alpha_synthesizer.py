@@ -25,6 +25,10 @@ from xqtrader.domain.factor.services.factor_dedup import dedup_by_correlation
 
 logger = get_logger(__name__)
 
+# 因子数据门禁阈值（与评估任务一致）
+_MIN_FACTOR_ROWS = 1000  # 最少有效数据行数（低于此值视为数据不完整）
+_MIN_COVERAGE = 0.80  # 最低覆盖率阈值（80%）
+
 # 组名 → 组内合成因子 factor_id 映射（用于跨组合成时识别组内因子）
 GROUP_FACTOR_ID_MAP: dict[str, str] = {
     "value": "composite_value",
@@ -73,7 +77,7 @@ async def build_group_factor_ids() -> dict[str, list[str]]:
         "tech_trend": "technical", "tech_volume": "liquidity",
     }
     all_factors = await FacFactorRegistry.filter(
-        status__in=["active", "testing", "draft"],
+        status="active",
         category__in=list(category_map.keys()),
     )
     for f in all_factors:
@@ -143,6 +147,7 @@ class AlphaSynthesizer:
             return {}
 
         # 3. 逐因子加载截面面板（截面预处理：缺失值填充→MAD→Z-score→行业+市值中性化→再Z-score）
+        # 门禁管控：因子数据必须完整（数据量≥1000行、覆盖率≥80%、无 Infinity），否则跳过
         factor_panels: dict[str, pd.Series] = {}
         for fid in factor_ids:
             panel = await self._reader.load_single_factor_panel(
@@ -157,7 +162,35 @@ class AlphaSynthesizer:
             if panel.empty or fid not in panel.columns:
                 logger.debug("[alpha.synth] 因子 %s 数据为空，跳过", fid)
                 continue
-            factor_panels[fid] = panel[fid]
+
+            # 数据门禁检查
+            series = panel[fid]
+            total_cells = len(series)
+            non_null = int(series.notna().sum())
+            coverage = float(non_null / total_cells) if total_cells > 0 else 0.0
+
+            if total_cells < _MIN_FACTOR_ROWS:
+                logger.warning(
+                    "[alpha.synth] pool=%s factor=%s 门禁拦截: 数据量不足 rows=%d < 阈值=%d",
+                    pool_id, fid, total_cells, _MIN_FACTOR_ROWS,
+                )
+                continue
+
+            if coverage < _MIN_COVERAGE:
+                logger.warning(
+                    "[alpha.synth] pool=%s factor=%s 门禁拦截: 覆盖率不足 coverage=%.2f < 阈值=%.2f",
+                    pool_id, fid, coverage, _MIN_COVERAGE,
+                )
+                continue
+
+            if np.isinf(series.dropna()).any():
+                logger.warning(
+                    "[alpha.synth] pool=%s factor=%s 门禁拦截: 存在 Infinity 值",
+                    pool_id, fid,
+                )
+                continue
+
+            factor_panels[fid] = series
 
         if len(factor_panels) < 2:
             logger.warning(
@@ -199,6 +232,10 @@ class AlphaSynthesizer:
         # 组内 Alpha 独立落库（group_alphas 的 key 均为 composite_fid）
         for composite_fid, group_series in group_alphas.items():
             results[composite_fid] = group_series.to_frame(composite_fid)
+
+        # 5.5 D4 交互因子合成（截面 Z-score 后两两相乘，独立落库）
+        interaction_results = self._synthesize_interactions(combined, composite_configs)
+        results.update(interaction_results)
 
         # 6. 第二阶段：跨组加权合成最终 alpha
         group_combined = pd.DataFrame(group_alphas)
@@ -345,6 +382,77 @@ class AlphaSynthesizer:
             {k: 1 for k in group_alphas},
         )
         return group_alphas
+
+    @staticmethod
+    def _synthesize_interactions(
+        factor_panel: pd.DataFrame,
+        composite_configs: dict[str, dict] | None,
+    ) -> dict[str, pd.DataFrame]:
+        """D4 交互因子合成 — 截面 Z-score 后两两相乘。
+
+        从 composite_configs 中筛选 composite_method='interaction' 的合成因子，
+        对其声明的两个输入因子做点对点相乘，产出交互因子面板。
+
+        输入因子必须已由 CrossSectionReader 完成截面 Z-score 标准化。
+        若任一输入因子缺失或全为 NaN，则跳过该交互因子。
+
+        Args:
+            factor_panel: MultiIndex(trade_date, symbol), columns = factor_ids
+            composite_configs: {composite_factor_id: {"composite_factor_ids": str, "composite_method": str}}
+
+        Returns:
+            {interaction_factor_id: DataFrame(MultiIndex, columns=[factor_id])}
+        """
+        if not composite_configs or factor_panel.empty:
+            return {}
+
+        results: dict[str, pd.DataFrame] = {}
+        for interaction_fid, config in composite_configs.items():
+            if config.get("composite_method") != "interaction":
+                continue
+            child_ids_str = config.get("composite_factor_ids", "")
+            if not child_ids_str:
+                continue
+            child_ids = [fid.strip() for fid in child_ids_str.split(",") if fid.strip()]
+            if len(child_ids) != 2:
+                logger.warning(
+                    "[alpha.synth] 交互因子 %s 输入因子数 != 2: %s",
+                    interaction_fid, child_ids,
+                )
+                continue
+            fid_a, fid_b = child_ids
+            if fid_a not in factor_panel.columns or fid_b not in factor_panel.columns:
+                logger.debug(
+                    "[alpha.synth] 交互因子 %s 输入缺失: %s/%s",
+                    interaction_fid, fid_a, fid_b,
+                )
+                continue
+
+            series_a = factor_panel[fid_a]
+            series_b = factor_panel[fid_b]
+            # 对齐索引后相乘
+            common = series_a.index.intersection(series_b.index)
+            if len(common) == 0:
+                continue
+            a_aligned = series_a.loc[common]
+            b_aligned = series_b.loc[common]
+            product = a_aligned * b_aligned
+            product = product.replace([np.inf, -np.inf], np.nan).dropna()
+            if product.empty:
+                continue
+
+            results[interaction_fid] = product.to_frame(interaction_fid)
+            logger.debug(
+                "[alpha.synth] 交互合成: %s = %s × %s rows=%d",
+                interaction_fid, fid_a, fid_b, len(product),
+            )
+
+        if results:
+            logger.info(
+                "[alpha.synth] 交互合成完成: factors=%s",
+                list(results.keys()),
+            )
+        return results
 
     @staticmethod
     def _calc_rolling_ic_weights(

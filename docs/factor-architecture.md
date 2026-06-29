@@ -14,11 +14,11 @@
 
 | 维度 | 旧版（机构级） | v6.0（个人版） | 落地状态 |
 |------|----------------|----------------|----------|
-| 因子生命周期 | 7 态状态机（Registered→Testing→Active→Watchlist→Deprecated→Dormant→Archived）+ 复活/冷却 | **2 态：active / deprecated** | 旧版 7 态**未实现**，直接采用 2 态 |
-| 因子评估 ML 管线 | XGBoost 特征重要性 + MLP 非线性 IC + AutoEncoder/HDBSCAN 共线性诊断 | **移除**；共线性用相关系数矩阵去冗余 | ML 管线**未实现**（`src/` 无代码），安全移除 |
+| 因子生命周期 | 7 态状态机（Registered→Testing→Active→Watchlist→Deprecated→Dormant→Archived）+ 复活/冷却 | **2 态：active / deprecated** | 旧版 7 态**未实现**，代码已收敛为 2 态（移除 draft/testing） |
+| 因子评估 ML 管线 | XGBoost 特征重要性 + MLP 非线性 IC + AutoEncoder/HDBSCAN 共线性诊断 | **移除**；共线性用相关系数矩阵去冗余 | ML 管线**未实现**（`src/` 无代码），安全移除；T9 已落地 `factor_dedup.py` |
 | 存储分层 | 热/温/冷三层 + Parquet 归档 + 按因子类别差异化保留 | **单层 + TimescaleDB 自动压缩** | 三层归档**未实现**；5 年总量仅 ~4GB，无需归档 |
-| 样本池 | 8 池（含行业/风格池）全量评估 | **默认 `all` + 1 个目标交易池**；其余按需开启 | 代码现配 7 个指数池，建议收敛默认评估范围 |
-| 因子合成 | 等权/IC/ICIR/ML 多方案 + Stacking 集成 | **默认等权（组内）+ ICIR 加权（跨组）**；ML 为远期可选 | ML 合成为远期可选 |
+| 样本池 | 8 池（含行业/风格池）全量评估 | **默认 `all` + 1 个目标交易池**；其余按需开启 | T5 已落地：`pool_init.py` 默认 `all + idx_300` active，其余 deprecated |
+| 因子合成 | 等权/IC/ICIR/ML 多方案 + Stacking 集成 | **默认等权（组内）+ ICIR 加权（跨组）**；ML 为远期可选 | ML 合成为远期可选；T9 组内去冗余已落地 |
 
 > **个人版第一设计原则**：能用既有组件与简单统计方法解决的，不引入 ML/分层存储/复杂状态机。**简单即可维护**。
 
@@ -244,22 +244,48 @@ FactorRegistry: auto_discover() / resolve(factor_ids)
 ```
 src/worker/plugins/factor_compute/     # 计算引擎（celery-plugin 自包含）
 ├── task.py                            # FactorComputeTask
-├── preprocessor.py                    # MAD/Z-score/中性化
-├── plugins/                           # FactorPlugin 实现
-│   ├── base.py                        # ABC + 注册表
-│   ├── valuation.py / fundamental.py  # B 估值/基本面
-│   ├── technical.py / momentum.py     # C 技术/动量
-│   ├── risk.py                        # A 风险
-│   ├── quantitative.py                # D Alpha101/158
-│   └── fund_flow.py                   # D3 资金流
-└── pipeline/                          # load / calc / preprocess / persist 阶段
+├── stages/                            # Pipeline 阶段
+│   ├── load_stage.py                  # 加载 K线/资金流/daily_indicator
+│   ├── calc_stage.py                  # 批量 FactorPlugin.compute()
+│   ├── preprocess_stage.py            # 透传（截面预处理在 CrossSectionReader）
+│   └── persist_stage.py               # 截断 5yr + upsert fac_factor_value
+└── factors/                           # FactorPlugin 实现
+    ├── fundamental_profitability.py   # B2 盈利
+    ├── fundamental_growth.py          # B3 成长
+    ├── fundamental_quality.py         # B4 质量
+    ├── fundamental_leverage.py        # B5 杠杆
+    ├── momentum.py                    # C1 动量/反转
+    ├── tech_trend.py                  # C2 趋势
+    ├── tech_oscillator.py             # C3 超买超卖
+    ├── tech_ma.py                     # C4 均线偏离
+    ├── tech_volatility.py             # A3 波动率
+    ├── alpha101.py                    # D1 Alpha101
+    ├── alpha158.py                    # D2 Alpha158
+    ├── fund_flow.py                   # D3 资金流（逐标的）
+    ├── risk.py                        # A1/A3/A4 风险（逐标的）
+    ├── chanlun.py                     # E1 缠论
+    ├── candle_pattern.py              # E2 K线聚合
+    └── return_factor.py               # 前向收益（评估标签）
+
+src/worker/plugins/factor_synthesize/  # 合成任务
+├── task.py                            # AlphaSynthesizeTask
+└── factors.py                         # CompositeXxxFactor 声明（7 个合成因子）
+
+src/worker/plugins/factor_quarterly/   # 季度财务因子任务
+└── task.py                            # FactorQuarterlyTask → fac_financial_factor_value
 
 src/xqtrader/domain/factor/            # 业务领域层
+├── base.py                            # FactorPlugin / FactorDefinition（代码声明，唯一真相源）
 ├── models/                            # FacFactorValue / Registry / Stats / FinancialFactorValue / Pool
-├── definitions/                       # FactorDefinition（代码声明，唯一真相源）
 └── services/
-    ├── cross_section_reader.py        # CrossSectionReader
-    ├── registry.py / registry_sync.py # 注册表服务/同步
+    ├── cross_section_reader.py        # CrossSectionReader（截面预处理 + 面板加载）
+    ├── factor_data_loader.py          # 估值/财务 PIT / 逐标的因子值 分流加载
+    ├── alpha_synthesizer.py           # 两层合成（L1 等权 + L2 ICIR）
+    ├── factor_dedup.py                # 相关矩阵去冗余
+    ├── ic_calculator.py               # IC / ICIR / 显著性 / 衰减 / 换手
+    ├── layered_backtest.py            # 分层回测（含成本）
+    ├── grade_evaluator.py             # A/B/C/D 评级
+    ├── registry.py                    # 自动发现 + 变体注册 + sync_to_registry
     └── pool_init.py                   # 样本池初始化
 ```
 
@@ -376,29 +402,33 @@ stateDiagram-v2
 ## 十、调度编排
 
 ```yaml
-# 日频 (工作日 17:00) — schedules/daily_factor_pipeline.yml
+# 日频 — schedules/daily_factor_pipeline.yml
 steps:
-  - kline_collect
-  - indicator_collect / fund_flow_collect  (depends_on: kline_collect)
-  - daily_factor_compute                   (depends_on: indicator/fund_flow)   # Task 1
-  - alpha_signal_compute                   (depends_on: daily_factor_compute)
+  - daily_incremental_collect              # 行情/指标/资金流 增量采集
+  - daily_factor_compute                   # Task 1 (depends_on: daily_incremental_collect)
 ```
 
 ```yaml
-# 周频 (周六 08:00) — schedules/weekly_factor_pipeline.yml
+# 周频 — schedules/weekly_factor_pipeline.yml
+# 当前为 on_demand 模式（plugin.yaml 的 schedule 行被注释），手动触发 DAG：
 steps:
   - factor_evaluate                        # Task 3 (先)
   - alpha_synthesize  (depends_on: factor_evaluate)   # Task 2
 ```
 
 ```yaml
-# 季频 (每季首月 1 号) — schedules/quarterly_factor_pipeline.yml
+# 季频 (每季首月 15 号 20:00) — schedules/quarterly_factor_pipeline.yml
 steps:
-  - financial_collect
-  - quarterly_factor_compute  (depends_on: financial_collect)   # → fac_financial_factor_value
+  - financial_indicator_collect
+  - income_statement_collect
+  - balance_sheet_collect
+  - cash_flow_collect
+  - quarterly_factor_compute  (depends_on: [financial_indicator_collect, income_statement_collect, balance_sheet_collect])
 ```
 
-> 旧版的 `ml_evaluate_pipeline.yml`（ML 因子评估）已移除。
+> **周频任务当前为手动触发**：评估/合成任务单次执行可达 12h+（全 A 池），无人值守自动调度风险较高。`weekly_factor_pipeline.yml` 提供 DAG 编排（评估 → 合成依赖），通过 scheduler API 手动触发；如需启用自动调度，取消 `plugin.yaml` 中 `schedule` 行注释即可。
+>
+> 旧版的 `ml_evaluate_pipeline.yml`（ML 因子评估）已移除；日频的 `alpha_signal_compute` 步骤未实现（信号生成由规则/工作流引擎独立负责，不阻塞因子管线）。
 
 ---
 
@@ -431,10 +461,11 @@ steps:
 
 | 文档结论 | 代码现状 | 后续 |
 |---------|---------|------|
-| 2 态生命周期 | 注册表已用 active/deprecated（未实现 7 态） | 一致，无需改 |
-| 移除 ML 评估 | `src/` 无 ML 评估实现 | 一致，无需改 |
-| 单层 + 压缩 | 无归档代码；`@timescale` 已配压缩 | 一致，无需改 |
-| 样本池收敛 | `pool_init.py` 现配 7 池全量评估 | **建议**调整默认评估范围（需单独确认后改代码） |
+| 2 态生命周期 | `registry.py` sync_to_registry 默认 `active`；评估/合成任务仅过滤 `active` | 一致 |
+| 移除 ML 评估 | `src/` 无 ML 评估实现 | 一致 |
+| 单层 + 压缩 | 无归档代码；`@timescale` 已配压缩 | 一致 |
+| 样本池收敛 | `pool_init.py` 默认 `all + idx_300` active，其余 deprecated（T5 已落地） | 一致 |
+| 周频调度 | `weekly_factor_pipeline.yml` 编排 DAG，但 `plugin.yaml` 的 schedule 注释禁用，手动触发 | 一致 |
 
 ---
 

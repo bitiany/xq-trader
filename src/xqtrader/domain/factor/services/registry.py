@@ -179,9 +179,19 @@ async def sync_to_registry() -> int:
         return 0
 
     rows: list[FacFactorRegistry] = []
+    # 已加入 rows 的 factor_id 集合，防止子因子被多个组合因子重复注册
+    # （如 adx_14 同时是 adx 组合与 composite_technical 的子因子）
+    seen_factor_ids: set[str] = set()
+
+    def _append_row(row: FacFactorRegistry) -> None:
+        if row.factor_id in seen_factor_ids:
+            return
+        seen_factor_ids.add(row.factor_id)
+        rows.append(row)
+
     for plugin in _REGISTRY.values():
         defn = plugin.get_definition()
-        rows.append(FacFactorRegistry(
+        _append_row(FacFactorRegistry(
             factor_id=defn.factor_id,
             display_name=defn.display_name,
             category=defn.category,
@@ -198,7 +208,7 @@ async def sync_to_registry() -> int:
             update_freq=defn.update_freq,
             compute_engine=defn.compute_engine,
             tags=defn.tags or "",
-            status="draft",
+            status="active",
             factor_grade=None,
             report_lag_days=defn.report_lag_days,
             is_composite=1 if defn.is_composite else 0,
@@ -209,10 +219,15 @@ async def sync_to_registry() -> int:
         ))
 
         # 组合因子的子因子自动注册（如 macd_dif / macd_dea / macd_hist）
+        # 仅注册无独立插件的子因子，已有独立插件的子因子（如 ep/bp/mom_20d）跳过
+        # 多个组合因子共享同一子因子时（如 adx_14 同时属于 adx 与 composite_technical），
+        # 仅由首个组合因子注册一次，避免 ON CONFLICT 重复行错误
         if defn.is_composite and defn.composite_factor_ids:
             for child_id in defn.composite_factor_ids:
-                child_display_name = defn.child_display_names[child_id]
-                rows.append(FacFactorRegistry(
+                if child_id in _REGISTRY or child_id in seen_factor_ids:
+                    continue
+                child_display_name = defn.child_display_names.get(child_id, child_id)
+                _append_row(FacFactorRegistry(
                     factor_id=child_id,
                     display_name=child_display_name,
                     category=defn.category,
@@ -229,7 +244,7 @@ async def sync_to_registry() -> int:
                     update_freq=defn.update_freq,
                     compute_engine=defn.compute_engine,
                     tags=defn.tags or "",
-                    status="draft",
+                    status="active",
                     factor_grade=None,
                     report_lag_days=0,
                     is_composite=0,
@@ -246,7 +261,7 @@ async def sync_to_registry() -> int:
             "display_name", "category", "group_id", "direction", "scope",
             "signal_type", "base_factor", "dependencies", "min_periods",
             "compute_module", "params", "data_origin", "update_freq",
-            "compute_engine", "tags", "is_composite",
+            "compute_engine", "tags", "is_composite", "status",
             "composite_factor_ids", "skip_preprocess", "composite_method", "description",
         ],
         batch_size=100,
@@ -347,6 +362,18 @@ _FACTOR_VARIANTS: list[tuple[str, dict[str, Any]]] = [
     ("worker.plugins.factor_compute.factors.candle_pattern:CdlBodyRatioFactor", {}),
     # E1 缠论连续值因子（组合因子，一次 chanpy 计算输出 10 个子因子）
     ("worker.plugins.factor_compute.factors.chanlun:ChanlunFactor", {}),
+    # A 截面风险因子 + D3 z_main_net_pct（CrossSectionReader 按需加载）
+    # - nl_size/stom: cross_section_compute 路由到 cross_section_factor_calculator
+    # - beta_250/beta_down: cross_section_beta 路由到 compute_beta_panel
+    # - z_main_net_pct/z_turnover: derived 路由，从 base_factor 加载后截面 Z-score
+    # - stoq: derived 路由，从 stom 派生 63 日滚动均值
+    ("worker.plugins.factor_compute.factors.cross_section:ZMainNetPctFactor", {}),
+    ("worker.plugins.factor_compute.factors.cross_section:ZTurnoverFactor", {}),
+    ("worker.plugins.factor_compute.factors.cross_section:NlSizeFactor", {}),
+    ("worker.plugins.factor_compute.factors.cross_section:StomFactor", {}),
+    ("worker.plugins.factor_compute.factors.cross_section:StoqFactor", {}),
+    ("worker.plugins.factor_compute.factors.cross_section:Beta250Factor", {}),
+    ("worker.plugins.factor_compute.factors.cross_section:BetaDownFactor", {}),
     # B 类基本面因子 — 属于 CrossSectionReader，不在 Task 1 逐标的计算
     # B1 价值因子：由 CrossSectionReader 从 sdc_daily_indicator 直接加载
     # B2-B5 财务因子：由 FactorQuarterlyTask 计算并写入 fac_financial_factor_value
@@ -361,4 +388,11 @@ _FACTOR_VARIANTS: list[tuple[str, dict[str, Any]]] = [
     ("worker.plugins.factor_synthesize.factors:CompositeFundFlowFactor", {}),
     # F2 跨组合成因子（第二层）
     ("worker.plugins.factor_synthesize.factors:CompositeAlphaFactor", {}),
+    # D4 交互因子（截面 Z-score 后两两相乘，由 factor_synthesize 任务计算）
+    ("worker.plugins.factor_synthesize.factors:MomVolCrossFactor", {}),
+    ("worker.plugins.factor_synthesize.factors:AdxRsiCrossFactor", {}),
+    ("worker.plugins.factor_synthesize.factors:VolRatioMomCrossFactor", {}),
+    ("worker.plugins.factor_synthesize.factors:RsiBbandsCrossFactor", {}),
+    ("worker.plugins.factor_synthesize.factors:MacdAdxCrossFactor", {}),
+    ("worker.plugins.factor_synthesize.factors:VolMomAccelCrossFactor", {}),
 ]

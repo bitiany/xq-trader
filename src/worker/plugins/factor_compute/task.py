@@ -103,8 +103,14 @@ class FactorComputeTask(BaseTask):
         # 解析因子列表，过滤掉：
         # - B 类基本面因子（由 FactorQuarterlyTask / CrossSectionReader 负责）
         # - D 类合成因子（由 FactorSynthesizeTask 负责）
+        # - A/D3 截面因子（compute_engine='cross_section'，由 CrossSectionReader 在评估/合成时按需计算）
         factors = await resolve_factor_list(factor_ids)
-        factors = [f for f in factors if not _is_fundamental_factor(f) and f.compute_engine != "synthesize"]
+        factors = [
+            f for f in factors
+            if not _is_fundamental_factor(f)
+            and f.compute_engine != "synthesize"
+            and f.compute_engine != "cross_section"
+        ]
         if not factors:
             return {"status": "FAILED", "message": "No factors resolved"}
 

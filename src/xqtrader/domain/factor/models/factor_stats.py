@@ -4,8 +4,10 @@
 """
 
 from datetime import date
+from typing import Any
 
 from sqlalchemy import Date, Float, Integer, String
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from framework.dal.base import AuditedBase
@@ -36,6 +38,12 @@ class FacFactorStats(AuditedBase):
     long_short_sharpe: Mapped[float | None] = mapped_column(Float, nullable=True, comment="多空夏普比率")
     coverage: Mapped[float | None] = mapped_column(Float, nullable=True, comment="因子覆盖度")
     factor_grade: Mapped[str | None] = mapped_column(String(2), nullable=True, comment="因子等级 A/B/C/D")
+    group_returns: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB, nullable=True, comment='分层回测各组年化收益 JSONB: {"Q1":..,"Q5":..}',
+    )
+    ic_decay_curve: Mapped[list[dict[str, Any]] | None] = mapped_column(
+        JSONB, nullable=True, comment='IC衰减曲线 JSONB: [{"h":1,"ic":0.05},...]',
+    )
 
     __table_args__ = (
         {"comment": "因子统计指标表 — 评估管线产出"},

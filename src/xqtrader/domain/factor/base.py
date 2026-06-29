@@ -35,7 +35,7 @@ class FactorDefinition:
     compute_engine: str = "plugin"
     report_lag_days: int = 0
     tags: str = ""
-    status: str = "draft"
+    status: str = "active"
     description: str = ""
     is_composite: bool = False
     composite_factor_ids: list[str] = field(default_factory=list)

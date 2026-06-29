@@ -22,7 +22,7 @@ params_schema:
       items:
         type: string
       title: 样本池列表
-      description: 为空时合成默认样本池(idx_300, idx_1000)
+      description: 为空时合成默认样本池(all, idx_300)
     factor_ids:
       type: array
       items:

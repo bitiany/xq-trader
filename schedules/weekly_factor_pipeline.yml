@@ -1,0 +1,22 @@
+name: weekly_factor_pipeline
+description: "周频因子评估与合成流水线：先评估因子等级 → 再按 A/B 级因子合成 Alpha"
+mode: canvas
+queue: celery
+enabled: true
+# 当前为手动触发模式（不配置 cron）：
+#   - 评估/合成任务单次执行可达 12h+（全 A 池），无人值守自动调度风险较高
+#   - 通过 scheduler API 手动触发整个 DAG，由编排引擎保证 evaluate → synthesize 依赖
+#   - 如需启用自动调度（周六 08:00 评估 → 10:00 合成），取消下方 cron 注释即可
+# cron: "0 8 * * 6"
+
+steps:
+  - name: factor_evaluate
+    task: factor.evaluate_weekly
+    args:
+      window: 252
+
+  - name: alpha_synthesize
+    task: factor.synthesize_weekly
+    depends_on: [factor_evaluate]
+    args:
+      window: 252

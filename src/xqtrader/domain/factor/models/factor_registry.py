@@ -1,6 +1,6 @@
 """因子注册表 — 因子元数据持久化，代码声明为唯一真相源，启动时同步。"""
 
-from sqlalchemy import Integer, String
+from sqlalchemy import Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -32,21 +32,21 @@ class FacFactorRegistry(AuditedBase):
     compute_engine: Mapped[str] = mapped_column(String(16), nullable=True, default="plugin", comment="计算引擎")
     tags: Mapped[str] = mapped_column(String(128), nullable=True, default="", comment="标签")
     status: Mapped[str] = mapped_column(
-        String(16), nullable=True, default="draft",
-        comment="状态 draft/testing/active/deprecated",
+        String(16), nullable=True, default="active",
+        comment="状态 active/deprecated（2 态生命周期）",
     )
     factor_grade: Mapped[str | None] = mapped_column(String(2), nullable=True, default=None, comment="因子等级 A/B/C/D")
     report_lag_days: Mapped[int] = mapped_column(Integer, nullable=True, default=0, comment="财报发布滞后天数")
     is_composite: Mapped[int] = mapped_column(Integer, nullable=True, default=0, comment="是否组合因子 0/1")
     composite_factor_ids: Mapped[str] = mapped_column(
-        String(256), nullable=True, default="", comment="组合因子子ID，逗号分隔",
+        Text, nullable=True, default="", comment="组合因子子ID，逗号分隔",
     )
     skip_preprocess: Mapped[int] = mapped_column(Integer, nullable=True, default=0, comment="是否跳过预处理 0/1")
     composite_method: Mapped[str] = mapped_column(
         String(32), nullable=True, default="",
         comment="合成方法: equal_weight/icir_weight/ml/interaction",
     )
-    description: Mapped[str] = mapped_column(String(256), nullable=True, default="", comment="因子描述")
+    description: Mapped[str] = mapped_column(Text, nullable=True, default="", comment="因子描述")
 
     __table_args__ = (
         {"comment": "因子注册表 — 元数据+运行时状态"},

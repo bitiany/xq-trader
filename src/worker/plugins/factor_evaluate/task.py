@@ -1,24 +1,28 @@
 """周频因子评估任务 — 按样本池计算 IC/ICIR/分层回测/换手率/衰减半衰期，评定因子等级。
 
-评估流程（按因子滚动，参考业界主流因子评估平台架构）：
+评估流程（生产者-消费者并发模式）：
   1. 从 fac_factor_pool 读取样本池配置（含 factor_scope）
   2. 从 fac_factor_registry 读取活跃因子列表
-  3. 逐样本池、逐因子加载截面面板 → 评估 → 即时持久化 → 释放内存
+  3. 逐样本池：预加载共享只读数据 → ConcurrentRunner 并发评估各因子 → 即时持久化
   4. 更新因子注册表的全局等级
 
-按因子滚动的好处：
-  - 内存峰值 = 1个因子 × 5年 × 样本池标的数，而非全量因子同时驻留
-  - 每个因子评估完成即持久化，任务中断时已评估的结果不丢失
-  - 进度可观测，每个因子完成时输出日志
+并发设计：
+  - 各因子相互独立，通过 ConcurrentRunner 多消费者并发评估
+  - 共享只读数据（symbols/returns_panel/industry_map 等）预加载一次
+  - 单因子失败不影响其他，错误隔离
+  - 内存峰值 = N 个因子同时驻留（N=concurrency），非全量因子
 """
 
 from __future__ import annotations
 
+import time
+from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
 
 import numpy as np
 
+from framework.commons.concurrent import ConcurrentRunner
 from framework.commons.logger import get_logger
 from framework.scheduler.base_task import BaseTask
 from worker.plugins.utils import parse_list_param
@@ -30,12 +34,51 @@ from xqtrader.domain.factor.services.grade_evaluator import GradeEvaluator
 from xqtrader.domain.factor.services.ic_calculator import ICCalculator
 from xqtrader.domain.factor.services.layered_backtest import LayeredBacktester
 from xqtrader.domain.factor.services.pool_init import PoolInitService
-from xqtrader.domain.factor.services.registry import auto_discover_factors, register_factor_variants
+from xqtrader.domain.factor.services.registry import (
+    auto_discover_factors,
+    register_factor_variants,
+    sync_to_registry,
+)
 
 logger = get_logger("factor.evaluate")
 
 _RETENTION_YEARS = 5
-_DEFAULT_WINDOW = 252
+_DEFAULT_WINDOW = 504  # IC 统计窗口（约 2 年），平衡近期表现与统计稳定性
+_EVAL_CONCURRENCY = 12  # 评估任务消费者数量（stock 连接池 20+30=50，12×2=24 ≤ 50，余量充足）
+
+# 不参与评估的因子类别：
+# - return: 评估标签（fwd_ret_*），不评估
+# - chanlun: 非截面连续值（缠论笔数等），覆盖率仅6%，IC异常，不入因子评估和合成
+# - composite_group/composite_cross: 合成产物，不评估
+# - interaction: 交互因子，合成产物，不评估
+_EXCLUDED_CATEGORIES: tuple[str, ...] = (
+    "return", "chanlun", "composite_group", "composite_cross", "interaction",
+)
+
+# 因子数据门禁阈值
+_MIN_FACTOR_ROWS = 1000  # 最少有效数据行数（低于此值视为数据不完整）
+_MIN_COVERAGE = 0.80  # 最低覆盖率阈值（80%）
+
+
+@dataclass(frozen=True)
+class _EvalContext:
+    """单因子评估的共享只读上下文（所有消费者共用，不可变）。"""
+
+    pool_id: str
+    symbols: list[str]
+    industry_map: dict[str, Any]
+    market_cap_panel: Any
+    membership: Any
+    returns_panel: Any
+    direction_map: dict[str, str]
+    reader: CrossSectionReader
+    ic_calc: ICCalculator
+    backtester: LayeredBacktester
+    grade_eval: GradeEvaluator
+    start_date: date
+    end_date: date
+    window: int
+    today: date
 
 
 class FactorEvaluateTask(BaseTask):
@@ -46,18 +89,27 @@ class FactorEvaluateTask(BaseTask):
     prevent_concurrent = True
 
     async def _run_impl(self, **kwargs: Any) -> dict[str, Any]:
+        task_start_time = time.monotonic()
         pool_ids = parse_list_param(kwargs.get("pool_ids"))
         factor_ids = parse_list_param(kwargs.get("factor_ids"))
         start_date = str(kwargs.get("start_date", ""))
         end_date = str(kwargs.get("end_date", ""))
         window = int(kwargs.get("window", _DEFAULT_WINDOW))
 
-        # 同步默认样本池配置（含 status 收敛至 all + idx_300）
-        await PoolInitService().sync_default_pools()
+        logger.info("[factor.evaluate] === 任务启动 === params: pool_ids=%s factor_ids=%s window=%d",
+                    pool_ids, factor_ids, window)
 
-        # 加载因子插件（估值/财务类因子依赖 FactorPlugin.compute）
+        # 同步默认样本池配置（含 status 收敛至 active 池集合）
+        t0 = time.monotonic()
+        await PoolInitService().sync_default_pools()
+        logger.info("[factor.evaluate] 样本池同步完成 耗时=%.2fs", time.monotonic() - t0)
+
+        # 加载因子插件并同步注册表到 DB（确保 draft 因子被激活为 active）
+        t0 = time.monotonic()
         auto_discover_factors()
         register_factor_variants()
+        await sync_to_registry()
+        logger.info("[factor.evaluate] 因子插件发现+注册表同步完成 耗时=%.2fs", time.monotonic() - t0)
 
         # 从 DB 加载样本池配置
         if pool_ids:
@@ -71,17 +123,17 @@ class FactorEvaluateTask(BaseTask):
         if not pools:
             return {"status": "FAILED", "message": "No active pools found"}
 
-        # 解析全量活跃因子列表（排除收益率因子，收益率因子与 fwd_ret 列冲突且业务上不应评估）
+        # 解析全量活跃因子列表
+        # 排除：return(评估标签) / chanlun(非截面连续值) / composite_*(合成产物) / interaction(交互因子)
+        excluded_set = set(_EXCLUDED_CATEGORIES)
         if factor_ids:
-            factors = await FacFactorRegistry.filter(
+            all_factors = await FacFactorRegistry.filter(
                 factor_id__in=factor_ids,
-                status__in=["active", "testing"],
+                status="active",
             )
         else:
-            factors = await FacFactorRegistry.filter(
-                status__in=["active", "testing"],
-                category__ne="return",
-            )
+            all_factors = await FacFactorRegistry.filter(status="active")
+        factors = [f for f in all_factors if f.category not in excluded_set]
 
         if not factors:
             return {"status": "FAILED", "message": "No active factors to evaluate"}
@@ -96,7 +148,7 @@ class FactorEvaluateTask(BaseTask):
             start_date = start.strftime("%Y-%m-%d")
 
         logger.info(
-            "[factor.evaluate] starting | pools=%d factors=%d range=%s~%s window=%d",
+            "[factor.evaluate] === 开始全量评估 === pools=%d factors=%d range=%s~%s window=%d",
             len(pools), len(all_factor_ids), start_date, end_date, window,
         )
 
@@ -117,10 +169,11 @@ class FactorEvaluateTask(BaseTask):
             # 根据样本池的 factor_scope 解析实际评估的因子
             pool_factor_ids = await PoolInitService.resolve_factor_ids(pool, all_factor_ids)
             logger.info(
-                "[factor.evaluate] pool progress=%d/%d pool=%s factors=%d",
+                "[factor.evaluate] >>> 池进度 %d/%d pool=%s factors=%d",
                 pool_idx, total_pools, pool.pool_id, len(pool_factor_ids),
             )
 
+            pool_start = time.monotonic()
             count = await self._evaluate_pool(
                 pool=pool,
                 factor_ids=pool_factor_ids,
@@ -132,15 +185,24 @@ class FactorEvaluateTask(BaseTask):
                 backtester=backtester,
                 grade_eval=grade_eval,
             )
+            pool_elapsed = time.monotonic() - pool_start
             total_stats += count
             evaluated_pool_ids.append(pool.pool_id)
+            logger.info(
+                "[factor.evaluate] <<< 池完成 %d/%d pool=%s 成功=%d/%d 耗时=%.1fs 累计耗时=%.1fs",
+                pool_idx, total_pools, pool.pool_id, count, len(pool_factor_ids),
+                pool_elapsed, time.monotonic() - task_start_time,
+            )
 
         # 更新因子注册表全局等级
+        t0 = time.monotonic()
         await self._update_global_grades(all_factor_ids, evaluated_pool_ids)
+        logger.info("[factor.evaluate] 全局等级更新完成 耗时=%.2fs", time.monotonic() - t0)
 
+        total_elapsed = time.monotonic() - task_start_time
         logger.info(
-            "[factor.evaluate] completed | total_stats=%d factors=%d pools=%s",
-            total_stats, len(all_factor_ids), evaluated_pool_ids,
+            "[factor.evaluate] === 任务完成 === total_stats=%d factors=%d pools=%s 总耗时=%.1fs",
+            total_stats, len(all_factor_ids), evaluated_pool_ids, total_elapsed,
         )
 
         return {
@@ -162,108 +224,257 @@ class FactorEvaluateTask(BaseTask):
         backtester: LayeredBacktester,
         grade_eval: GradeEvaluator,
     ) -> int:
-        """评估单个样本池的所有因子（按因子滚动：逐因子加载→评估→持久化→释放）。"""
+        """评估单个样本池的所有因子（生产者-消费者并发模式）。
+
+        各因子相互独立，通过 ConcurrentRunner 并发评估：
+        - 预加载共享只读数据（symbols/returns_panel 等）
+        - N 个消费者并发处理各因子（加载面板→计算 stats→持久化）
+        - 单因子失败不影响其他，错误隔离
+        """
         pool_id = pool.pool_id
         total_factors = len(factor_ids)
-        logger.info("[factor.evaluate] 评估样本池: %s (%s), factors=%d", pool_id, pool.pool_name, total_factors)
+        pool_t0 = time.monotonic()
+        logger.info(
+            "[factor.evaluate] >>> 进入样本池: %s (%s) factors=%d concurrency=%d",
+            pool_id, pool.pool_name, total_factors, _EVAL_CONCURRENCY,
+        )
 
-        # 预加载样本池标的列表、行业映射和市值映射（所有因子共用）
+        # 预加载共享只读数据（所有因子共用）
+        t0 = time.monotonic()
         symbols = await reader.load_pool_symbols(pool_id)
-        industry_map = await reader.load_industry_map(symbols)
-        market_cap_panel = await reader.load_market_cap_panel(symbols, start_date, end_date)
-        membership = await reader.build_pool_membership(pool_id, start_date, end_date)
-
+        logger.info(
+            "[factor.evaluate] pool=%s 标的加载完成: %d 只 耗时=%.2fs",
+            pool_id, len(symbols), time.monotonic() - t0,
+        )
         if not symbols:
             logger.warning("[factor.evaluate] 样本池 %s 无标的，跳过", pool_id)
             return 0
 
-        # 预加载收益率面板（所有因子共用，按月滚动加载）
+        t0 = time.monotonic()
+        industry_map = await reader.load_industry_map(symbols)
+        logger.info(
+            "[factor.evaluate] pool=%s 行业映射加载: %d 条 耗时=%.2fs",
+            pool_id, len(industry_map), time.monotonic() - t0,
+        )
+
+        t0 = time.monotonic()
+        market_cap_panel = await reader.load_market_cap_panel(symbols, start_date, end_date)
+        logger.info(
+            "[factor.evaluate] pool=%s 市值面板加载: rows=%d 耗时=%.2fs",
+            pool_id, len(market_cap_panel) if market_cap_panel is not None else 0,
+            time.monotonic() - t0,
+        )
+
+        t0 = time.monotonic()
+        membership = await reader.build_pool_membership(pool_id, start_date, end_date)
+        logger.info(
+            "[factor.evaluate] pool=%s membership 构建: %d 期 耗时=%.2fs",
+            pool_id, len(membership) if membership else 0, time.monotonic() - t0,
+        )
+
+        t0 = time.monotonic()
         returns_panel = await reader.load_returns_panel(
-            start_date=start_date,
-            end_date=end_date,
-            symbols=symbols,
+            start_date=start_date, end_date=end_date, symbols=symbols,
         )
         returns_panel = reader.filter_panel_by_membership(returns_panel, membership)
+        logger.info(
+            "[factor.evaluate] pool=%s 收益率面板加载: rows=%d 耗时=%.2fs",
+            pool_id, len(returns_panel), time.monotonic() - t0,
+        )
         if returns_panel.empty:
             logger.warning("[factor.evaluate] 样本池 %s 收益率数据为空，跳过", pool_id)
             return 0
 
-        # 逐因子滚动评估
-        total_stats = 0
-        today = date.today()
+        # 预加载因子方向（DESC/ASC）：ASC 因子需翻转符号使"高值→高收益"成立
+        t0 = time.monotonic()
+        direction_map = await self._load_direction_map(factor_ids)
+        logger.info(
+            "[factor.evaluate] pool=%s 因子方向加载: %d 条 耗时=%.2fs",
+            pool_id, len(direction_map), time.monotonic() - t0,
+        )
 
-        for idx, factor_id in enumerate(factor_ids, 1):
-            try:
-                # 加载单因子截面面板（含截面预处理：缺失值填充→MAD→Z-score→行业+市值中性化→再Z-score）
-                factor_panel = await reader.load_single_factor_panel(
-                    start_date=start_date,
-                    end_date=end_date,
-                    pool_id=pool_id,
-                    symbols=symbols,
-                    factor_id=factor_id,
-                    industry_map=industry_map,
-                    market_cap_panel=market_cap_panel,
-                )
-                factor_panel = reader.filter_panel_by_membership(factor_panel, membership)
+        logger.info(
+            "[factor.evaluate] pool=%s 共享数据预加载完成 总耗时=%.2fs, 开始并发评估 %d 因子",
+            pool_id, time.monotonic() - pool_t0, total_factors,
+        )
 
-                if factor_panel.empty or factor_id not in factor_panel.columns:
-                    logger.debug("[factor.evaluate] 因子 %s 数据为空，跳过", factor_id)
-                    continue
+        # 构建共享上下文（只读，所有消费者共用）
+        ctx = _EvalContext(
+            pool_id=pool_id,
+            symbols=symbols,
+            industry_map=industry_map,
+            market_cap_panel=market_cap_panel,
+            membership=membership,
+            returns_panel=returns_panel,
+            direction_map=direction_map,
+            reader=reader,
+            ic_calc=ic_calc,
+            backtester=backtester,
+            grade_eval=grade_eval,
+            start_date=start_date,
+            end_date=end_date,
+            window=window,
+            today=date.today(),
+        )
 
-                single_factor = factor_panel[[factor_id]]
+        # 生产者-消费者并发评估
+        runner = ConcurrentRunner[str, dict](
+            concurrency=_EVAL_CONCURRENCY,
+            log_name=f"factor.evaluate[{pool_id}]",
+        )
+        result = await runner.run_items(
+            items=factor_ids,
+            processor=lambda fid: self._evaluate_single_factor(fid, ctx),
+        )
 
-                # 计算统计指标
-                stats = self._calc_factor_stats(
-                    factor_id=factor_id,
-                    factor_panel=single_factor,
-                    returns_panel=returns_panel,
-                    window=window,
-                    ic_calc=ic_calc,
-                    backtester=backtester,
-                )
+        logger.info(
+            "[factor.evaluate] <<< 样本池 %s 评估完成: 成功=%d/%d 失败=%d 耗时=%.1fs",
+            pool_id, result.success_count, total_factors,
+            result.failure_count, time.monotonic() - pool_t0,
+        )
+        return result.success_count
 
-                stats["factor_id"] = factor_id
-                stats["pool_id"] = pool_id
-                stats["calc_date"] = today
-                stats["window"] = window
+    async def _evaluate_single_factor(
+        self, factor_id: str, ctx: _EvalContext,
+    ) -> dict[str, Any] | None:
+        """单个因子完整评估：加载面板 → 计算 stats → 持久化。
 
-                # 覆盖度
-                total_cells = len(single_factor)
-                non_null = single_factor[factor_id].notna().sum()
-                stats["coverage"] = float(non_null / total_cells) if total_cells > 0 else 0.0
+        各消费者独立调用此方法，因子间无共享可变状态。
+        返回 None 表示因子数据为空被跳过；返回 stats dict 表示评估成功。
+        """
+        reader = ctx.reader
+        factor_t0 = time.monotonic()
+        logger.info(
+            "[factor.evaluate] pool=%s >>> 开始评估 factor=%s",
+            ctx.pool_id, factor_id,
+        )
 
-                # 评定等级
-                grade = grade_eval.evaluate(stats)
-                stats["factor_grade"] = grade
+        # 加载单因子截面面板（含截面预处理：缺失值填充→MAD→Z-score→行业+市值中性化→再Z-score）
+        t0 = time.monotonic()
+        factor_panel = await reader.load_single_factor_panel(
+            start_date=ctx.start_date,
+            end_date=ctx.end_date,
+            pool_id=ctx.pool_id,
+            symbols=ctx.symbols,
+            factor_id=factor_id,
+            industry_map=ctx.industry_map,
+            market_cap_panel=ctx.market_cap_panel,
+        )
+        factor_panel = reader.filter_panel_by_membership(factor_panel, ctx.membership)
+        logger.info(
+            "[factor.evaluate] pool=%s factor=%s 面板加载完成: rows=%d 耗时=%.2fs",
+            ctx.pool_id, factor_id, len(factor_panel), time.monotonic() - t0,
+        )
 
-                # 即时持久化（单因子）
-                model = self._build_stats_model(stats)
-                await FacFactorStats.bulk_create_or_update(
-                    [model],
-                    on_conflict=["factor_id", "pool_id", "calc_date", "window"],
-                    update_fields=[
-                        "ic_mean", "ic_std", "icir", "ic_win_rate",
-                        "ic_mean_5d", "ic_mean_10d", "ic_mean_20d",
-                        "ic_tstat", "ic_pvalue",
-                        "turnover", "decay_half_life",
-                        "long_short_annual_ret", "long_short_sharpe",
-                        "coverage", "factor_grade",
-                    ],
-                )
-                total_stats += 1
+        if factor_panel.empty or factor_id not in factor_panel.columns:
+            logger.info(
+                "[factor.evaluate] pool=%s factor=%s 数据为空，跳过 耗时=%.2fs",
+                ctx.pool_id, factor_id, time.monotonic() - factor_t0,
+            )
+            return None
 
-                logger.info(
-                    "[factor.evaluate] pool=%s factor=%s (%d/%d) grade=%s icir=%.3f coverage=%.2f",
-                    pool_id, factor_id, idx, total_factors, grade,
-                    stats.get("icir", 0) or 0, stats.get("coverage", 0) or 0,
-                )
+        single_factor = factor_panel[[factor_id]]
 
-            except Exception as e:
-                logger.error("[factor.evaluate] 因子 %s 评估失败: %s", factor_id, e, exc_info=True)
-                continue
+        # 数据门禁管控：评估前必须确认因子数据完整，避免无数据或不完整数据导致评估报错
+        total_cells = len(single_factor)
+        non_null = int(single_factor[factor_id].notna().sum())
+        coverage = float(non_null / total_cells) if total_cells > 0 else 0.0
 
-        logger.info("[factor.evaluate] 样本池 %s: 评估完成, %d/%d 因子成功", pool_id, total_stats, total_factors)
-        return total_stats
+        if total_cells < _MIN_FACTOR_ROWS:
+            logger.warning(
+                "[factor.evaluate] pool=%s factor=%s 门禁拦截: 数据量不足 rows=%d < 阈值=%d，跳过 耗时=%.2fs",
+                ctx.pool_id, factor_id, total_cells, _MIN_FACTOR_ROWS,
+                time.monotonic() - factor_t0,
+            )
+            return None
+
+        if coverage < _MIN_COVERAGE:
+            logger.warning(
+                "[factor.evaluate] pool=%s factor=%s 门禁拦截: 覆盖率不足 coverage=%.2f < 阈值=%.2f，跳过 耗时=%.2fs",
+                ctx.pool_id, factor_id, coverage, _MIN_COVERAGE,
+                time.monotonic() - factor_t0,
+            )
+            return None
+
+        # 检查 Infinity 值（会导致后续统计计算报错）
+        factor_values = single_factor[factor_id].dropna()
+        if np.isinf(factor_values).any():
+            logger.warning(
+                "[factor.evaluate] pool=%s factor=%s 门禁拦截: 存在 Infinity 值，跳过 耗时=%.2fs",
+                ctx.pool_id, factor_id, time.monotonic() - factor_t0,
+            )
+            return None
+
+        # 应用因子方向：ASC 表示因子值越小越好，翻转符号使所有因子统一为"高值→高收益"
+        if ctx.direction_map.get(factor_id, "DESC") == "ASC":
+            single_factor = single_factor.copy()
+            single_factor[factor_id] = -single_factor[factor_id]
+
+        # 计算统计指标
+        t0 = time.monotonic()
+        stats = self._calc_factor_stats(
+            factor_id=factor_id,
+            factor_panel=single_factor,
+            returns_panel=ctx.returns_panel,
+            window=ctx.window,
+            ic_calc=ctx.ic_calc,
+            backtester=ctx.backtester,
+        )
+        logger.info(
+            "[factor.evaluate] pool=%s factor=%s stats 计算完成 耗时=%.2fs",
+            ctx.pool_id, factor_id, time.monotonic() - t0,
+        )
+
+        stats["factor_id"] = factor_id
+        stats["pool_id"] = ctx.pool_id
+        stats["calc_date"] = ctx.today
+        stats["window"] = ctx.window
+        stats["coverage"] = coverage  # 复用门禁检查中已计算的覆盖度
+
+        # 评定等级
+        grade = ctx.grade_eval.evaluate(stats)
+        stats["factor_grade"] = grade
+
+        # 即时持久化（单因子）
+        t0 = time.monotonic()
+        model = self._build_stats_model(stats)
+        await FacFactorStats.bulk_create_or_update(
+            [model],
+            on_conflict=["factor_id", "pool_id", "calc_date", "window"],
+            update_fields=[
+                "ic_mean", "ic_std", "icir", "ic_win_rate",
+                "ic_mean_5d", "ic_mean_10d", "ic_mean_20d",
+                "ic_tstat", "ic_pvalue",
+                "turnover", "decay_half_life",
+                "long_short_annual_ret", "long_short_sharpe",
+                "group_returns", "ic_decay_curve",
+                "coverage", "factor_grade",
+            ],
+        )
+
+        logger.info(
+            "[factor.evaluate] pool=%s factor=%s <<< 评估完成 grade=%s icir=%.3f "
+            "coverage=%.2f 持久化=%.2fs 总耗时=%.2fs",
+            ctx.pool_id, factor_id, grade,
+            stats.get("icir", 0) or 0, stats.get("coverage", 0) or 0,
+            time.monotonic() - t0, time.monotonic() - factor_t0,
+        )
+        return stats
+
+    @staticmethod
+    async def _load_direction_map(factor_ids: list[str]) -> dict[str, str]:
+        """批量加载因子方向（DESC/ASC），用于评估时翻转 ASC 因子符号。
+
+        Args:
+            factor_ids: 因子 ID 列表
+
+        Returns:
+            {factor_id: direction}，缺失 direction 视为 DESC
+        """
+        if not factor_ids:
+            return {}
+        rows = await FacFactorRegistry.filter(factor_id__in=factor_ids)
+        return {r.factor_id: (r.direction or "DESC") for r in rows}
 
     @staticmethod
     def _calc_factor_stats(
@@ -289,7 +500,8 @@ class FactorEvaluateTask(BaseTask):
         # 换手率
         turnover = ic_calc.calc_turnover(factor_panel)
 
-        # 衰减半衰期
+        # IC 衰减曲线（持久化为 JSONB，供前端绘制衰减图）与半衰期（共享底层计算）
+        ic_decay_curve = ic_calc.calc_ic_decay_curve(factor_panel, returns_panel)
         decay_half_life = ic_calc.calc_decay_half_life(factor_panel, returns_panel)
 
         return {
@@ -304,8 +516,10 @@ class FactorEvaluateTask(BaseTask):
             "ic_pvalue": ic_sig.get("ic_pvalue"),
             "long_short_annual_ret": backtest_result.get("long_short_annual_ret"),
             "long_short_sharpe": backtest_result.get("long_short_sharpe"),
+            "group_returns": backtest_result.get("group_returns"),
             "turnover": turnover,
             "decay_half_life": decay_half_life,
+            "ic_decay_curve": ic_decay_curve,
         }
 
     @staticmethod
@@ -341,6 +555,8 @@ class FactorEvaluateTask(BaseTask):
             decay_half_life=_f(stats.get("decay_half_life")),
             long_short_annual_ret=_f(stats.get("long_short_annual_ret")),
             long_short_sharpe=_f(stats.get("long_short_sharpe")),
+            group_returns=stats.get("group_returns") or {},
+            ic_decay_curve=stats.get("ic_decay_curve") or [],
             coverage=_f(stats.get("coverage")),
             factor_grade=stats.get("factor_grade"),
         )
@@ -349,8 +565,13 @@ class FactorEvaluateTask(BaseTask):
     async def _update_global_grades(factor_ids: list[str], pool_ids: list[str]) -> None:
         """更新因子注册表的全局等级（最优样本池规则）。"""
         grade_eval = GradeEvaluator()
+        total = len(factor_ids)
+        updated = 0
+        logger.info(
+            "[factor.evaluate] 开始更新全局等级: factors=%d pools=%s", total, pool_ids,
+        )
 
-        for factor_id in factor_ids:
+        for idx, factor_id in enumerate(factor_ids, 1):
             pool_stats = await FacFactorStats.filter(
                 factor_id=factor_id,
                 pool_id__in=pool_ids,
@@ -368,7 +589,9 @@ class FactorEvaluateTask(BaseTask):
                 {"factor_grade": global_grade},
                 factor_id=factor_id,
             )
-            logger.debug(
-                "[factor.evaluate] 因子 %s 全局等级更新为 %s (pool_grades=%s)",
-                factor_id, global_grade, pool_grades,
-            )
+            updated += 1
+            if idx % 30 == 0 or idx == total:
+                logger.info(
+                    "[factor.evaluate] 全局等级更新进度: %d/%d (已更新=%d)",
+                    idx, total, updated,
+                )
