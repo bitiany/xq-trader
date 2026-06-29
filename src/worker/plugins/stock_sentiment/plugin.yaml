@@ -1,0 +1,27 @@
+name: stock_sentiment
+celery_task_name: market.stock_sentiment_collect
+version: "1.0.0"
+task_name: 市场舆情快照采集（akshare 微博舆情）
+task_name_en: Market Sentiment Snapshot Collection (akshare weibo)
+description: 按日期采集微博财经舆情报告（akshare stock_js_weibo_report），写入 sdc_stock_sentiment 表。市场级舆情（symbol 为空），按 snapshot_date + sentiment_type + symbol 复合唯一约束去重。
+description_en: Daily collection of weibo finance sentiment report from akshare, persisted to sdc_stock_sentiment table.
+category: io
+task_type: on_demand
+queue: market
+timeout: 3600
+retry_config:
+  max_retries: 2
+  retry_backoff: true
+  retry_backoff_max: 600
+params_schema:
+  type: object
+  properties:
+    collect_date:
+      type: string
+      title: 采集日期
+      description: 微博舆情查询日期（格式 YYYYMMDD），为空时取最近交易日
+    sentiment_type:
+      type: string
+      title: 舆情类型标识
+      default: weibo
+      description: 写入 sdc_stock_sentiment.sentiment_type 字段的值

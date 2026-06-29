@@ -1,0 +1,52 @@
+name: research_report
+celery_task_name: market.research_report_collect
+version: "1.0.0"
+task_name: 券商研报采集（东财研报中心）
+task_name_en: Research Report Collection (Eastmoney)
+description: 逐标的采集东方财富研报中心研报元数据并下载 PDF。数据源为东财 reportapi.eastmoney.com HTTP API，PDF 存储到本地 workspace/report/{symbol}/ 目录。水位基于 publish_date（研报发布日期）。
+description_en: Per-security collection of research report metadata from East Money report center, with PDF download. Watermark based on publish_date.
+category: io
+task_type: on_demand
+queue: market
+timeout: 43200
+retry_config:
+  max_retries: 2
+  retry_backoff: true
+  retry_backoff_max: 600
+params_schema:
+  type: object
+  properties:
+    concurrency:
+      type: integer
+      title: 并发数
+      default: 3
+    stock_codes:
+      type: array
+      title: 股票代码列表
+      description: 为空时采集全市场
+      items:
+        type: string
+    max_count:
+      type: integer
+      title: 最大标的数量
+      description: 用于测试，0 表示不限
+      default: 0
+    collect_date:
+      type: string
+      title: 采集起始日期
+      description: 指定采集起始发布日期（格式 YYYY-MM-DD），为空时按水位日期增量采集
+    report_type:
+      type: string
+      title: 研报类型
+      description: stock=个股研报 / industry=行业研报 / strategy=策略 / macro=宏观 / morning=晨报
+      default: stock
+    download_pdf:
+      type: boolean
+      title: 是否下载 PDF
+      description: 为 true 时下载研报 PDF 到本地
+      default: true
+    max_pages:
+      type: integer
+      title: 单标的最大翻页数
+      description: 0 表示不限（自动翻页直到无数据）
+      default: 0

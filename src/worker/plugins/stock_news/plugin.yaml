@@ -1,0 +1,45 @@
+name: stock_news
+celery_task_name: market.stock_news_collect
+version: "1.0.0"
+task_name: 个股新闻与公告采集（akshare）
+task_name_en: Stock News & Announcement Collection (akshare)
+description: 逐标的采集个股新闻（akshare stock_news_em）与公告（akshare stock_individual_notice_report），合并写入 sdc_stock_news 表，用 news_type 字段区分。新闻接口不支持日期范围，依赖 news_url 唯一约束去重；公告接口按 date_str 增量采集。
+description_en: Per-security collection of stock news and announcements from akshare, merged into sdc_stock_news table with news_type discriminator.
+category: io
+task_type: on_demand
+queue: market
+timeout: 43200
+retry_config:
+  max_retries: 2
+  retry_backoff: true
+  retry_backoff_max: 600
+params_schema:
+  type: object
+  properties:
+    concurrency:
+      type: integer
+      title: 并发数
+      default: 3
+    stock_codes:
+      type: array
+      title: 股票代码列表
+      description: 为空时采集全市场
+      items:
+        type: string
+    max_count:
+      type: integer
+      title: 最大标的数量
+      description: 用于测试，0 表示不限
+      default: 0
+    collect_date:
+      type: string
+      title: 公告采集日期
+      description: 公告接口的查询日期（格式 YYYYMMDD），为空时取最近交易日
+    fetch_news:
+      type: boolean
+      title: 是否采集新闻
+      default: true
+    fetch_announcements:
+      type: boolean
+      title: 是否采集公告
+      default: true

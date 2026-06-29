@@ -7,6 +7,7 @@ dependencies = [
     "alembic>=1.13,<2.0",
     "apscheduler>=3.10,<4.0",
     "asyncpg>=0.29,<1.0",
+    "akshare>=1.14,<2.0",
     "celery[redis]>=5.4,<6.0",
     "cryptography>=42.0,<45.0",
     "fastapi>=0.109,<1.0",
@@ -104,7 +105,7 @@ disallow_untyped_defs = true
 packages = ["framework", "xqtrader", "agent", "mcp_server", "skills"]
 
 [[tool.mypy.overrides]]
-module = ["psycopg2", "psycopg.*", "xtquant.*", "langgraph.checkpoint.postgres", "nanobot.*", "mcp.*", "backtrader", "quantstats", "quantstats.*"]
+module = ["psycopg2", "psycopg.*", "xtquant.*", "langgraph.checkpoint.postgres", "nanobot.*", "mcp.*", "backtrader", "quantstats", "quantstats.*", "akshare", "akshare.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
