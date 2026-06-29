@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Literal
 
@@ -93,10 +94,29 @@ class McpServerConfig(BaseModel):
         return self
 
 
+def _apply_env_overrides(cfg: McpServerConfig) -> McpServerConfig:
+    """容器部署时通过环境变量覆盖 YAML 中的 localhost 绑定。"""
+
+    if host := os.getenv("MCP_SERVER_HOST"):
+        cfg.server.host = host
+    if port := os.getenv("MCP_SERVER_PORT"):
+        cfg.server.port = int(port)
+    if url := os.getenv("MCP_OPENAPI_URL"):
+        cfg.source.url = url
+        if cfg.source.type == "http":
+            cfg.source.api_base_url = os.getenv(
+                "MCP_API_BASE_URL",
+                url.rsplit("/", 1)[0],
+            )
+    elif api := os.getenv("MCP_API_BASE_URL"):
+        cfg.source.api_base_url = api
+    return cfg
+
+
 def load_config(path: str | Path) -> McpServerConfig:
     """读取 YAML 并构造校验后的配置。"""
 
     raw: Any = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
         raise ValueError(f"配置文件根节点必须是 dict: {path}")
-    return McpServerConfig.model_validate(raw)
+    return _apply_env_overrides(McpServerConfig.model_validate(raw))

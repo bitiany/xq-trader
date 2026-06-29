@@ -1,0 +1,39 @@
+# xqtrader Agent Worker（Nanobot）容器部署
+#
+# 单独启动：
+#   docker compose -f docker/agent/docker-compose.yml up -d --build
+#
+# 与 MCP 组网联合启动（推荐）：
+#   docker compose -f docker/docker-compose.yml up -d --build
+#
+# 挂载说明：
+#   - workspace：Agent 技能、AGENTS.md 等 Nanobot 工作区文件
+#   - .env：Redis、LLM 等环境变量配置
+
+networks:
+  xqtrader:
+    name: xqtrader-net
+
+services:
+  agent:
+    build:
+      context: ../..
+      dockerfile: docker/agent/Dockerfile
+    container_name: xqtrader-agent
+    networks:
+      - xqtrader
+    environment:
+      ENV: /config/.env
+      AGENT_WORKSPACE: /workspace
+      AGENT_REDIS_HOST: host.docker.internal
+      AGENT_LLM_BASE_URL: http://host.docker.internal:8000/v1
+      AGENT_MCP_BASE_URL: http://xqtrader-mcp:8097
+      AGENT_SERVICE_BASE_URL: http://host.docker.internal:8096
+      AGENT_WORKER_ID: worker-1
+      AGENT_MAX_CONCURRENT_RUNS: "8"
+    volumes:
+      - ../../src/agent/workspace:/workspace
+      - ../../.env:/config/.env:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped

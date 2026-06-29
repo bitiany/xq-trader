@@ -1,0 +1,55 @@
+# xqtrader Agent + MCP 联合部署（推荐）
+#
+# 用法（在项目根目录）：
+#   docker compose -f docker/docker-compose.yml up -d --build
+#
+# Agent 通过 Docker 内网服务名 http://mcp:8097 访问 MCP；
+# MCP / Agent 仍通过 host.docker.internal 访问宿主机 API / Redis / LLM。
+
+name: xqtrader
+
+networks:
+  default:
+    name: xqtrader-net
+
+services:
+  mcp:
+    build:
+      context: ..
+      dockerfile: docker/mcp/Dockerfile
+    container_name: xqtrader-mcp
+    ports:
+      - "8097:8097"
+    environment:
+      MCP_SERVER_HOST: "0.0.0.0"
+      MCP_SERVER_PORT: "8097"
+      MCP_OPENAPI_URL: http://host.docker.internal:8096/openapi.json
+      MCP_API_BASE_URL: http://host.docker.internal:8096
+    volumes:
+      - ../mcp_server.yml:/config/mcp_server.yml:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  agent:
+    build:
+      context: ..
+      dockerfile: docker/agent/Dockerfile
+    container_name: xqtrader-agent
+    depends_on:
+      - mcp
+    environment:
+      ENV: /config/.env
+      AGENT_WORKSPACE: /workspace
+      AGENT_REDIS_HOST: host.docker.internal
+      AGENT_LLM_BASE_URL: http://host.docker.internal:8000/v1
+      AGENT_MCP_BASE_URL: http://mcp:8097
+      AGENT_SERVICE_BASE_URL: http://host.docker.internal:8096
+      AGENT_WORKER_ID: worker-1
+      AGENT_MAX_CONCURRENT_RUNS: "8"
+    volumes:
+      - ../src/agent/workspace:/workspace
+      - ../.env:/config/.env:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
