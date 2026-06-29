@@ -1,6 +1,6 @@
 ---
 name: factor-research
-description: 因子研究 — 浏览因子注册表、查询截面因子值、查看因子最新评估快照。
+description: 浏览因子注册表、查询截面因子值、查看因子最新评估快照（IC/ICIR/胜率/分层）。当用户询问因子定义、可用因子分类、某因子的当前值与评估指标时触发。
 keywords: 因子, factor, IC, 选股因子, 因子值, 因子分布
 ---
 
@@ -37,3 +37,18 @@ keywords: 因子, factor, IC, 选股因子, 因子值, 因子分布
 
 - 因子值返回为列表，必要时按 `factor_value` 排序展示前 N 行。
 - 不要凭名称推断因子语义，必须先调 `mcp_xq_factors_xq_get_factor` 拿 description。
+- 输出遵守 AGENTS.md Markdown 排版规范，段落间最多 1 空行。
+
+## 示例对话
+
+用户: "有哪些价值类因子"
+步骤:
+1. 调用 `mcp_xq_factors_xq_list_factors`（keyword="价值", status="active"）
+2. 返回因子列表（id / name / category / direction）
+
+用户: "PE_TTM 因子最新评估怎么样"
+步骤:
+1. 调用 `mcp_xq_factors_xq_list_factors`（keyword="PE_TTM"）拿到 factor_id
+2. 调用 `mcp_xq_factors_xq_get_factor` 确认语义
+3. 调用 `mcp_xq_factors_xq_get_factor_stats_latest`（factor_id, pool_id="all"）
+4. 解读 IC/ICIR/胜率/分层收益，给出因子有效性判断

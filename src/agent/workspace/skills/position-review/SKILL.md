@@ -1,6 +1,6 @@
 ---
 name: position-review
-description: 持仓盘点 — 资产、持仓、当日委托与成交（仅只读）。
+description: 查询账户资产、持仓、当日委托与成交（仅只读）。当用户询问当前账户持仓、可用资金、当日委托/成交、单只标的盈亏时触发。
 keywords: 持仓, 资产, 委托, 成交, 盘点, position, asset
 ---
 
@@ -35,3 +35,18 @@ keywords: 持仓, 资产, 委托, 成交, 盘点, position, asset
 - 严禁触发任何下单、撤单、连接管理操作（这些都不在 MCP 暴露面中）。
 - 涉及资金数据时统一以"元"为单位，金额保留 2 位小数。
 - 不给出具体买卖建议。
+- 输出遵守 AGENTS.md Markdown 排版规范，段落间最多 1 空行。
+
+## 示例对话
+
+用户: "账户怎么样"
+步骤:
+1. 调用 `mcp_xq_positions_xq_get_broker_asset`
+2. 调用 `mcp_xq_positions_xq_list_broker_positions`
+3. 输出总资产 / 可用资金 / 持仓市值 / 当日盈亏
+
+用户: "我茅台持仓多少"
+步骤:
+1. 调用 `mcp_xq_positions_xq_get_broker_position`（stock_code="600519.SH"）
+2. 调用 `mcp_xq_stocks_xq_get_stock_overview`（symbol="600519.SH"）补最新价
+3. 计算浮盈浮亏，输出持仓明细

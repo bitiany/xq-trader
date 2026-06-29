@@ -1,6 +1,6 @@
 ---
 name: selection-replay
-description: 历史选股复盘 — 浏览样本池、按策略/日期检索选股结果。
+description: 浏览样本池、按策略/日期检索历史选股结果。当用户希望查看某策略在某信号日的入选标的、复盘历史选股、浏览样本池构成时触发。
 keywords: 选股, 选股结果, 样本池, universe, 复盘, 候选
 ---
 
@@ -33,3 +33,17 @@ keywords: 选股, 选股结果, 样本池, universe, 复盘, 候选
 
 - 不进行实时选股运行（避免 POST），只做历史结果复盘。
 - 因子值字段含 `factor_values_flat`，渲染时取前 5 个最具代表性的字段即可。
+- 输出遵守 AGENTS.md Markdown 排版规范，段落间最多 1 空行。
+
+## 示例对话
+
+用户: "昨天选股选了哪些"
+步骤:
+1. 调用 `mcp_xq_selection_xq_list_selection_result_dates` 取最近信号日
+2. 调用 `mcp_xq_selection_xq_list_selection_results`（signal_date=最新日）
+3. 输出 rank / symbol / name / score / direction 表格
+
+用户: "样本池有哪些"
+步骤:
+1. 调用 `mcp_xq_selection_xq_list_universe_pools`（include_db=true）
+2. 输出样本池列表（pool_id / name / count）
