@@ -10,21 +10,28 @@ interface StockFundFlowPanelProps {
   data?: StockFundFlowResponse
 }
 
+// 数据原始单位为万元（Tushare moneyflow 字段单位）
+// 图表格式化：>= 1万万元(=1亿)以亿显示，否则以万元显示
 function formatNumber(value: number | null | undefined): string {
   if (value == null || Number.isNaN(value)) return '—'
-  if (Math.abs(value) >= 1e8) return `${(value / 1e8).toFixed(2)}亿`
-  if (Math.abs(value) >= 1e4) return `${(value / 1e4).toFixed(2)}万`
+  if (Math.abs(value) >= 1e4) return `${(value / 1e4).toFixed(2)}亿`
+  return `${value.toFixed(2)}万`
+}
+
+// 表格专用格式化：单位统一标注在表头，数据不携带后缀
+function formatTableAmount(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) return '—'
   return value.toFixed(2)
 }
 
-function formatPercent(value: number | null | undefined): string {
+function formatTablePercent(value: number | null | undefined): string {
   if (value == null || Number.isNaN(value)) return '—'
-  return `${value.toFixed(2)}%`
+  return value.toFixed(2)
 }
 
 function TrendValue({ value, percent = false }: { value: number | null | undefined; percent?: boolean }) {
   const color = value == null ? undefined : value > 0 ? 'var(--color-rise)' : value < 0 ? 'var(--color-fall)' : undefined
-  return <span style={{ color, fontFamily: 'var(--font-mono)' }}>{percent ? formatPercent(value) : formatNumber(value)}</span>
+  return <span style={{ color, fontFamily: 'var(--font-mono)' }}>{percent ? formatTablePercent(value) : formatTableAmount(value)}</span>
 }
 
 function FundFlowPieChart({ item }: { item: StockFundFlowItem }) {
@@ -224,13 +231,20 @@ export function StockFundFlowPanel({ data }: StockFundFlowPanelProps) {
   const chartItems = rows.slice(-120)
 
   const columns: ColumnsType<StockFundFlowItem> = [
-    { title: t('stock.fundFlow.tradeDate'), dataIndex: 'trade_date', width: 110, fixed: 'left' },
-    { title: t('stock.fundFlow.mainNetAmt'), dataIndex: 'main_net_amt', width: 120, render: (v) => <TrendValue value={v} /> },
-    { title: t('stock.fundFlow.mainNetPct'), dataIndex: 'main_net_pct', width: 110, render: (v) => <TrendValue value={v} percent /> },
-    { title: t('stock.fundFlow.hugeNetAmt'), dataIndex: 'huge_net_amt', width: 120, render: (v) => <TrendValue value={v} /> },
-    { title: t('stock.fundFlow.bigNetAmt'), dataIndex: 'big_net_amt', width: 120, render: (v) => <TrendValue value={v} /> },
-    { title: t('stock.fundFlow.midNetAmt'), dataIndex: 'mid_net_amt', width: 120, render: (v) => <TrendValue value={v} /> },
-    { title: t('stock.fundFlow.smallNetAmt'), dataIndex: 'small_net_amt', width: 120, render: (v) => <TrendValue value={v} /> },
+    {
+      title: t('stock.fundFlow.tradeDate'),
+      dataIndex: 'trade_date',
+      width: 110,
+      fixed: 'left',
+      defaultSortOrder: 'descend',
+      sorter: (a, b) => a.trade_date.localeCompare(b.trade_date),
+    },
+    { title: `${t('stock.fundFlow.mainNetAmt')}（万元）`, dataIndex: 'main_net_amt', width: 130, render: (v) => <TrendValue value={v} /> },
+    { title: `${t('stock.fundFlow.mainNetPct')}（%）`, dataIndex: 'main_net_pct', width: 110, render: (v) => <TrendValue value={v} percent /> },
+    { title: `${t('stock.fundFlow.hugeNetAmt')}（万元）`, dataIndex: 'huge_net_amt', width: 130, render: (v) => <TrendValue value={v} /> },
+    { title: `${t('stock.fundFlow.bigNetAmt')}（万元）`, dataIndex: 'big_net_amt', width: 130, render: (v) => <TrendValue value={v} /> },
+    { title: `${t('stock.fundFlow.midNetAmt')}（万元）`, dataIndex: 'mid_net_amt', width: 130, render: (v) => <TrendValue value={v} /> },
+    { title: `${t('stock.fundFlow.smallNetAmt')}（万元）`, dataIndex: 'small_net_amt', width: 130, render: (v) => <TrendValue value={v} /> },
   ]
 
   return (

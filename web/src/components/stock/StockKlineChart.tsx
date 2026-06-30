@@ -671,7 +671,9 @@ export function StockKlineChart({
       if (dz && dz.length > 0 && dz[0].start != null && dz[0].end != null) {
         zoomStateRef.current = { start: dz[0].start, end: dz[0].end }
       }
-      chart.setOption(nextOption, true)
+      // 使用 replaceMerge 仅替换 series，保留 tooltip/axisPointer 状态，
+      // 避免盘中实时行情推送时 setOption 全量替换导致十字星面板闪烁消失
+      chart.setOption(nextOption, { replaceMerge: ['series'] })
       chart.resize()
     }
 
