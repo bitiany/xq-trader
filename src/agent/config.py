@@ -57,6 +57,15 @@ class AgentSettings:
             if g.strip()
         ]
         self.MCP_TOOL_TIMEOUT = int(os.getenv("MCP_TOOL_TIMEOUT", "30"))
+        self.DISABLED_SKILLS = [
+            s.strip()
+            for s in os.getenv(
+                "AGENT_DISABLED_SKILLS",
+                "memory,my,github,tmux,weather,clawhub,cron,image-generation,"
+                "summarize,skill-creator,update-setup",
+            ).split(",")
+            if s.strip()
+        ]
 
 
 agent_settings = AgentSettings()

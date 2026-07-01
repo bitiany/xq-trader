@@ -101,6 +101,7 @@ def _write_runtime_config() -> None:
                 "max_tool_iterations": 30,
                 "max_tool_result_chars": 16000,
                 "timezone": "Asia/Shanghai",
+                "disabled_skills": agent_settings.DISABLED_SKILLS,
             }
         },
         "providers": {
