@@ -1,6 +1,8 @@
 """因子注册表 — 因子元数据持久化，代码声明为唯一真相源，启动时同步。"""
 
-from sqlalchemy import Integer, String, Text
+from datetime import date
+
+from sqlalchemy import Date, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -28,6 +30,10 @@ class FacFactorRegistry(AuditedBase):
     )
     params: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default={}, comment="计算参数 JSON")
     data_origin: Mapped[str] = mapped_column(String(32), nullable=True, default="computed", comment="数据来源")
+    data_start_date: Mapped[date | None] = mapped_column(
+        Date, nullable=True, default=None,
+        comment="数据起始日期（受数据源限制，如 fund_flow 自 2023-09-11 起；NULL 表示无限制）",
+    )
     update_freq: Mapped[str] = mapped_column(String(16), nullable=True, default="daily", comment="更新频率")
     compute_engine: Mapped[str] = mapped_column(String(16), nullable=True, default="plugin", comment="计算引擎")
     tags: Mapped[str] = mapped_column(String(128), nullable=True, default="", comment="标签")

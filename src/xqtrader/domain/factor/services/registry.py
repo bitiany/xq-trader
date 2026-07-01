@@ -205,6 +205,7 @@ async def sync_to_registry() -> int:
             compute_module=defn.compute_module or "",
             params=defn.params if defn.params else {},
             data_origin=defn.data_origin or "computed",
+            data_start_date=defn.data_start_date,
             update_freq=defn.update_freq,
             compute_engine=defn.compute_engine,
             tags=defn.tags or "",
@@ -260,7 +261,7 @@ async def sync_to_registry() -> int:
         update_fields=[
             "display_name", "category", "group_id", "direction", "scope",
             "signal_type", "base_factor", "dependencies", "min_periods",
-            "compute_module", "params", "data_origin", "update_freq",
+            "compute_module", "params", "data_origin", "data_start_date", "update_freq",
             "compute_engine", "tags", "is_composite", "status",
             "composite_factor_ids", "skip_preprocess", "composite_method", "description",
         ],

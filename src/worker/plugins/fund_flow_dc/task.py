@@ -1,33 +1,28 @@
-"""A股个股资金流向采集任务（Tushare 原生数据源）。
+"""A股个股资金流向采集任务（Tushare moneyflow_dc 数据源）。
 
-数据源：Tushare moneyflow 接口，采集个股资金流向数据写入 FundFlowIndividual 表。
+数据源：Tushare moneyflow_dc 接口（东方财富，基于 L2 主动买卖单统计），
+采集个股资金流向数据写入 FundFlowIndividual 表。
+数据起始日期：2023-09-11。
+
 管线流程（每个标的串行执行）：
   WatermarkAspect(前切) → DownloadStage → CleanStage → PersistStage → WatermarkAspect(后切)
 
-字段映射与计算（moneyflow → FundFlowIndividual）：
+字段映射（moneyflow_dc → FundFlowIndividual）：
   ts_code → symbol
   trade_date → trade_date
-  buy_elg_amount → huge_buy_amt（特大单买入金额，万元）
-  sell_elg_amount → huge_sell_amt（特大单卖出金额，万元）
-  buy_lg_amount → big_buy_amt（大单买入金额，万元）
-  sell_lg_amount → big_sell_amt（大单卖出金额，万元）
-  buy_md_amount → mid_buy_amt（中单买入金额，万元）
-  sell_md_amount → mid_sell_amt（中单卖出金额，万元）
-  buy_sm_amount → small_buy_amt（小单买入金额，万元）
-  sell_sm_amount → small_sell_amt（小单卖出金额，万元）
-  net_mf_amount → net_mf_amt（净流入额，万元）
+  buy_elg_amount → huge_net_amt（特大单净流入额，万元）
+  buy_lg_amount → big_net_amt（大单净流入额，万元）
+  buy_md_amount → mid_net_amt（中单净流入额，万元）
+  buy_sm_amount → small_net_amt（小单净流入额，万元）
+  net_amount → net_mf_amt（全部净流入额，万元）
+  buy_elg_amount_rate → huge_net_pct（特大单净流入占比）
+  buy_lg_amount_rate → big_net_pct（大单净流入占比）
+  buy_md_amount_rate → mid_net_pct（中单净流入占比）
+  buy_sm_amount_rate → small_net_pct（小单净流入占比）
+  net_amount_rate → main_net_pct（主力净流入占比）
 
   计算字段：
-  huge_net_amt = buy_elg_amount - sell_elg_amount
-  big_net_amt = buy_lg_amount - sell_lg_amount
-  mid_net_amt = buy_md_amount - sell_md_amount
-  small_net_amt = buy_sm_amount - sell_sm_amount
   main_net_amt = huge_net_amt + big_net_amt
-  huge_net_pct = huge_net_amt / (buy_elg_amount + sell_elg_amount) * 100
-  big_net_pct = big_net_amt / (buy_lg_amount + sell_lg_amount) * 100
-  mid_net_pct = mid_net_amt / (buy_md_amount + sell_md_amount) * 100
-  small_net_pct = small_net_amt / (buy_sm_amount + sell_sm_amount) * 100
-  main_net_pct = main_net_amt / (huge_buy+sell + big_buy+sell) * 100
 
 水位管理（WatermarkAspect）：
   - 前切：若指定 collect_date 则以该日期为起始；否则查询水位日期作为增量起始时间
@@ -51,8 +46,6 @@ from framework.pipeline import (
 from framework.scheduler.base_task import BaseTask
 from worker.plugins.aspects import WatermarkAspect
 from worker.plugins.daily_incremental.stages.fund_flow_stage import (
-    _is_bj_symbol,
-    clean_fund_flow_data,
     clean_fund_flow_dc_data,
     persist_fund_flow_data,
 )
@@ -107,19 +100,11 @@ class DownloadStage(Stage):
             ts_start = start_date.replace("-", "")
             ts_end = end_date.replace("-", "") if end_date else ""
 
-            use_dc = _is_bj_symbol(stock_code)
-            if use_dc:
-                df = await _get_collector().fetch_moneyflow_dc(
-                    ts_code=stock_code,
-                    start_date=ts_start,
-                    end_date=ts_end,
-                )
-            else:
-                df = await _get_collector().fetch_moneyflow(
-                    ts_code=stock_code,
-                    start_date=ts_start,
-                    end_date=ts_end,
-                )
+            df = await _get_collector().fetch_moneyflow_dc(
+                ts_code=stock_code,
+                start_date=ts_start,
+                end_date=ts_end,
+            )
 
             if df is None or df.empty:
                 logger.debug("[fund_flow.collect] 无数据: %s range=%s~%s", stock_code, start_date, end_date)
@@ -130,7 +115,6 @@ class DownloadStage(Stage):
                 ctx.set("download_data", df)
                 ctx.set("row_count", len(df))
                 ctx.set("skip_persist", False)
-                ctx.set("use_dc_source", use_dc)
 
             return StageResult.ok(data={"stock_code": stock_code, "rows": ctx.get("row_count", 0)})
         except Exception as e:
@@ -155,10 +139,7 @@ class CleanStage(Stage):
             return StageResult.ok(data={"stock_code": stock_code, "cleaned": 0})
 
         initial_len = len(df)
-        if ctx.get("use_dc_source"):
-            df = clean_fund_flow_dc_data(df)
-        else:
-            df = clean_fund_flow_data(df)
+        df = clean_fund_flow_dc_data(df)
 
         ctx.set("download_data", df)
         ctx.set("row_count", len(df))
@@ -216,7 +197,7 @@ class FundFlowCollectTask(BaseTask):
     """
 
     task_name = "market.fund_flow_collect"
-    description = "A股个股资金流向采集-Tushare原生数据源（管道引擎并发）"
+    description = "A股个股资金流向采集-moneyflow_dc数据源（管道引擎并发）"
     async def _run_impl(self, **kwargs: Any) -> dict[str, Any]:
         data_type = kwargs.get("data_type", "fund_flow")
         concurrency = kwargs.get("concurrency", 50)

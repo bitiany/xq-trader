@@ -11,9 +11,14 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 import pandas as pd
 
 from xqtrader.domain.factor.base import FactorPlugin  # noqa: E402
+
+# 资金流向合成因子继承数据源起始日期限制（moneyflow_dc 自 2023-09-11 起）
+_FUND_FLOW_DATA_START = date(2023, 9, 11)
 
 # ── 第一层：组内合成因子 ──
 
@@ -149,19 +154,32 @@ class CompositeTechnicalFactor(FactorPlugin):
 
 
 class CompositeFundFlowFactor(FactorPlugin):
-    """资金流因子组 — 主力/大单/超大单资金流因子等权合成。"""
+    """资金流因子组 — 主力/大单/超大单资金流因子等权合成。
+
+    输入因子涵盖三类信息：
+      - 当日截面占比：cs_main_net_pct / cs_net_mf_pct / huge_net_pct / big_net_pct
+      - 结构分化：main_small_divergence / huge_big_divergence
+      - 时序聚合/变化：main_net_pct_3d / main_net_pct_5d / main_net_pct_chg
+    合成时由 dedup_by_correlation 自动去冗余高相关因子。
+    """
 
     factor_id: str = "composite_fund_flow"
     display_name: str = "资金流合成因子"
     category: str = "composite_group"
     direction: str = "DESC"
-    description: str = "资金流因子组内等权合成（cs_main_net_pct/cs_net_mf_pct/huge_net_pct/big_net_pct）"
+    description: str = "资金流因子组内等权合成（占比+结构分化+时序聚合/变化，共9因子，去冗余后合成）"
     update_freq: str = "weekly"
     compute_engine: str = "synthesize"
     is_composite: bool = True
     composite_method: str = "equal_weight"
+    data_start_date: date = _FUND_FLOW_DATA_START
     composite_factor_ids: list[str] = [
+        # 当日截面占比
         "cs_main_net_pct", "cs_net_mf_pct", "huge_net_pct", "big_net_pct",
+        # 结构分化
+        "main_small_divergence", "huge_big_divergence",
+        # 时序聚合/变化
+        "main_net_pct_3d", "main_net_pct_5d", "main_net_pct_chg",
     ]
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:

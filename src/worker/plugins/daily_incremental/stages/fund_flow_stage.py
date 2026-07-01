@@ -5,10 +5,9 @@
   2. 获取交易日列表
   3. 逐日执行：采集 → 清洗 → 持久化 → 更新标的水位
 
-数据源：
-  - 沪深 A 股：Tushare moneyflow 接口（单次上限 6000 条）
-  - 北交所（.BJ）：Tushare moneyflow_dc 接口（moneyflow 不含北交所数据）
-逐日采集时传入 trade_date 获取全市场当日数据，若返回达到上限则按标的补采。
+数据源：Tushare moneyflow_dc 接口（东方财富，基于 L2 主动买卖单统计）。
+数据起始日期：2023-09-11。
+逐日采集时传入 trade_date 获取全市场当日数据。
 """
 
 from __future__ import annotations
@@ -31,36 +30,6 @@ _collector: TushareDataCollector | None = None
 
 _DATA_TYPE = "fund_flow"
 
-# moneyflow 接口字段 → FundFlowIndividual 模型字段
-_COLUMN_MAPPING: dict[str, str] = {
-    "ts_code": "symbol",
-    "buy_elg_amount": "huge_buy_amt",
-    "sell_elg_amount": "huge_sell_amt",
-    "buy_lg_amount": "big_buy_amt",
-    "sell_lg_amount": "big_sell_amt",
-    "buy_md_amount": "mid_buy_amt",
-    "sell_md_amount": "mid_sell_amt",
-    "buy_sm_amount": "small_buy_amt",
-    "sell_sm_amount": "small_sell_amt",
-    "net_mf_amount": "net_mf_amt",
-}
-
-# 买卖金额列（用于计算净流入额和占比）
-_BUY_SELL_PAIRS: list[tuple[str, str, str]] = [
-    ("huge_buy_amt", "huge_sell_amt", "huge_net_amt"),
-    ("big_buy_amt", "big_sell_amt", "big_net_amt"),
-    ("mid_buy_amt", "mid_sell_amt", "mid_net_amt"),
-    ("small_buy_amt", "small_sell_amt", "small_net_amt"),
-]
-
-# 净流入额列名 → 占比列名映射
-_NET_TO_PCT: dict[str, str] = {
-    "huge_net_amt": "huge_net_pct",
-    "big_net_amt": "big_net_pct",
-    "mid_net_amt": "mid_net_pct",
-    "small_net_amt": "small_net_pct",
-}
-
 # 持久化配置
 _PERSIST_UPDATE_FIELDS = [
     "huge_buy_amt", "huge_sell_amt", "huge_net_amt", "huge_net_pct",
@@ -75,9 +44,6 @@ _PERSIST_CUSTOM_TRANSFORMS = {
     "trade_date": lambda v: date.fromisoformat(str(v)) if v and str(v) != "nan" else None,
 }
 
-# moneyflow 单次上限（Tushare 官方文档：单次最大提取6000行记录）
-_MONEYFLOW_ROW_LIMIT = 6000
-
 
 def _get_collector() -> TushareDataCollector:
     """延迟初始化 TushareDataCollector 单例。"""
@@ -85,91 +51,6 @@ def _get_collector() -> TushareDataCollector:
     if _collector is None:
         _collector = TushareDataCollector()
     return _collector
-
-
-def clean_fund_flow_data(df: pd.DataFrame) -> pd.DataFrame:
-    """资金流向数据清洗 — 列映射 + 派生字段计算。
-
-    1. 列名映射（moneyflow → FundFlowIndividual）
-    2. trade_date 格式统一 YYYY-MM-DD
-    3. 删除 trade_date 为空
-    4. 买卖金额列强制转 numeric
-    5. 计算各档净流入额
-    6. 计算主力净流入额
-    7. 计算各档占比
-    8. 计算主力占比
-    9. 数值列精度 4 位小数
-    10. 删除 symbol/trade_date 仍有 NaN 的行
-    """
-    amount_cols = [
-        "huge_buy_amt", "huge_sell_amt",
-        "big_buy_amt", "big_sell_amt",
-        "mid_buy_amt", "mid_sell_amt",
-        "small_buy_amt", "small_sell_amt",
-        "net_mf_amt",
-    ]
-    all_numeric_cols = [
-        *amount_cols,
-        "main_net_amt", "main_net_pct",
-        "huge_net_amt", "huge_net_pct",
-        "big_net_amt", "big_net_pct",
-        "mid_net_amt", "mid_net_pct",
-        "small_net_amt", "small_net_pct",
-    ]
-
-    # 1. 列名映射
-    df = df.rename(columns=_COLUMN_MAPPING)
-
-    # 2. trade_date 格式统一
-    if "trade_date" in df.columns:
-        df["trade_date"] = pd.to_datetime(df["trade_date"], format="%Y%m%d").dt.strftime("%Y-%m-%d")
-
-    # 3. 删除 trade_date 为空
-    df = df.dropna(subset=["trade_date"])
-    if df.empty:
-        return df
-
-    # 4. 买卖金额列强制转 numeric
-    for col in amount_cols:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-
-    # 5. 计算各档净流入额
-    for buy_col, sell_col, net_col in _BUY_SELL_PAIRS:
-        if buy_col in df.columns and sell_col in df.columns:
-            df[net_col] = df[buy_col] - df[sell_col]
-
-    # 6. 主力净流入额
-    if "huge_net_amt" in df.columns and "big_net_amt" in df.columns:
-        df["main_net_amt"] = df["huge_net_amt"] + df["big_net_amt"]
-
-    # 7. 各档占比
-    for buy_col, sell_col, net_col in _BUY_SELL_PAIRS:
-        pct_col = _NET_TO_PCT.get(net_col)
-        if pct_col and buy_col in df.columns and sell_col in df.columns and net_col in df.columns:
-            total = df[buy_col] + df[sell_col]
-            df[pct_col] = (df[net_col] / total * 100).where(total != 0, 0)
-
-    # 8. 主力占比
-    required = ("main_net_amt", "huge_buy_amt", "huge_sell_amt", "big_buy_amt", "big_sell_amt")
-    if all(c in df.columns for c in required):
-        main_total = df["huge_buy_amt"] + df["huge_sell_amt"] + df["big_buy_amt"] + df["big_sell_amt"]
-        df["main_net_pct"] = (df["main_net_amt"] / main_total * 100).where(main_total != 0, 0)
-
-    # 9. 数值列精度
-    for col in all_numeric_cols:
-        if col in df.columns:
-            df[col] = df[col].round(4)
-
-    # 10. 删除关键列 NaN
-    df = df.dropna(subset=["symbol", "trade_date"])
-
-    return df.reset_index(drop=True)
-
-
-def _is_bj_symbol(symbol: str) -> bool:
-    """判断是否为北交所标的。"""
-    return symbol.endswith(".BJ")
 
 
 def clean_fund_flow_dc_data(df: pd.DataFrame) -> pd.DataFrame:
@@ -316,33 +197,13 @@ class FundFlowIncrementalStage:
         """处理单个交易日：采集→清洗→持久化→更新标的水位。"""
         ts_date = trade_date.strftime("%Y%m%d")
 
-        frames: list[pd.DataFrame] = []
-
-        # 采集沪深 A 股（moneyflow 不含北交所）
-        raw_szsh = await _get_collector().fetch_moneyflow(trade_date=ts_date)
-        if raw_szsh is not None and not raw_szsh.empty:
-            if len(raw_szsh) >= _MONEYFLOW_ROW_LIMIT:
-                logger.warning(
-                    "[fund_flow.incremental] 返回 %d 条达到上限 %d，可能存在截断: %s",
-                    len(raw_szsh), _MONEYFLOW_ROW_LIMIT, trade_date,
-                )
-                raw_szsh = await self._supplement_missing(raw_szsh, ts_date)
-            cleaned_szsh = clean_fund_flow_data(raw_szsh)
-            if not cleaned_szsh.empty:
-                frames.append(cleaned_szsh)
-
-        # 北交所单独从 moneyflow_dc 采集
-        raw_bj = await self._fetch_bj_moneyflow_dc(trade_date)
-        if raw_bj is not None and not raw_bj.empty:
-            cleaned_bj = clean_fund_flow_dc_data(raw_bj)
-            if not cleaned_bj.empty:
-                frames.append(cleaned_bj)
-
-        if not frames:
+        # moneyflow_dc 按交易日全市场采集
+        raw = await _get_collector().fetch_moneyflow_dc(trade_date=ts_date)
+        if raw is None or raw.empty:
             logger.debug("[fund_flow.incremental] 无数据: %s", trade_date)
             return 0
 
-        df = pd.concat(frames, ignore_index=True)
+        df = clean_fund_flow_dc_data(raw)
         if df.empty:
             return 0
 
@@ -362,57 +223,6 @@ class FundFlowIncrementalStage:
             await self._update_item_watermarks(df, trade_date)
 
         return count
-
-    async def _supplement_missing(self, existing_df: pd.DataFrame, ts_date: str) -> pd.DataFrame:
-        """当返回达到上限时，按标的批次补采缺失数据。"""
-        existing_codes = set()
-        if "ts_code" in existing_df.columns:
-            existing_codes = set(existing_df["ts_code"].tolist())
-
-        # 获取全市场标的，找出缺失的
-        from xqtrader.domain.security.models import Security  # noqa: PLC0415
-
-        all_securities = await Security.filter(list_status="L")
-        all_codes = {s.symbol for s in all_securities if not _is_bj_symbol(s.symbol)}
-        missing_codes = all_codes - existing_codes
-
-        if not missing_codes:
-            return existing_df
-
-        logger.info(
-            "[fund_flow.incremental] 补采缺失标的: date=%s missing=%d",
-            ts_date, len(missing_codes),
-        )
-
-        # 按批次补采（每批 50 支，减少 API 调用次数）
-        missing_list = sorted(missing_codes)
-        batch_size = 50
-        for i in range(0, len(missing_list), batch_size):
-            batch = missing_list[i:i + batch_size]
-            batch_str = ",".join(batch)
-            try:
-                extra = await _get_collector().fetch_moneyflow(ts_code=batch_str, trade_date=ts_date)
-                if extra is not None and not extra.empty:
-                    existing_df = pd.concat([existing_df, extra], ignore_index=True)
-            except Exception as e:
-                logger.warning(
-                    "[fund_flow.incremental] 批量补采失败 batch=%d/%d: %s",
-                    i // batch_size + 1, (len(missing_list) + batch_size - 1) // batch_size, e,
-                )
-
-        return existing_df
-
-    @staticmethod
-    async def _fetch_bj_moneyflow_dc(trade_date: date) -> pd.DataFrame:
-        """采集北交所个股资金流向（moneyflow_dc 按交易日全量后过滤 .BJ）。"""
-        ts_date = trade_date.strftime("%Y%m%d")
-        raw = await _get_collector().fetch_moneyflow_dc(trade_date=ts_date)
-        if raw is None or raw.empty or "ts_code" not in raw.columns:
-            return pd.DataFrame()
-        bj_df = raw[raw["ts_code"].str.endswith(".BJ")].copy()
-        if bj_df.empty:
-            logger.debug("[fund_flow.incremental] 北交所无数据: %s", trade_date)
-        return bj_df
 
     @staticmethod
     async def _get_trade_dates(start_date: date, end_date: date) -> list[date]:

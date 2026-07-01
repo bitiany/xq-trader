@@ -22,9 +22,14 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 import pandas as pd
 
 from xqtrader.domain.factor.base import FactorPlugin
+
+# 资金流向派生因子继承数据源起始日期限制（moneyflow_dc 自 2023-09-11 起）
+_FUND_FLOW_DATA_START = date(2023, 9, 11)
 
 
 class ZMainNetPctFactor(FactorPlugin):
@@ -47,6 +52,7 @@ class ZMainNetPctFactor(FactorPlugin):
     min_periods: int = 1
     requires_full_history: bool = False
     data_origin: str = "derived"
+    data_start_date: date = _FUND_FLOW_DATA_START
     update_freq: str = "daily"
     compute_engine: str = "cross_section"
     tags: str = "cross_section,z_score"

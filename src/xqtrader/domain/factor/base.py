@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any
 
 import pandas as pd
@@ -31,6 +32,7 @@ class FactorDefinition:
     compute_module: str = ""
     params: dict[str, Any] = field(default_factory=dict)
     data_origin: str = ""
+    data_start_date: date | None = None
     update_freq: str = "daily"
     compute_engine: str = "plugin"
     report_lag_days: int = 0
@@ -75,6 +77,7 @@ class FactorPlugin(ABC):
     skip_preprocess: bool = False
     composite_method: str = ""
     data_origin: str = "computed"
+    data_start_date: date | None = None
     update_freq: str = "daily"
     compute_engine: str = "plugin"
     report_lag_days: int = 0
@@ -108,6 +111,7 @@ class FactorPlugin(ABC):
             compute_module=f"{self.__class__.__module__}:{self.__class__.__name__}",
             params=dict(self.params),
             data_origin=self.data_origin,
+            data_start_date=self.data_start_date,
             update_freq=self.update_freq,
             compute_engine=self.compute_engine,
             report_lag_days=self.report_lag_days,

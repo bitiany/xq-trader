@@ -13,9 +13,11 @@ from datetime import date, timedelta
 from typing import Any
 
 import numpy as np
+from sqlalchemy import text
 
 from framework.commons.concurrent import ConcurrentRunner
 from framework.commons.logger import get_logger
+from framework.dal.enginee import engines_manager
 from framework.scheduler.base_task import BaseTask
 from worker.plugins.utils import parse_list_param
 from xqtrader.domain.factor.models.factor_pool import FacFactorPool
@@ -93,6 +95,10 @@ class AlphaSynthesizeTask(BaseTask):
         total_upserted = 0
         synthesized_pools: list[str] = []
 
+        # 持久化前预解压目标时间范围的已压缩 chunks
+        # 合成任务写入 5 年数据，upsert 命中已压缩 chunk 会触发同步解压导致写入变慢
+        await self._decompress_factor_chunks(start_dt, end_dt)
+
         for pool_idx, pool in enumerate(pools, 1):
             # 解析该样本池的输入因子
             pool_factor_ids = factor_ids or await self._resolve_pool_factors(pool.pool_id)
@@ -151,6 +157,64 @@ class AlphaSynthesizeTask(BaseTask):
             "total_upserted": total_upserted,
             "pools": synthesized_pools,
         }
+
+    @staticmethod
+    async def _decompress_factor_chunks(start_date: date, end_date: date) -> int:
+        """预解压 fac_factor_value 表中目标时间范围的已压缩 chunks。
+
+        合成任务写入 5 年数据时，upsert 命中已压缩 chunk 会触发同步解压，
+        导致写入性能急剧下降。持久化前预解压可避免此问题；
+        解压后的 chunks 由晚间 23:00 的压缩任务按 age 策略重新压缩。
+
+        Returns:
+            解压的 chunk 数量
+        """
+        engine = engines_manager.get_engine("stock")
+        query_sql = text("""
+            SELECT chunk_schema, chunk_name
+            FROM timescaledb_information.chunks
+            WHERE hypertable_name = 'fac_factor_value'
+              AND is_compressed = true
+              AND range_end >= :start_date
+              AND range_start <= :end_date
+            ORDER BY range_start
+        """)
+
+        async with engine.begin() as conn:
+            result = await conn.execute(
+                query_sql, {"start_date": start_date, "end_date": end_date},
+            )
+            chunks = result.fetchall()
+
+        if not chunks:
+            logger.info(
+                "[alpha.synth] 无需预解压的 chunks (range=%s~%s)",
+                start_date, end_date,
+            )
+            return 0
+
+        logger.info(
+            "[alpha.synth] 预解压 %d 个已压缩 chunks (range=%s~%s)",
+            len(chunks), start_date, end_date,
+        )
+
+        count = 0
+        for chunk_schema, chunk_name in chunks:
+            qualified = f'"{chunk_schema}"."{chunk_name}"'
+            try:
+                async with engine.begin() as conn:
+                    await conn.execute(
+                        text(f"SELECT decompress_chunk('{qualified}'::regclass)"),
+                    )
+                count += 1
+                logger.info("[alpha.synth] 解压 chunk: %s", qualified)
+            except Exception as e:
+                logger.warning(
+                    "[alpha.synth] 解压 chunk 失败 %s: %s", qualified, e, exc_info=True,
+                )
+
+        logger.info("[alpha.synth] 预解压完成: %d/%d 成功", count, len(chunks))
+        return count
 
     @staticmethod
     async def _resolve_pool_factors(pool_id: str) -> list[str]:

@@ -20,6 +20,7 @@ import pandas as pd
 from scipy.stats import spearmanr  # type: ignore[import-untyped]
 
 from framework.commons.logger import get_logger
+from xqtrader.domain.factor.models.factor_registry import FacFactorRegistry
 from xqtrader.domain.factor.services.cross_section_reader import CrossSectionReader
 from xqtrader.domain.factor.services.factor_dedup import dedup_by_correlation
 
@@ -148,10 +149,16 @@ class AlphaSynthesizer:
 
         # 3. 逐因子加载截面面板（截面预处理：缺失值填充→MAD→Z-score→行业+市值中性化→再Z-score）
         # 门禁管控：因子数据必须完整（数据量≥1000行、覆盖率≥80%、无 Infinity），否则跳过
+        # 因子级 start_date：受数据源限制的因子（如 fund_flow 自 2023-09-11 起）使用自身起始日期
+        data_start_map = await self._load_data_start_map(factor_ids)
+
         factor_panels: dict[str, pd.Series] = {}
         for fid in factor_ids:
+            factor_data_start = data_start_map.get(fid)
+            effective_start = max(start_date, factor_data_start) if factor_data_start else start_date
+
             panel = await self._reader.load_single_factor_panel(
-                start_date=start_date,
+                start_date=effective_start,
                 end_date=end_date,
                 pool_id=pool_id,
                 symbols=symbols,
@@ -265,6 +272,18 @@ class AlphaSynthesizer:
             )
 
         return results
+
+    @staticmethod
+    async def _load_data_start_map(factor_ids: list[str]) -> dict[str, date | None]:
+        """从注册表加载因子数据起始日期。
+
+        受数据源限制的因子（如 fund_flow 自 2023-09-11 起）有非 NULL 的 data_start_date，
+        用于在加载因子面板时取 max(global_start, factor_data_start) 避免覆盖率门禁拦截。
+        """
+        if not factor_ids:
+            return {}
+        rows = await FacFactorRegistry.filter(factor_id__in=factor_ids)
+        return {r.factor_id: r.data_start_date for r in rows}
 
     @staticmethod
     async def _load_icir_rank(pool_id: str, factor_ids: list[str]) -> dict[str, float]:

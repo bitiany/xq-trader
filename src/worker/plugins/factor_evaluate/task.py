@@ -71,6 +71,7 @@ class _EvalContext:
     membership: Any
     returns_panel: Any
     direction_map: dict[str, str]
+    data_start_map: dict[str, date | None]
     reader: CrossSectionReader
     ic_calc: ICCalculator
     backtester: LayeredBacktester
@@ -285,11 +286,11 @@ class FactorEvaluateTask(BaseTask):
             logger.warning("[factor.evaluate] 样本池 %s 收益率数据为空，跳过", pool_id)
             return 0
 
-        # 预加载因子方向（DESC/ASC）：ASC 因子需翻转符号使"高值→高收益"成立
+        # 预加载因子方向（DESC/ASC）和数据起始日期：ASC 因子需翻转符号使"高值→高收益"成立
         t0 = time.monotonic()
-        direction_map = await self._load_direction_map(factor_ids)
+        direction_map, data_start_map = await self._load_factor_metadata(factor_ids)
         logger.info(
-            "[factor.evaluate] pool=%s 因子方向加载: %d 条 耗时=%.2fs",
+            "[factor.evaluate] pool=%s 因子元数据加载: %d 条 耗时=%.2fs",
             pool_id, len(direction_map), time.monotonic() - t0,
         )
 
@@ -307,6 +308,7 @@ class FactorEvaluateTask(BaseTask):
             membership=membership,
             returns_panel=returns_panel,
             direction_map=direction_map,
+            data_start_map=data_start_map,
             reader=reader,
             ic_calc=ic_calc,
             backtester=backtester,
@@ -350,9 +352,14 @@ class FactorEvaluateTask(BaseTask):
         )
 
         # 加载单因子截面面板（含截面预处理：缺失值填充→MAD→Z-score→行业+市值中性化→再Z-score）
+        # 因子级 start_date：受数据源限制的因子（如 fund_flow 自 2023-09-11 起）使用自身起始日期，
+        # 避免在 5 年默认窗口中因覆盖率不足 80% 被门禁拦截
+        factor_data_start = ctx.data_start_map.get(factor_id)
+        effective_start = max(ctx.start_date, factor_data_start) if factor_data_start else ctx.start_date
+
         t0 = time.monotonic()
         factor_panel = await reader.load_single_factor_panel(
-            start_date=ctx.start_date,
+            start_date=effective_start,
             end_date=ctx.end_date,
             pool_id=ctx.pool_id,
             symbols=ctx.symbols,
@@ -462,19 +469,25 @@ class FactorEvaluateTask(BaseTask):
         return stats
 
     @staticmethod
-    async def _load_direction_map(factor_ids: list[str]) -> dict[str, str]:
-        """批量加载因子方向（DESC/ASC），用于评估时翻转 ASC 因子符号。
+    async def _load_factor_metadata(
+        factor_ids: list[str],
+    ) -> tuple[dict[str, str], dict[str, date | None]]:
+        """批量加载因子方向（DESC/ASC）和数据起始日期。
 
         Args:
             factor_ids: 因子 ID 列表
 
         Returns:
-            {factor_id: direction}，缺失 direction 视为 DESC
+            (direction_map, data_start_map)
+            - direction_map: {factor_id: direction}，缺失 direction 视为 DESC
+            - data_start_map: {factor_id: data_start_date}，NULL 表示无限制
         """
         if not factor_ids:
-            return {}
+            return {}, {}
         rows = await FacFactorRegistry.filter(factor_id__in=factor_ids)
-        return {r.factor_id: (r.direction or "DESC") for r in rows}
+        direction_map = {r.factor_id: (r.direction or "DESC") for r in rows}
+        data_start_map = {r.factor_id: r.data_start_date for r in rows}
+        return direction_map, data_start_map
 
     @staticmethod
     def _calc_factor_stats(
