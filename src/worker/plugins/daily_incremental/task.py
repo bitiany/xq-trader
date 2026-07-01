@@ -1,17 +1,10 @@
-"""日行情、资金流向、每日指标、指数行情与申万行业行情增量采集任务。
+"""全市场个股日频增量采集任务（日 K 线 / 资金流向 / 每日指标）。
 
-按日期增量采集全市场日行情K线、资金流向、每日指标、指数行情和申万行业行情数据，
-每个数据类型独立完成采集→清洗→持久化→更新水位闭环。
+按日期增量采集全市场个股日行情K线、资金流向、每日指标，
+每个 Stage 独立完成采集→清洗→持久化→更新水位闭环。
 
-季度财务数据（fina_indicator / income_statement / balance_sheet）由独立的季频管线
-（market.financial_indicator_collect 等）按财报季调度采集，不在此日频任务中处理。
-
-水位策略：
-  - 每个数据类型独立检查水位，缺失水位的 Stage 跳过执行
-  - 若指定 start_date，则所有 Stage 统一使用该日期
-  - 若未指定 start_date，则各 Stage 按自身 data_type 的最大水位日期确定起始日期
-  - 所有 Stage 均无水位且未指定 start_date → 报错
-  - 标的级水位（与回补任务共享）用于过滤已采集数据，采集后按标的更新
+指数（market.index_daily_collect）与申万行业（market.sw_daily_collect）
+为独立插件任务；日频统一编排在 schedules/daily_pipeline.yml，仅执行顺序、无数据依赖。
 """
 
 from __future__ import annotations
@@ -30,12 +23,6 @@ from worker.plugins.daily_incremental.stages.daily_kline_stage import (
 from worker.plugins.daily_incremental.stages.fund_flow_stage import (
     FundFlowIncrementalStage,
 )
-from worker.plugins.daily_incremental.stages.index_daily_stage import (
-    IndexDailyIncrementalStage,
-)
-from worker.plugins.daily_incremental.stages.sw_daily_stage import (
-    SwDailyIncrementalStage,
-)
 from xqtrader.domain.security.models import Security
 from xqtrader.domain.watermark.models.collect_watermark import CollectWatermark
 
@@ -43,11 +30,11 @@ logger = get_logger(__name__)
 
 
 class DailyIncrementalTask(BaseTask):
-    """日行情、资金流向、每日指标、指数行情与申万行业行情增量采集任务。
+    """全市场个股日频增量采集（日 K 线 + 资金流向 + 每日指标）。
 
     入参：
       - start_date: 采集起始日期（格式 YYYY-MM-DD，为空时按各 Stage 标的级水位）
-      - kline_batch_size: QMT 标的分片大小（默认 50）
+      - kline_batch_size: QMT 标的分片大小（默认 500）
     """
     task_name = "market.daily_incremental_collect"
 
@@ -55,10 +42,8 @@ class DailyIncrementalTask(BaseTask):
         start_date_str: str | None = kwargs.get("start_date")
         kline_batch_size: int = kwargs.get("kline_batch_size", 500)
 
-        # end_date 默认取当前日期
         end_date = date.today()
 
-        # 各 Stage 独立确定 start_date
         kline_start = await self._resolve_stage_start(
             DailyKlineIncrementalStage.DATA_TYPE,
             start_date_str,
@@ -71,35 +56,23 @@ class DailyIncrementalTask(BaseTask):
             DailyIndicatorIncrementalStage.DATA_TYPE,
             start_date_str,
         )
-        index_start = await self._resolve_stage_start(
-            IndexDailyIncrementalStage.DATA_TYPE,
-            start_date_str,
-        )
-        sw_start = await self._resolve_stage_start(
-            SwDailyIncrementalStage.DATA_TYPE,
-            start_date_str,
-        )
 
-        # 所有 Stage 均无水位且未指定 start_date → 报错
         all_no_watermark = (
             kline_start is None
             and ff_start is None
             and indicator_start is None
-            and index_start is None
-            and sw_start is None
         )
         if all_no_watermark:
             return {
                 "status": "ERROR",
                 "message": (
                     "无水位记录，请先执行全量回补任务"
-                    "（daily_kline / fund_flow / daily_indicator / index_daily / sw_daily）"
+                    "（daily_kline / fund_flow / daily_indicator）"
                 ),
             }
 
         results: dict[str, Any] = {"status": "SUCCESS", "end_date": str(end_date)}
 
-        # Stage 1: 日行情增量
         if kline_start is not None and kline_start < end_date:
             logger.info(
                 "[daily.incremental] 日行情增量: %s~%s", kline_start, end_date,
@@ -110,7 +83,6 @@ class DailyIncrementalTask(BaseTask):
             logger.info("[daily.incremental] 日行情: 无水位或已最新，跳过")
             results["daily_kline"] = {"status": "SKIPPED"}
 
-        # Stage 2: 资金流向增量
         if ff_start is not None and ff_start < end_date:
             logger.info(
                 "[daily.incremental] 资金流向增量: %s~%s", ff_start, end_date,
@@ -121,7 +93,6 @@ class DailyIncrementalTask(BaseTask):
             logger.info("[daily.incremental] 资金流向: 无水位或已最新，跳过")
             results["fund_flow"] = {"status": "SKIPPED"}
 
-        # Stage 3: 每日指标增量
         if indicator_start is not None and indicator_start < end_date:
             logger.info(
                 "[daily.incremental] 每日指标增量: %s~%s", indicator_start, end_date,
@@ -132,28 +103,6 @@ class DailyIncrementalTask(BaseTask):
             logger.info("[daily.incremental] 每日指标: 无水位或已最新，跳过")
             results["daily_indicator"] = {"status": "SKIPPED"}
 
-        # Stage 4: 指数行情增量
-        if index_start is not None and index_start < end_date:
-            logger.info(
-                "[daily.incremental] 指数行情增量: %s~%s", index_start, end_date,
-            )
-            index_stage = IndexDailyIncrementalStage()
-            results["index_daily"] = await index_stage.execute(index_start, end_date)
-        else:
-            logger.info("[daily.incremental] 指数行情: 无水位或已最新，跳过")
-            results["index_daily"] = {"status": "SKIPPED"}
-
-        # Stage 5: 申万行业行情增量
-        if sw_start is not None and sw_start < end_date:
-            logger.info(
-                "[daily.incremental] 申万行业行情增量: %s~%s", sw_start, end_date,
-            )
-            sw_stage = SwDailyIncrementalStage()
-            results["sw_daily"] = await sw_stage.execute(sw_start, end_date)
-        else:
-            logger.info("[daily.incremental] 申万行业行情: 无水位或已最新，跳过")
-            results["sw_daily"] = {"status": "SKIPPED"}
-
         logger.info("[daily.incremental] 全部完成: %s", results)
         return results
 
@@ -162,16 +111,10 @@ class DailyIncrementalTask(BaseTask):
         data_type: str,
         start_date_str: str | None,
     ) -> date | None:
-        """确定单个 Stage 的起始日期。
-
-        优先使用指定的 start_date；否则查询该 data_type 下**仅上市标的**的最小水位日期。
-        退市标的（list_status=D）的水位停留在退市日，不应拉低整体起始日期。
-        无水位返回 None（该 Stage 将被跳过）。
-        """
+        """确定单个 Stage 的起始日期（仅适用于上市证券类 data_type）。"""
         if start_date_str:
             return date.fromisoformat(start_date_str)
 
-        # 仅取上市标的的 symbol 集合
         listed = await Security.filter(list_status="L")
         listed_codes = {s.symbol for s in listed}
 

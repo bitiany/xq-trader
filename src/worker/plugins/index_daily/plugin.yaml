@@ -1,10 +1,10 @@
 name: index_daily
 celery_task_name: market.index_daily_collect
 version: "1.0.0"
-task_name: 指数日线行情采集
-task_name_en: Index Daily Kline Collection
-description: 逐标的采集全市场指数日线行情数据，数据源为QMT，支持增量采集和水位管理
-description_en: Per-security collection of index daily kline data from QMT with incremental collection and watermark management
+task_name: 全市场指数日线增量采集
+task_name_en: Index Universe Daily Collection
+description: 指数维度独立插件：逐标的采集全市场指数日线（Tushare index_daily），下载→清洗→持久化→水位更新均在任务内闭环。日频编排在 schedules/daily_pipeline.yml
+description_en: Index universe plugin — per-index daily kline from Tushare with full in-task watermark lifecycle; orchestrated in daily_pipeline.yml
 category: io
 task_type: on_demand
 queue: market

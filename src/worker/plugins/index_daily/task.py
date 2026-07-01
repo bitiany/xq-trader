@@ -1,23 +1,14 @@
 """指数日线行情采集任务。
 
-数据源策略：双数据源 fallback
-  - 主数据源：QMT (xtdata)
-  - fallback：Tushare index_daily（QMT 不支持或无数据时启用）
-
+数据源：Tushare (index_daily)
 管线流程（每个标的串行执行）：
   WatermarkAspect(前切) → DownloadStage → CleanStage → PersistStage → WatermarkAspect(后切)
-
-水位管理（WatermarkAspect）：
-  - 前切：若指定 collect_date 则以该日期为起始；否则查询水位日期作为增量起始时间
-  - 后切：持久化成功后按数据实际最新日期更新水位
 """
 
 from __future__ import annotations
 
 from datetime import date as date_type
 from typing import Any
-
-import pandas as pd
 
 from framework.commons.logger import get_logger
 from framework.pipeline import (
@@ -30,18 +21,16 @@ from framework.pipeline import (
 )
 from framework.scheduler.base_task import BaseTask
 from worker.plugins.aspects import WatermarkAspect
-from worker.plugins.daily_incremental.stages.index_daily_stage import (
+from worker.plugins.index_daily.kline_ops import (
     clean_index_kline_data,
     persist_index_kline_data,
 )
-from xqtrader.broker.services.qmt_data_collector import QmtDataCollector
 from xqtrader.broker.services.tushare_data_collector import TushareDataCollector
 from xqtrader.domain.index.models.index import Index
 
 logger = get_logger(__name__)
 
-_qmt_collector = QmtDataCollector()
-_tushare_collector = TushareDataCollector()
+_collector = TushareDataCollector()
 
 
 class IndexDailyError(PipelineError):
@@ -57,7 +46,7 @@ class PersistError(IndexDailyError):
 
 
 class DownloadStage(Stage):
-    """下载阶段 — 双数据源 fallback：先 QMT，无数据或数据过期时切 Tushare。"""
+    """下载阶段 — 调用 Tushare index_daily 获取指数日线行情。"""
 
     @property
     def name(self) -> str:
@@ -81,7 +70,11 @@ class DownloadStage(Stage):
             index_code, start_date, effective_end_date,
         )
         try:
-            df, source = await self._download_with_fallback(index_code, start_date, effective_end_date)
+            df = await _collector.fetch_index_daily(
+                ts_code=index_code,
+                start_date=start_date,
+                end_date=effective_end_date,
+            )
             if df is None or df.empty:
                 logger.info(
                     "[index_daily.collect] 无数据: %s range=%s~%s",
@@ -93,81 +86,15 @@ class DownloadStage(Stage):
             else:
                 ctx.set("download_data", df)
                 ctx.set("row_count", len(df))
-                ctx.set("data_source", source)
                 ctx.set("skip_persist", False)
                 logger.info(
-                    "[index_daily.collect] 下载完成: %s rows=%d source=%s range=%s~%s",
-                    index_code, len(df), source, start_date, effective_end_date,
+                    "[index_daily.collect] 下载完成: %s rows=%d range=%s~%s",
+                    index_code, len(df), start_date, effective_end_date,
                 )
 
             return StageResult.ok(data={"index_code": index_code, "rows": ctx.get("row_count", 0)})
         except Exception as e:
             raise DownloadError(f"下载失败 {index_code}: {e}") from e
-
-    @staticmethod
-    async def _download_with_fallback(
-        index_code: str, start_date: str, end_date: str,
-    ) -> tuple[pd.DataFrame | None, str]:
-        """双数据源下载：先 QMT，无数据或数据过期时 fallback Tushare。
-
-        QMT 数据过期判定：返回数据的最大交易日 <= 请求起始日期（水位日期），
-        表示 QMT 在水位日期之后无新增数据，需切换 Tushare 获取新增数据。
-        注：start_date 等于水位日期（非 +1 天），故使用 <= 而非 <。
-
-        Returns:
-            (DataFrame, source) — source 为 "qmt" 或 "tushare"；
-            若双源均无数据返回 (None, "")
-        """
-        # 1. 主数据源 QMT
-        try:
-            result = await _qmt_collector.fetch_kline_daily(
-                stock_list=[index_code],
-                start_time=start_date,
-                end_time=end_date,
-            )
-            df = result.get(index_code)
-            if df is not None and not df.empty:
-                qmt_max = DownloadStage._max_trade_date(df)
-                start_dt = pd.to_datetime(start_date, format="%Y%m%d", errors="coerce")
-                if qmt_max is not None and pd.notna(start_dt) and qmt_max <= start_dt:
-                    logger.info(
-                        "[index_daily.collect] QMT 数据过期(max=%s <= start=%s): %s, 切换 Tushare",
-                        qmt_max.strftime("%Y%m%d"), start_date, index_code,
-                    )
-                else:
-                    return df, "qmt"
-        except Exception as e:
-            logger.warning(
-                "[index_daily.collect] QMT 下载失败，切换 Tushare: %s err=%s",
-                index_code, e,
-            )
-
-        # 2. fallback：Tushare index_daily
-        try:
-            df = await _tushare_collector.fetch_index_daily(
-                ts_code=index_code,
-                start_date=start_date,
-                end_date=end_date,
-            )
-            if df is not None and not df.empty:
-                return df, "tushare"
-        except Exception as e:
-            logger.warning(
-                "[index_daily.collect] Tushare fallback 也失败: %s err=%s",
-                index_code, e,
-            )
-        return None, ""
-
-    @staticmethod
-    def _max_trade_date(df: pd.DataFrame) -> pd.Timestamp | None:
-        """获取 DataFrame 中 trade_date 列的最大值，解析失败或无该列返回 None。
-
-        QMT 与 Tushare 的 trade_date 均为 YYYY-MM-DD 字符串格式。
-        """
-        if df.empty or "trade_date" not in df.columns:
-            return None
-        max_dt = pd.to_datetime(df["trade_date"], errors="coerce").max()
-        return max_dt if pd.notna(max_dt) else None
 
 
 class CleanStage(Stage):
@@ -218,21 +145,19 @@ class PersistStage(Stage):
             return StageResult.ok(data={"index_code": index_code, "persisted": 0})
 
         try:
-            source = ctx.get("data_source", "qmt")
             df["symbol"] = index_code
-            df["source"] = source
+            df["source"] = "tushare"
 
             count = await persist_index_kline_data(df)
 
             ctx.set("persisted_count", count)
-            # 记录数据的最新日期，供水位更新使用
             if count > 0 and "trade_date" in df.columns:
                 max_td = df["trade_date"].map(
                     lambda v: date_type.fromisoformat(str(v))
                 ).max()
                 ctx.set("max_trade_date", max_td)
 
-            logger.debug("[index_daily.collect] 持久化完成: %s rows=%d source=%s", index_code, count, source)
+            logger.debug("[index_daily.collect] 持久化完成: %s rows=%d", index_code, count)
             return StageResult.ok(data={"index_code": index_code, "persisted": count})
         except Exception as e:
             raise PersistError(f"持久化失败 {index_code}: {e}") from e
@@ -250,7 +175,8 @@ class IndexDailyCollectTask(BaseTask):
     """
 
     task_name = "market.index_daily_collect"
-    description = "指数日线行情采集（管道引擎并发）"
+    description = "指数日线行情采集（Tushare，管道引擎并发）"
+
     async def _run_impl(self, **kwargs: Any) -> dict[str, Any]:
         data_type = kwargs.get("data_type", "index_daily")
         concurrency = kwargs.get("concurrency", 5)
@@ -258,19 +184,16 @@ class IndexDailyCollectTask(BaseTask):
         max_count: int = kwargs.get("max_count", 0)
         collect_date: str | None = kwargs.get("collect_date")
 
-        # 获取指数代码列表
         if not index_codes:
             index_codes = await self._get_all_index_codes()
             if not index_codes:
                 logger.warning("[index_daily.collect] 未找到任何指数代码")
                 return {"total": 0, "succeeded": 0, "failed": 0}
 
-        # 限制标的数量（用于测试）
         if max_count > 0 and len(index_codes) > max_count:
             index_codes = index_codes[:max_count]
             logger.debug("[index_daily.collect] 限制标的数量: max_count=%d", max_count)
 
-        # 构建全局上下文
         global_ctx: dict[str, Any] = {}
         if collect_date:
             global_ctx["collect_date"] = collect_date
@@ -280,14 +203,12 @@ class IndexDailyCollectTask(BaseTask):
             data_type, concurrency, len(index_codes), collect_date or "按水位",
         )
 
-        # 组装管线: download → clean → persist
         pipeline = Pipeline(
             name=data_type,
             stages=[DownloadStage(), CleanStage(), PersistStage()],
             aspects=[WatermarkAspect(data_type=data_type)],
         )
 
-        # 执行管道引擎
         engine = PipelineEngine(
             pipelines=[pipeline],
             concurrency=concurrency,

@@ -25,7 +25,7 @@ from framework.pipeline import (
 )
 from framework.scheduler.base_task import BaseTask
 from worker.plugins.aspects import WatermarkAspect
-from worker.plugins.daily_incremental.stages.sw_daily_stage import (
+from worker.plugins.sw_daily.kline_ops import (
     clean_sw_daily_data,
     persist_sw_daily_data,
 )

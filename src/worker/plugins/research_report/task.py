@@ -6,14 +6,15 @@
 
 字段映射（东财 API → ResearchReport）：
   infoCode → info_code
-  stockCode → symbol
+  stockCode → symbol（被入参 symbol 带后缀格式覆盖，如 600519.SH）
   title → title
   orgSName → org_name
   researcher → researcher
   emRatingName → rating
-  ratingChangeName → rating_change
+  ratingChange (int) → rating_change（转中文：1=上调 2=下调 3=维持 4=首次）
   publishDate → publish_date
-  industryName → industry
+  industryName → industry（空时回退 indvInduName）
+  predictXxxEps/Pe + actualXxxEps → eps_forecast（聚合为 list[dict]）
 
 PDF 下载：
   - 路径：{WORKSPACE_ROOT}/report/{symbol}/{info_code}.pdf
@@ -49,6 +50,7 @@ from framework.pipeline import (
 )
 from framework.scheduler.base_task import BaseTask
 from worker.plugins.aspects import WatermarkAspect
+from worker.plugins.utils import parse_list_param
 from xqtrader.broker.services.akshare_data_collector import AkshareDataCollector
 from xqtrader.domain.research.models.research_report import ResearchReport
 from xqtrader.domain.security.models import Security
@@ -65,7 +67,8 @@ _PDF_RELATIVE_PREFIX = "report"
 # ORM 模型中可被 upsert 更新的字段（不含 info_code 主键、id/created_at 审计字段）
 _PERSIST_UPDATE_FIELDS = [
     "symbol", "title", "org_name", "researcher", "rating", "rating_change",
-    "publish_date", "industry", "pdf_url", "pdf_path", "updated_at",
+    "publish_date", "industry", "eps_forecast", "pdf_url", "pdf_path",
+    "summary", "updated_at",
 ]
 
 
@@ -166,6 +169,8 @@ async def persist_research_report_data(
             if v and str(v) not in {"nan", "None", "NaT"}
             else None
         ),
+        "eps_forecast": _normalize_eps_forecast,
+        "rating_change": _normalize_rating_change,
     }
     instances = DataFrameToModelConverter.convert(
         df=df,
@@ -190,6 +195,57 @@ async def persist_research_report_data(
             max_publish_date = max(valid_dates)
 
     return count, max_publish_date
+
+
+def _normalize_eps_forecast(value: Any) -> list[dict[str, Any]] | None:
+    """将 eps_forecast 规范化为 list[dict] 或 None。
+
+    DataFrameToModelConverter 对 JSONB 字段兜底转 str，
+    需通过 custom_transforms 显式保留 list 类型。
+    """
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except (ValueError, TypeError):
+        pass
+
+    if isinstance(value, list):
+        return value if value else None
+    return None
+
+
+# 东财 ratingChange（int）→ 中文评级变动
+_RATING_CHANGE_MAP: dict[int, str] = {
+    1: "上调",
+    2: "下调",
+    3: "维持",
+    4: "首次",
+}
+
+
+def _normalize_rating_change(value: Any) -> str | None:
+    """将 rating_change 规范化为中文字符串。
+
+    东财 API 返回 ratingChange 为 int（1=上调 2=下调 3=维持 4=首次），
+    ORM 字段 rating_change 为 String(16)。
+    """
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except (ValueError, TypeError):
+        pass
+
+    if isinstance(value, str) and value.strip() in {"", "nan", "None"}:
+        return None
+
+    try:
+        return _RATING_CHANGE_MAP.get(int(value))
+    except (ValueError, TypeError):
+        return None
 
 
 class ResearchReportError(PipelineError):
@@ -313,7 +369,7 @@ class ResearchReportCollectTask(BaseTask):
 
     async def _run_impl(self, **kwargs: Any) -> dict[str, Any]:
         concurrency = kwargs.get("concurrency", 3)
-        stock_codes: list[str] | None = kwargs.get("stock_codes")
+        stock_codes: list[str] | None = parse_list_param(kwargs.get("stock_codes"))
         max_count: int = kwargs.get("max_count", 0)
         collect_date: str | None = kwargs.get("collect_date")
         report_type: str = kwargs.get("report_type", "stock")

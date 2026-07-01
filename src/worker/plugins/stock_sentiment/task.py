@@ -4,7 +4,8 @@
 
 特点：
   - 市场级舆情（symbol='' 空串占位），不按标的循环
-  - 按日期采集（date_str 参数，YYYYMMDD 格式）
+  - stock_js_weibo_report 不支持按日期查询，只返回指定时间段的最新数据
+  - snapshot_date 取采集当天的日期
   - 写入 sdc_stock_sentiment 表，sentiment_type='weibo'
   - 复合唯一约束：snapshot_date + sentiment_type + symbol
 
@@ -23,7 +24,6 @@ from framework.commons.logger import get_logger
 from framework.scheduler.base_task import BaseTask
 from xqtrader.broker.services.akshare_data_collector import AkshareDataCollector
 from xqtrader.domain.research.models.stock_sentiment import StockSentiment
-from xqtrader.domain.watermark.services.watermark_service import WatermarkService
 
 logger = get_logger(__name__)
 
@@ -34,6 +34,9 @@ _PERSIST_UPDATE_FIELDS = [
     "heat_score", "sentiment_score", "positive_count", "negative_count",
     "neutral_count", "keywords", "summary", "updated_at",
 ]
+
+# 合法的时间周期值
+_VALID_TIME_PERIODS = {"CNHOUR2", "CNHOUR6", "CNHOUR12", "CNHOUR24", "CNDAY7", "CNDAY30"}
 
 
 def _get_collector() -> AkshareDataCollector:
@@ -49,59 +52,70 @@ def clean_sentiment_data(
     snapshot_date: date_type,
     sentiment_type: str,
 ) -> pd.DataFrame:
-    """舆情数据清洗 — 设置 snapshot_date / sentiment_type / symbol 字段。
+    """舆情数据清洗 — 将 akshare 原始数据聚合为单条快照。
 
-    akshare stock_js_weibo_report 返回字段（典型）：
-      日期 / 关键词 / 热度 / 正面 / 负面 / 中性
-    本任务将市场级舆情聚合为单条快照：
+    akshare stock_js_weibo_report 实际返回字段：
+      name: 股票/关键词名称（如"比亚迪"、"贵州茅台"）
+      rate: 情感评分（float，正值=正面/负值=负面，范围约 -5~+5）
+
+    聚合逻辑：
       - symbol 设为 ''（市场级，空串占位）
       - snapshot_date 设为入参日期
       - sentiment_type 设为 'weibo'
-      - 聚合热度/正负面计数
+      - sentiment_score = rate 平均值（整体情感倾向）
+      - positive_count = rate > 0 的数量
+      - negative_count = rate < 0 的数量
+      - neutral_count = rate == 0 的数量
+      - heat_score = |rate| 平均值（整体热度）
+      - keywords = 前 20 个标的（name + rate）
     """
     if df.empty:
         return df
 
-    # 聚合为单行快照（市场级）
-    # akshare 返回的是关键词列表，每行一个关键词；聚合后取总热度、正/负/中性提及数总和
     snapshot: dict[str, Any] = {
         "snapshot_date": snapshot_date,
         "sentiment_type": sentiment_type,
         "symbol": "",
     }
 
-    # 尝试解析热度列
-    heat_cols = [c for c in df.columns if "热度" in str(c)]
-    if heat_cols:
-        snapshot["heat_score"] = float(pd.to_numeric(df[heat_cols[0]], errors="coerce").sum())
+    # 解析 name 和 rate 列
+    name_col = "name" if "name" in df.columns else df.columns[0]
+    rate_col = "rate" if "rate" in df.columns else (df.columns[1] if len(df.columns) > 1 else None)
 
-    # 尝试解析正/负/中性提及数
-    pos_cols = [c for c in df.columns if "正面" in str(c) or "积极" in str(c)]
-    neg_cols = [c for c in df.columns if "负面" in str(c) or "消极" in str(c)]
-    neu_cols = [c for c in df.columns if "中性" in str(c)]
-    if pos_cols:
-        snapshot["positive_count"] = int(pd.to_numeric(df[pos_cols[0]], errors="coerce").sum())
-    if neg_cols:
-        snapshot["negative_count"] = int(pd.to_numeric(df[neg_cols[0]], errors="coerce").sum())
-    if neu_cols:
-        snapshot["neutral_count"] = int(pd.to_numeric(df[neu_cols[0]], errors="coerce").sum())
+    if rate_col is not None:
+        rates = pd.to_numeric(df[rate_col], errors="coerce").dropna()
+        if not rates.empty:
+            snapshot["sentiment_score"] = float(rates.mean())
+            snapshot["positive_count"] = int((rates > 0).sum())
+            snapshot["negative_count"] = int((rates < 0).sum())
+            snapshot["neutral_count"] = int((rates == 0).sum())
+            snapshot["heat_score"] = float(rates.abs().mean())
 
-    # 关键词列表（取前 20 个热门关键词）
-    keyword_cols = [c for c in df.columns if "关键词" in str(c) or "词" in str(c)]
-    if keyword_cols:
-        keywords_series = df[keyword_cols[0]].dropna()
-        keywords = [
-            {"word": str(k), "count": 0}
-            for k in keywords_series.head(20)
-            if str(k) not in {"nan", "None", ""}
-        ]
-        if keywords:
-            snapshot["keywords"] = keywords
+    # 关键词列表（取前 20 个，含 name 和 rate）
+    names = df[name_col].dropna()
+    rate_series = (
+        pd.to_numeric(df[rate_col], errors="coerce")
+        if rate_col is not None else None
+    )
+    keywords: list[dict[str, Any]] = []
+    for idx, n in names.head(20).items():
+        name_str = str(n)
+        if name_str in {"nan", "None", ""}:
+            continue
+        rate_value = 0.0
+        if rate_series is not None:
+            try:
+                rate_raw = rate_series.get(idx, 0.0)
+                if not pd.isna(rate_raw):
+                    rate_value = float(rate_raw)
+            except (ValueError, TypeError):
+                rate_value = 0.0
+        keywords.append({"word": name_str, "rate": rate_value})
 
-    # 摘要：拼接前 5 个关键词
-    if "keywords" in snapshot and snapshot["keywords"]:
-        words = [kw["word"] for kw in snapshot["keywords"][:5]]
-        snapshot["summary"] = "热门关键词: " + " / ".join(words)
+    if keywords:
+        snapshot["keywords"] = keywords
+        words = [str(kw["word"]) for kw in keywords[:5]]
+        snapshot["summary"] = "热门标的: " + " / ".join(words)
 
     return pd.DataFrame([snapshot])
 
@@ -159,8 +173,9 @@ class StockSentimentCollectTask(BaseTask):
     """市场舆情快照采集任务（akshare 微博财经舆情）。
 
     入参：
-      - collect_date: 采集日期（YYYYMMDD，为空时取最近交易日）
+      - collect_date: 快照日期（YYYYMMDD，为空时取当天）
       - sentiment_type: 舆情类型标识（默认 weibo）
+      - time_period: 时间周期（默认 CNDAY7，可选 CNHOUR2/CNHOUR6/CNHOUR12/CNHOUR24/CNDAY7/CNDAY30）
     """
 
     task_name = "market.stock_sentiment_collect"
@@ -169,31 +184,33 @@ class StockSentimentCollectTask(BaseTask):
     async def _run_impl(self, **kwargs: Any) -> dict[str, Any]:
         collect_date: str | None = kwargs.get("collect_date")
         sentiment_type: str = kwargs.get("sentiment_type", "weibo")
+        time_period: str = kwargs.get("time_period", "CNDAY7")
 
-        # 确定采集日期
+        # 校验 time_period
+        if time_period not in _VALID_TIME_PERIODS:
+            logger.warning(
+                "[stock_sentiment.collect] 无效的 time_period=%s，使用默认 CNDAY7",
+                time_period,
+            )
+            time_period = "CNDAY7"
+
+        # 确定快照日期（stock_js_weibo_report 不支持历史查询，snapshot_date 取当天）
         if collect_date:
             snapshot_date = _parse_date_str(collect_date)
-            date_str_param = collect_date.replace("-", "")
         else:
-            service = WatermarkService()
-            latest = await service.get_latest_trade_date()
-            if latest is None:
-                logger.warning("[stock_sentiment.collect] 未找到最近交易日")
-                return {"total": 0, "succeeded": 0, "failed": 0}
-            snapshot_date = latest
-            date_str_param = latest.strftime("%Y%m%d")
+            snapshot_date = date_type.today()
 
         if snapshot_date is None:
             logger.warning("[stock_sentiment.collect] 日期解析失败: %s", collect_date)
             return {"total": 0, "succeeded": 0, "failed": 0}
 
         logger.info(
-            "[stock_sentiment.collect] 开始采集: date=%s type=%s",
-            snapshot_date, sentiment_type,
+            "[stock_sentiment.collect] 开始采集: date=%s type=%s time_period=%s",
+            snapshot_date, sentiment_type, time_period,
         )
 
         try:
-            df = await _get_collector().fetch_weibo_sentiment(date_str=date_str_param)
+            df = await _get_collector().fetch_weibo_sentiment(time_period=time_period)
 
             if df is None or df.empty:
                 logger.info(
