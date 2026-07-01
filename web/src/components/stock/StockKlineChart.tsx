@@ -710,7 +710,7 @@ export function StockKlineChart({
       chart.off('globalout')
       chart.off('datazoom')
     }
-  }, [bars.length, barsKey, hasBars, option, zoomSourceKey])
+  }, [bars, barsKey, hasBars, option, zoomSourceKey])
 
   // Unmount cleanup: dispose chart and resize observer
   useEffect(() => {
