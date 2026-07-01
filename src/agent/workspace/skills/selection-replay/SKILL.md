@@ -33,7 +33,6 @@ keywords: 选股, 选股结果, 样本池, universe, 复盘, 候选
 
 - 不进行实时选股运行（避免 POST），只做历史结果复盘。
 - 因子值字段含 `factor_values_flat`，渲染时取前 5 个最具代表性的字段即可。
-- 输出遵守 AGENTS.md Markdown 排版规范，段落间最多 1 空行。
 
 ## 示例对话
 

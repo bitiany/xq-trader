@@ -35,7 +35,6 @@ keywords: 策略, 规则, rule, strategy, 规则组, 绑定
 
 - 不修改任何策略、规则与绑定（read-only）。
 - 输出时保留 `strategy_id`、`group_id`、`binding_id` 便于用户复查。
-- 输出遵守 AGENTS.md Markdown 排版规范，段落间最多 1 空行。
 
 ## 示例对话
 

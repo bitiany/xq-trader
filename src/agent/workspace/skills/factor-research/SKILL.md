@@ -37,7 +37,6 @@ keywords: 因子, factor, IC, 选股因子, 因子值, 因子分布
 
 - 因子值返回为列表，必要时按 `factor_value` 排序展示前 N 行。
 - 不要凭名称推断因子语义，必须先调 `mcp_xq_factors_xq_get_factor` 拿 description。
-- 输出遵守 AGENTS.md Markdown 排版规范，段落间最多 1 空行。
 
 ## 示例对话
 
