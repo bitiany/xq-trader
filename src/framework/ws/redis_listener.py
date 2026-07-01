@@ -10,7 +10,6 @@ from typing import Any
 from framework.commons.logger import get_logger
 from framework.commons.redis_client import redis_client
 from framework.ws.connection_manager import connection_manager
-from framework.ws.exceptions import WsConnectionError
 from framework.ws.messages import CHANNEL_PREFIX, WsServerMessage, WsServerMessageType
 
 logger = get_logger("ws.redis_listener")
@@ -50,8 +49,19 @@ class RedisListener:
 
     def stop(self) -> None:
         self._running = False
-        if self._pubsub:
-            self._pubsub.close()
+        pubsub = self._pubsub
+        if pubsub is not None:
+            try:
+                pubsub.punsubscribe()
+            except Exception:
+                logger.debug("RedisListener punsubscribe 失败", exc_info=True)
+            try:
+                pubsub.close()
+            except Exception:
+                logger.debug("RedisListener pubsub 关闭失败", exc_info=True)
+        thread = self._thread
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=5)
 
     def _run(self) -> None:
         try:
@@ -64,11 +74,19 @@ class RedisListener:
                     break
                 if message.get("type") == "pmessage":
                     self._handle_message(message)
-        except WsConnectionError:
-            raise
-        except Exception as e:
-            raise WsConnectionError("RedisListener error") from e
+        except OSError as e:
+            # stop() 关闭 pubsub 时 listen() 可能抛出 WinError 10038，属正常关闭路径
+            if self._running:
+                logger.error("RedisListener 套接字异常: %s", e, exc_info=True)
+            else:
+                logger.debug("RedisListener 关闭中: %s", e)
+        except Exception:
+            if self._running:
+                logger.error("RedisListener 异常退出", exc_info=True)
+            else:
+                logger.debug("RedisListener 关闭", exc_info=True)
         finally:
+            self._pubsub = None
             logger.info("RedisListener stopped")
 
     def _handle_message(self, message: dict) -> None:
@@ -93,10 +111,8 @@ class RedisListener:
                     connection_manager.broadcast_to_topic(topic, ws_msg),
                     loop,
                 )
-        except WsConnectionError:
-            raise
-        except Exception as e:
-            raise WsConnectionError("Handle Redis message failed") from e
+        except Exception:
+            logger.warning("Redis 消息处理失败", exc_info=True)
 
 
 redis_listener = RedisListener()

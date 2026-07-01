@@ -76,14 +76,36 @@ uvicorn xqtrader.main:create_app --factory --host 0.0.0.0 --port 8096
 ```powershell
 conda activate .\.conda
 $env:ENV=".env"
-celery -A worker.celery_entry worker -c 2 -P threads -Q celery,factor,market --loglevel=info
+$env:PYTHONPATH="src"
+celery -A worker.celery_entry worker -c 4 -P threads -Q celery,factor,market --loglevel=info
+```
+
+或使用 `pyproject.toml` 入口（参数等价）：
+
+```powershell
+conda activate .\.conda
+$env:ENV=".env"
+$env:PYTHONPATH="src"
+xqtrader-worker
 ```
 
 **参数说明**：
-- `-c 2`：2 个并发工作线程（线程池模式，连接池有限时不宜过大）
-- `-P threads`：使用线程池（Windows 推荐，避免多进程问题）
-- `-Q celery,factor,market`：监听三个队列，确保所有任务都能被接收
-- `--loglevel=info`：日志级别为 info
+
+| 参数 | 值 | 说明 |
+|------|-----|------|
+| `-c 4` | 4 | Celery 工作线程数，最多同时执行 4 个**不同** Celery 任务 |
+| `-P threads` | threads | 线程池模式（Windows 推荐；`-P solo` 强制单任务串行，`-c` 无效） |
+| `-Q celery,factor,market` | 三队列 | 监听默认队列及 factor/market 路由队列 |
+| `--loglevel=info` | info | 日志级别 |
+
+**并发模型**：
+
+- Worker 层：`-c 4 -P threads` 表示最多 4 个 Celery 任务并行；各任务通过共享的 `AsyncTaskRunner` 事件循环执行 async 逻辑（`run_coroutine_threadsafe`，线程安全）。
+- 任务层：`BaseTask.prevent_concurrent=True`（默认）对**同名任务**加 Redis 分布式锁，同一任务不会重复并发；**不同任务**可并行（如 `factor.compute_daily` 与 `market.daily_kline_collect` 可同时跑）。
+- 任务内部：部分采集/计算插件另有 `max_workers` / `concurrency` 参数（如 `factor.compute_daily --kwargs max_workers=5`），在单个 Celery 任务内再并行，与 Worker `-c` 无关。
+- 配置：`worker_prefetch_multiplier=1`（见 `celery_app.py`），每个工作线程预取 1 条消息，避免长任务占满队列。
+
+**调优建议**：`-c` 不宜超过 DB 连接池容量；连接池紧张时可降为 `-c 2`。Linux 生产环境可用 `-P prefork`，但 Windows 请保持 `-P threads`。
 
 > **注意**：当前验证阶段不启动 Celery Beat，所有任务通过 CLI 手动触发。
 

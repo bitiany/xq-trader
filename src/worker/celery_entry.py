@@ -270,8 +270,19 @@ def _load_schedules_yaml(schedule_dir: str) -> dict[str, Any]:
 
 
 def run_worker() -> None:
-    """启动 Celery Worker。"""
-    celery_app.worker_main(argv=["worker", "--loglevel=info", "-P", "solo"])
+    """启动 Celery Worker（线程池，4 并发，监听 celery/factor/market 三队列）。"""
+    celery_app.worker_main(
+        argv=[
+            "worker",
+            "--loglevel=info",
+            "-c",
+            "4",
+            "-P",
+            "threads",
+            "-Q",
+            "celery,factor,market",
+        ]
+    )
 
 
 def run_beat() -> None:

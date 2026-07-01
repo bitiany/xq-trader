@@ -207,16 +207,26 @@ steps:
 ## 7. 启动命令
 
 ```powershell
-# Worker
-celery -A worker.celery_entry worker --loglevel=info -P solo
+conda activate .\.conda
+$env:ENV=".env"
+$env:PYTHONPATH="src"
+
+# Worker（4 并发，线程池，监听三队列）
+celery -A worker.celery_entry worker -c 4 -P threads -Q celery,factor,market --loglevel=info
 
 # Beat
 celery -A worker.celery_entry beat --loglevel=info
 
-# 或使用 pyproject.toml 中定义的入口
+# 或使用 pyproject.toml 中定义的入口（Worker 参数与上一行等价）
 xqtrader-worker
 xqtrader-beat
 ```
+
+**并发说明**：
+
+- `-P threads -c 4`：最多 4 个 Celery 任务并行；Windows 必须用 threads，禁止 solo（solo 下 `-c` 无效）。
+- 同名任务默认 `prevent_concurrent=True`，Redis 锁保证不重复执行；不同任务可并行。
+- 插件内 `concurrency` / `max_workers` 是任务内部并行度，与 Worker `-c` 无关。
 
 ## 8. 开发检查清单
 
