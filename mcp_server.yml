@@ -84,3 +84,11 @@ groups:
       - operation_id: get_broker_asset
       - operation_id: list_broker_orders
       - operation_id: list_broker_trades
+
+  indices:
+    title: 指数行情
+    description: 指数列表、概览与日K线（含技术指标）
+    include:
+      - operation_id: list_indices
+      - operation_id: get_index_overview
+      - operation_id: get_index_kline

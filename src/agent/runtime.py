@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -111,7 +112,15 @@ def _write_runtime_config() -> None:
             }
         },
         "tools": {
-            "web": {"enable": True},
+            "web": {
+                "enable": True,
+                "search": {
+                    "provider": os.getenv("AGENT_WEB_SEARCH_PROVIDER", "tavily"),
+                    "api_key": os.getenv("TAVILY_API_KEY", os.getenv("BRAVE_API_KEY", "")),
+                    "max_results": 5,
+                    "timeout": 30,
+                },
+            },
             "exec": {"enable": False},
             "mcpServers": _build_mcp_servers(),
         },

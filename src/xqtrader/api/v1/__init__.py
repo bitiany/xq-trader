@@ -9,6 +9,7 @@ from xqtrader.api.v1.broker import router as broker_router
 from xqtrader.api.v1.data import router as data_router
 from xqtrader.api.v1.factors import router as factors_router
 from xqtrader.api.v1.health import router as health_router
+from xqtrader.api.v1.indices import router as indices_router
 from xqtrader.api.v1.rules import router as rules_router
 from xqtrader.api.v1.scheduler import router as scheduler_router
 from xqtrader.api.v1.security import router as security_router
@@ -38,5 +39,6 @@ router.include_router(selection_router)
 router.include_router(backtest_router)
 router.include_router(trading_router)
 router.include_router(stocks_router)
+router.include_router(indices_router)
 # AI Agent
 router.include_router(agent_router, prefix="/agent", tags=["agent"])

@@ -52,7 +52,7 @@ class AgentSettings:
             g.strip()
             for g in os.getenv(
                 "MCP_GROUPS",
-                "stocks,factors,strategies,selection,positions",
+                "stocks,factors,strategies,selection,positions,indices",
             ).split(",")
             if g.strip()
         ]
