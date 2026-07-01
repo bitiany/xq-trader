@@ -11,6 +11,9 @@ from xqtrader.domain.security.services.stock_detail_service import (
     StockFundFlowService,
     StockKlineService,
 )
+from xqtrader.domain.security.services.stock_technical_service import (
+    StockTechnicalService,
+)
 
 router = APIRouter(prefix="/stocks", tags=["个股"])
 
@@ -19,6 +22,7 @@ _detail_service = StockDetailService()
 _kline_service = StockKlineService()
 _fund_flow_service = StockFundFlowService()
 _chanlun_service = StockChanlunService()
+_technical_service = StockTechnicalService()
 
 
 @router.get("", summary="查询股票列表")
@@ -71,7 +75,7 @@ async def get_stock_kline(
     return await _kline_service.get_kline(symbol=symbol, limit=limit)
 
 
-@router.get("/{symbol}/kline/bars", summary="查询个股日K")
+@router.get("/{symbol}/kline/bars", summary="查询个股日K", operation_id="get_stock_kline_bars")
 async def get_stock_kline_bars(
     symbol: str,
     limit: int = Query(default=1200, ge=100, le=12000, description="K线条数"),
@@ -79,9 +83,33 @@ async def get_stock_kline_bars(
     return await _kline_service.get_kline_bars(symbol=symbol, limit=limit)
 
 
-@router.get("/{symbol}/chanlun", summary="查询缠论图形元素")
+@router.get("/{symbol}/chanlun", summary="查询缠论图形元素", operation_id="get_stock_chanlun")
 async def get_stock_chanlun(symbol: str) -> dict:
     return await _chanlun_service.get_chanlun(symbol)
+
+
+@router.get("/{symbol}/trend", summary="查询个股趋势诊断", operation_id="get_stock_trend")
+async def get_stock_trend(
+    symbol: str,
+    limit: int = Query(default=120, ge=60, le=12000, description="K线条数"),
+) -> dict:
+    return await _technical_service.get_trend(symbol=symbol, limit=limit)
+
+
+@router.get("/{symbol}/momentum", summary="查询个股动量诊断", operation_id="get_stock_momentum")
+async def get_stock_momentum(
+    symbol: str,
+    limit: int = Query(default=120, ge=35, le=12000, description="K线条数"),
+) -> dict:
+    return await _technical_service.get_momentum(symbol=symbol, limit=limit)
+
+
+@router.get("/{symbol}/valuation", summary="查询个股估值诊断", operation_id="get_stock_valuation")
+async def get_stock_valuation(
+    symbol: str,
+    limit: int = Query(default=252, ge=30, le=12000, description="估值历史样本天数"),
+) -> dict:
+    return await _technical_service.get_valuation(symbol=symbol, limit=limit)
 
 
 @router.get("/{symbol}/news", summary="查询个股资讯", operation_id="get_stock_news")

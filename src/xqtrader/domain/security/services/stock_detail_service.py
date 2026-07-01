@@ -22,6 +22,7 @@ from xqtrader.domain.market.models.daily_indicator import DailyIndicator
 from xqtrader.domain.market.models.financial_indicator import FinancialIndicator
 from xqtrader.domain.market.models.fund_flow import FundFlowIndividual
 from xqtrader.domain.market.models.income_statement import IncomeStatement
+from xqtrader.domain.research.models.stock_news import StockNews
 from xqtrader.domain.security.models import Security
 from xqtrader.domain.security.stock_tag import StockTag
 
@@ -319,11 +320,30 @@ class StockDetailService(SecurityMixin):
 
     async def get_news(self, symbol: str) -> dict[str, Any]:
         await self._ensure_security(symbol)
-        return {"symbol": symbol, "items": [], "placeholder": True}
+        rows = await StockNews.filter(
+            symbol=symbol, news_type="news",
+            order_by=StockNews.publish_time.desc(), limit=20,
+        )
+        return {"symbol": symbol, "items": [self._news_item(r) for r in rows]}
 
     async def get_announcements(self, symbol: str) -> dict[str, Any]:
         await self._ensure_security(symbol)
-        return {"symbol": symbol, "items": [], "placeholder": True}
+        rows = await StockNews.filter(
+            symbol=symbol, news_type="announcement",
+            order_by=StockNews.publish_time.desc(), limit=20,
+        )
+        return {"symbol": symbol, "items": [self._news_item(r) for r in rows]}
+
+    @staticmethod
+    def _news_item(row: StockNews) -> dict[str, Any]:
+        return {
+            "title": row.title,
+            "source": row.source,
+            "url": row.news_url,
+            "publish_time": StockApiFormatter.value(row.publish_time),
+            "keywords": row.keywords or [],
+            "content": (row.content or "")[:500],
+        }
 
     def _quote_snapshot(self, symbol: str, candle: CandlestickDaily | None) -> dict[str, Any]:
         return {

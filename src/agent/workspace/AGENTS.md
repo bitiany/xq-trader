@@ -15,7 +15,9 @@
 
 | Skill | 触发场景 |
 |------|---------|
-| stock-analysis | 个股前瞻性推演（国泰君安五步法：信息差→逻辑差→超预期差→催化剂→结论） |
+| stock-analysis | 个股深度分析（五步法）/季报速评/行业比较/事件驱动/财务异常挖掘 |
+| technical-analysis | 个股技术面专项（趋势/动量/缠论/估值诊断） |
+| research-report | 券商研报观点汇总、评级共识、盈利预测、交叉验证 |
 | sentiment-analysis | 个股新闻舆情、市场情绪、事件驱动信号 |
 | compare-analysis | 跨公司对比、跨期对比、同行比较 |
 | market-overview | 大盘指数、板块表现、市场情绪概览 |

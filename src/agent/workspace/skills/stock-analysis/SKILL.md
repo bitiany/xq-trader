@@ -21,17 +21,23 @@ keywords: 分析, 诊断, 评估, 解读, 推演, 个股, 股票, 五步法, 信
 
 ## 可用工具
 
-来自 MCP 分组 `xq_stocks`（必需）与 `xq_positions`（按需）。
+来自 MCP 分组 `xq_stocks`（必需）、`xq_research`（研报）、`xq_positions`（按需）。
 
 | 工具名 | 用途 | 关键参数 |
 |--------|------|---------|
 | `mcp_xq_stocks_xq_get_stock_overview` | 行情、估值、行业、市值、公司简介 | `symbol` |
 | `mcp_xq_stocks_xq_get_stock_financials` | 财务摘要（利润/资产/现金流/指标，含多期） | `symbol` |
 | `mcp_xq_stocks_xq_get_stock_kline` | 日 K 与 MA/MACD/KDJ/RSI/BIAS 指标 | `symbol`, `limit` |
+| `mcp_xq_stocks_xq_get_stock_trend` | 趋势诊断（方向/均线排列/ADX/BOLL位置） | `symbol`, `limit` |
+| `mcp_xq_stocks_xq_get_stock_momentum` | 动量诊断（MACD/KDJ/RSI/TD9 信号） | `symbol`, `limit` |
+| `mcp_xq_stocks_xq_get_stock_chanlun` | 缠论诊断（笔/段/中枢/买卖点） | `symbol` |
+| `mcp_xq_stocks_xq_get_stock_valuation` | 估值诊断（PE/PB 分位/市值/换手率） | `symbol` |
 | `mcp_xq_stocks_xq_get_stock_fund_flow` | 主力/超大单/大单/中单/小单资金流 | `symbol`, `limit` |
-| `mcp_xq_stocks_xq_get_stock_news` | 个股新闻 | `symbol` |
-| `mcp_xq_stocks_xq_get_stock_announcements` | 个股公告（股权激励/回购/增持/产能投产等前瞻信号） | `symbol` |
+| `mcp_xq_stocks_xq_get_stock_news` | 个股新闻（已采集真实数据） | `symbol` |
+| `mcp_xq_stocks_xq_get_stock_announcements` | 个股公告（股权激励/回购/增持/产能投产等） | `symbol` |
 | `mcp_xq_stocks_xq_get_stock_diagnosis` | 平台综合诊断（辅助交叉验证） | `symbol` |
+| `mcp_xq_research_xq_list_stock_research_reports` | 券商研报列表（机构/评级/盈利预测） | `symbol`, `page`, `page_size` |
+| `mcp_xq_research_xq_get_research_report` | 单篇研报详情（摘要/全文） | `info_code` |
 | `mcp_xq_positions_xq_get_broker_position` | 单只标的当前持仓（仅在用户提及持仓时调用） | `stock_code` |
 | `web_search` | 搜索事件日历、行业拐点、卖方一致预期、竞品动向 | `query` |
 | `web_fetch` | 抓取指定 URL 的网页内容 | `url` |
@@ -40,7 +46,36 @@ keywords: 分析, 诊断, 评估, 解读, 推演, 个股, 股票, 五步法, 信
 - 一次只调用一个工具，禁止合并多工具参数。
 - `symbol` / `stock_code` 必须是 `600519.SH` / `000001.SZ` 这种带后缀格式。
 
-## 执行流程（前瞻性五步法）
+## 分析场景
+
+识别用户意图后选择场景，按对应流程执行：
+
+| 场景 | 触发词 | 主流程 |
+|------|--------|--------|
+| 1 个股深度报告 | "深度分析/五步法/推演 + 某公司" | 前瞻性五步法（下文） |
+| 2 季报速评 | "季报/刚发了财报/业绩点评" | 预期差聚焦（financials + research + 一致预期） |
+| 3 行业比较 | "对比/谁更好/哪个值得买" | 多公司 overview+financials+valuation 横向对比 |
+| 4 事件驱动 | "政策/突发事件/听说..." | news+announcements + web_search 传导分析 |
+| 5 财务异常挖掘 | "异常/风险/现金流有问题" | financials 拆分 + fund_flow 背离 + 异常信号扫描 |
+
+### 场景2 季报速评
+**调用**：`get_stock_financials` + `list_stock_research_reports`（最新研报评级/预测）+ `get_stock_news` + `web_search` "{股票名称} 业绩 一致预期"。
+**输出**：最新财报核心指标 → 市场预期对比（预期差方向+幅度） → 研报评级变动 → 一句话点评。
+
+### 场景3 行业比较
+**调用**：对每个公司并行 `get_stock_overview` + `get_stock_financials` + `get_stock_valuation`；`web_search` "{行业} 估值对比 增长前景"。
+**输出**：多公司核心指标对比表（营收增速/净利增速/毛利率/ROE/PE/PB） → 行业趋势 → 推序与理由。
+
+### 场景4 事件驱动
+**调用**：`get_stock_news` + `get_stock_announcements` + `web_search` 事件详情 + 受益/受损标的。
+**输出**：事件解读 → 受益/受损标的筛选 → 传导路径 → 催化剂时间轴。
+
+### 场景5 财务异常挖掘
+**调用**：`get_stock_financials`（多期拆分）+ `get_stock_fund_flow`（资金面背离）+ `get_stock_valuation`（估值分位）+ `web_search` "{股票名称} 财务风险 异常"。
+**要点**：应收/存货异常变动、现金流与利润背离、毛利率异常、商誉/质押、资金面与基本面背离。
+**输出**：异常信号清单（每条标注数据依据+严重度） → 风险结论。
+
+## 执行流程（前瞻性五步法 — 场景1 个股深度报告）
 
 ### 第一步：与众不同的信息差
 

@@ -39,6 +39,11 @@ groups:
       - operation_id: search_stocks
       - operation_id: get_stock_overview
       - operation_id: get_stock_kline
+      - operation_id: get_stock_kline_bars
+      - operation_id: get_stock_trend
+      - operation_id: get_stock_momentum
+      - operation_id: get_stock_chanlun
+      - operation_id: get_stock_valuation
       - operation_id: get_stock_financials
       - operation_id: get_stock_fund_flow
       - operation_id: get_stock_news
@@ -92,3 +97,10 @@ groups:
       - operation_id: list_indices
       - operation_id: get_index_overview
       - operation_id: get_index_kline
+
+  research:
+    title: 券商研报
+    description: 个股研报列表与详情（机构/评级/盈利预测/摘要）
+    include:
+      - operation_id: list_stock_research_reports
+      - operation_id: get_research_report
