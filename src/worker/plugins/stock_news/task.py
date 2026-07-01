@@ -5,17 +5,18 @@
   - 公告：akshare stock_individual_notice_report（巨潮/东财公告）
 
 管线流程（每个标的串行执行）：
-  DownloadStage → PersistStage
+  WatermarkAspect(前切) → DownloadStage → PersistStage → WatermarkAspect(后切)
 
 注意：
   - 新闻接口不支持日期范围参数，每次返回近期约 100 条，依赖 news_url 唯一约束去重
-  - 公告接口支持 date_str 参数（YYYYMMDD），按日期增量采集
+  - 公告接口支持 begin_date/end_date（YYYYMMDD），按水位增量采集
   - 合并写入 sdc_stock_news 表，用 news_type 字段区分（news/announcement）
-  - 不使用 WatermarkAspect（新闻不支持日期范围；公告按 collect_date 触发）
+  - 水位管理：水位最新时跳过公告采集，但新闻始终采集（新闻无日期参数）
 """
 
 from __future__ import annotations
 
+from datetime import date as date_type
 from datetime import datetime
 from typing import Any
 
@@ -32,10 +33,14 @@ from framework.pipeline import (
     StageResult,
 )
 from framework.scheduler.base_task import BaseTask
-from xqtrader.broker.services.akshare_data_collector import AkshareDataCollector
+from worker.plugins.aspects import WatermarkAspect
+from worker.plugins.utils import parse_list_param
+from xqtrader.broker.services.akshare_data_collector import (
+    AkshareDataCollector,
+    normalize_news_keywords,
+)
 from xqtrader.domain.research.models.stock_news import StockNews
 from xqtrader.domain.security.models import Security
-from xqtrader.domain.watermark.services.watermark_service import WatermarkService
 
 logger = get_logger(__name__)
 
@@ -75,10 +80,17 @@ def clean_stock_news_data(df: pd.DataFrame) -> pd.DataFrame:
     return df.reset_index(drop=True)
 
 
-async def persist_stock_news_data(df: pd.DataFrame) -> int:
-    """将新闻/公告数据 upsert 到 StockNews 表。"""
+async def persist_stock_news_data(df: pd.DataFrame) -> tuple[int, date_type | None]:
+    """将新闻/公告数据 upsert 到 StockNews 表。
+
+    Returns:
+        (持久化行数, 最大 publish_time 的日期部分)
+    """
     custom_transforms = {
         "publish_time": lambda v: v if isinstance(v, datetime) and not pd.isna(v) else None,
+        # keywords 为 JSONB 数组，DataFrameToModelConverter 兜底转 str，
+        # 需通过 normalize_news_keywords 显式保留 list 类型
+        "keywords": lambda v: normalize_news_keywords(v),
     }
     instances = DataFrameToModelConverter.convert(
         df=df,
@@ -86,14 +98,27 @@ async def persist_stock_news_data(df: pd.DataFrame) -> int:
         custom_transforms=custom_transforms,
     )
     if not instances:
-        return 0
+        return 0, None
 
-    return await StockNews.bulk_create_or_update(
+    count = await StockNews.bulk_create_or_update(
         instances,  # type: ignore[arg-type]
         on_conflict=["news_url"],
         update_fields=_PERSIST_UPDATE_FIELDS,
         batch_size=100,
     )
+
+    # 计算最大 publish_time 日期，用于水位更新
+    max_date: date_type | None = None
+    if "publish_time" in df.columns:
+        valid_times = [
+            t for t in df["publish_time"].dropna()
+            if isinstance(t, datetime) or hasattr(t, "date")
+        ]
+        if valid_times:
+            max_time = max(valid_times)
+            max_date = max_time.date() if hasattr(max_time, "date") else None
+
+    return count, max_date
 
 
 class StockNewsError(PipelineError):
@@ -109,7 +134,13 @@ class PersistError(StockNewsError):
 
 
 class DownloadStage(Stage):
-    """下载阶段 — 拉取新闻 + 公告并合并。"""
+    """下载阶段 — 拉取新闻 + 公告并合并。
+
+    水位策略：
+      - 新闻接口不支持日期范围，始终拉取近期数据（依赖 news_url 去重）
+      - 公告接口按水位增量采集（start_date ~ end_date）
+      - 水位最新时（is_up_to_date=True）跳过公告，但仍拉取新闻
+    """
 
     @property
     def name(self) -> str:
@@ -119,7 +150,13 @@ class DownloadStage(Stage):
         stock_code: str = item
         fetch_news: bool = ctx.get("fetch_news", True)
         fetch_announcements: bool = ctx.get("fetch_announcements", True)
-        announcement_date: str = ctx.get("announcement_date", "")
+        # WatermarkAspect 设置的 start_date/end_date（YYYYMMDD）
+        ann_begin_date: str = ctx.get("start_date", "")
+        ann_end_date: str = ctx.get("end_date", "")
+        is_up_to_date: bool = ctx.get("is_up_to_date", False)
+
+        # 水位最新时跳过公告采集
+        skip_announcements = (not fetch_announcements) or is_up_to_date
 
         try:
             frames: list[pd.DataFrame] = []
@@ -139,26 +176,27 @@ class DownloadStage(Stage):
                         stock_code, e, exc_info=True,
                     )
 
-            # 2. 拉取公告（按 date_str 增量）
-            if fetch_announcements:
+            # 2. 拉取公告（按水位日期范围增量）
+            if not skip_announcements:
                 try:
                     ann_df = await _get_collector().fetch_stock_announcements(
                         symbol=stock_code,
-                        date_str=announcement_date,
+                        begin_date=ann_begin_date,
+                        end_date=ann_end_date,
                     )
                     if not ann_df.empty:
                         frames.append(ann_df)
                         ann_count = len(ann_df)
                 except Exception as e:
                     logger.warning(
-                        "[stock_news.collect] 公告拉取失败 %s date=%s: %s",
-                        stock_code, announcement_date, e, exc_info=True,
+                        "[stock_news.collect] 公告拉取失败 %s range=%s~%s: %s",
+                        stock_code, ann_begin_date, ann_end_date, e, exc_info=True,
                     )
 
             if not frames:
                 logger.debug(
-                    "[stock_news.collect] 无数据: %s news=%d ann=%d",
-                    stock_code, news_count, ann_count,
+                    "[stock_news.collect] 无数据: %s news=%d ann=%d skip_ann=%s",
+                    stock_code, news_count, ann_count, skip_announcements,
                 )
                 ctx.set("download_data", None)
                 ctx.set("row_count", 0)
@@ -176,6 +214,7 @@ class DownloadStage(Stage):
                     "rows": ctx.get("row_count", 0),
                     "news": news_count,
                     "ann": ann_count,
+                    "skip_announcements": skip_announcements,
                 },
             )
         except Exception as e:
@@ -183,7 +222,7 @@ class DownloadStage(Stage):
 
 
 class PersistStage(Stage):
-    """持久化阶段 — 写入 StockNews 表。"""
+    """持久化阶段 — 写入 StockNews 表并设置水位更新所需的 max_ann_date。"""
 
     @property
     def name(self) -> str:
@@ -200,13 +239,16 @@ class PersistStage(Stage):
             return StageResult.ok(data={"stock_code": stock_code, "persisted": 0})
 
         try:
-            count = await persist_stock_news_data(df)
+            count, max_date = await persist_stock_news_data(df)
 
             ctx.set("persisted_count", count)
+            # WatermarkAspect 后切读取 max_ann_date 更新水位
+            if count > 0 and max_date is not None:
+                ctx.set("max_ann_date", max_date)
 
             logger.debug(
-                "[stock_news.collect] 持久化完成: %s rows=%d",
-                stock_code, count,
+                "[stock_news.collect] 持久化完成: %s rows=%d max_date=%s",
+                stock_code, count, max_date,
             )
             return StageResult.ok(data={"stock_code": stock_code, "persisted": count})
         except Exception as e:
@@ -220,17 +262,17 @@ class StockNewsCollectTask(BaseTask):
       - concurrency: 并发数（默认 3）
       - stock_codes: 股票代码列表（为空时采集全市场）
       - max_count: 最大标的数量（用于测试，0 表示不限）
-      - collect_date: 公告查询日期（YYYYMMDD，为空时取最近交易日）
+      - collect_date: 指定采集起始日期（YYYYMMDD 或 YYYY-MM-DD，为空时按水位增量）
       - fetch_news: 是否采集新闻（默认 true）
       - fetch_announcements: 是否采集公告（默认 true）
     """
 
     task_name = "market.stock_news_collect"
-    description = "个股新闻与公告采集-akshare（新闻+公告合并，news_type 区分）"
+    description = "个股新闻与公告采集-akshare（新闻+公告合并，news_type 区分，公告按水位增量）"
 
     async def _run_impl(self, **kwargs: Any) -> dict[str, Any]:
         concurrency = kwargs.get("concurrency", 3)
-        stock_codes: list[str] | None = kwargs.get("stock_codes")
+        stock_codes: list[str] | None = parse_list_param(kwargs.get("stock_codes"))
         max_count: int = kwargs.get("max_count", 0)
         collect_date: str | None = kwargs.get("collect_date")
         fetch_news: bool = kwargs.get("fetch_news", True)
@@ -248,24 +290,24 @@ class StockNewsCollectTask(BaseTask):
             stock_codes = stock_codes[:max_count]
             logger.debug("[stock_news.collect] 限制标的数量: max_count=%d", max_count)
 
-        # 公告日期：优先使用入参，否则取最近交易日
-        announcement_date = collect_date or await self._get_latest_trade_date_str()
-
         global_ctx: dict[str, Any] = {
             "fetch_news": fetch_news,
             "fetch_announcements": fetch_announcements,
-            "announcement_date": announcement_date,
         }
+        if collect_date:
+            global_ctx["collect_date"] = collect_date
 
         logger.info(
-            "[stock_news.collect] 开始采集: concurrency=%d stocks=%d news=%s ann=%s date=%s",
-            concurrency, len(stock_codes), fetch_news, fetch_announcements, announcement_date,
+            "[stock_news.collect] 开始采集: concurrency=%d stocks=%d news=%s ann=%s collect_date=%s",
+            concurrency, len(stock_codes), fetch_news, fetch_announcements,
+            collect_date or "按水位",
         )
 
-        # 组装管线: download → persist（不使用 WatermarkAspect）
+        # 组装管线: download → persist，公告通过 WatermarkAspect 增量
         pipeline = Pipeline(
             name=_DATA_TYPE,
             stages=[DownloadStage(), PersistStage()],
+            aspects=[WatermarkAspect(data_type=_DATA_TYPE)],
         )
 
         engine = PipelineEngine(
@@ -287,10 +329,3 @@ class StockNewsCollectTask(BaseTask):
         codes = [row.symbol for row in rows]
         logger.debug("[stock_news.collect] 全市场标的数: %d", len(codes))
         return codes
-
-    @staticmethod
-    async def _get_latest_trade_date_str() -> str:
-        """获取最近交易日（YYYYMMDD 格式）。"""
-        service = WatermarkService()
-        latest = await service.get_latest_trade_date()
-        return latest.strftime("%Y%m%d") if latest else ""
