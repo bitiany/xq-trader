@@ -39,6 +39,7 @@ dependencies = [
     "starlette>=0.36,<1.0",
     "qdrant-client>=1.9,<2.0",
     "sentence-transformers>=2.7,<4.0",
+    "pdfplumber>=0.11,<1.0",
 ]
 
 [project.optional-dependencies]
@@ -109,7 +110,7 @@ disallow_untyped_defs = true
 packages = ["framework", "xqtrader", "agent", "mcp_server", "skills"]
 
 [[tool.mypy.overrides]]
-module = ["psycopg2", "psycopg.*", "xtquant.*", "langgraph.checkpoint.postgres", "nanobot.*", "mcp.*", "backtrader", "quantstats", "quantstats.*", "akshare", "akshare.*", "qdrant_client", "qdrant_client.*", "sentence_transformers", "sentence_transformers.*", "framework.dal.transactional"]
+module = ["psycopg2", "psycopg.*", "xtquant.*", "langgraph.checkpoint.postgres", "nanobot.*", "mcp.*", "backtrader", "quantstats", "quantstats.*", "akshare", "akshare.*", "qdrant_client", "qdrant_client.*", "sentence_transformers", "sentence_transformers.*", "pdfplumber", "pdfplumber.*", "framework.dal.transactional"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

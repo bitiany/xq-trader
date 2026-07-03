@@ -16,10 +16,11 @@
   industryName → industry（空时回退 indvInduName）
   predictXxxEps/Pe + actualXxxEps → eps_forecast（聚合为 list[dict]）
 
-PDF 下载：
+PDF 下载与解析：
   - 路径：{WORKSPACE_ROOT}/report/{symbol}/{info_code}.pdf
   - pdf_path 字段记录相对路径：report/{symbol}/{info_code}.pdf
-  - 下载失败不阻塞主流程，仅记录 warning
+  - 下载成功后使用 pdfplumber 提取文本，存入 content 字段
+  - 下载/解析失败不阻塞主流程，仅记录 warning
 
 水位管理（WatermarkAspect）：
   - 前切：若指定 collect_date 则以该日期为起始；否则按水位日期增量采集
@@ -31,6 +32,7 @@ PDF 下载：
 
 from __future__ import annotations
 
+import asyncio
 import os
 from datetime import date as date_type
 from pathlib import Path
@@ -68,8 +70,11 @@ _PDF_RELATIVE_PREFIX = "report"
 _PERSIST_UPDATE_FIELDS = [
     "symbol", "title", "org_name", "researcher", "rating", "rating_change",
     "publish_date", "industry", "eps_forecast", "pdf_url", "pdf_path",
-    "summary", "updated_at",
+    "summary", "content", "updated_at",
 ]
+
+# PDF 文本最大存储长度（避免超大文本撑爆 DB）
+_PDF_CONTENT_MAX_CHARS = 50000
 
 
 def _get_workspace_root() -> Path:
@@ -83,6 +88,35 @@ def _get_collector() -> AkshareDataCollector:
     if _collector is None:
         _collector = AkshareDataCollector()
     return _collector
+
+
+def _extract_pdf_text(pdf_path: Path) -> str | None:
+    """从 PDF 文件提取文本内容。
+
+    使用 pdfplumber 逐页提取文本，拼接后截断到最大长度。
+    解析失败返回 None，不抛异常。
+    """
+    try:
+        import pdfplumber
+
+        texts: list[str] = []
+        with pdfplumber.open(pdf_path) as pdf:
+            for page in pdf.pages:
+                text = page.extract_text()
+                if text:
+                    texts.append(text.strip())
+                if sum(len(t) for t in texts) >= _PDF_CONTENT_MAX_CHARS:
+                    break
+        result = "\n\n".join(texts)
+        if len(result) > _PDF_CONTENT_MAX_CHARS:
+            result = result[:_PDF_CONTENT_MAX_CHARS]
+        return result if result else None
+    except Exception as e:
+        logger.warning(
+            "[research_report.pdf] 文本提取失败 path=%s: %s",
+            pdf_path, e, exc_info=True,
+        )
+        return None
 
 
 def _normalize_date_param(date_str: str) -> str:
@@ -132,15 +166,18 @@ async def persist_research_report_data(
     workspace_root = _get_workspace_root()
 
     pdf_paths: list[str | None] = []
+    pdf_contents: list[str | None] = []
     for _, row in df.iterrows():
         if not download_pdf:
             pdf_paths.append(None)
+            pdf_contents.append(None)
             continue
 
         info_code = row.get("info_code")
         row_symbol = row.get("symbol")
         if not info_code or not row_symbol or pd.isna(info_code) or pd.isna(row_symbol):
             pdf_paths.append(None)
+            pdf_contents.append(None)
             continue
 
         # 相对路径：report/{symbol}/{info_code}.pdf
@@ -153,15 +190,24 @@ async def persist_research_report_data(
                 save_path=absolute_path,
             )
             pdf_paths.append(relative_path if saved else None)
+
+            # PDF 下载成功后提取文本
+            if saved and absolute_path.exists():
+                content = await asyncio.to_thread(_extract_pdf_text, absolute_path)
+                pdf_contents.append(content)
+            else:
+                pdf_contents.append(None)
         except Exception as e:
             logger.warning(
                 "[research_report.pdf] 下载失败 info_code=%s: %s",
                 info_code, e, exc_info=True,
             )
             pdf_paths.append(None)
+            pdf_contents.append(None)
 
     df = df.copy()
     df["pdf_path"] = pdf_paths
+    df["content"] = pdf_contents
 
     custom_transforms = {
         "publish_date": lambda v: v if isinstance(v, date_type) else (

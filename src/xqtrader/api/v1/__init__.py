@@ -16,6 +16,7 @@ from xqtrader.api.v1.rules import router as rules_router
 from xqtrader.api.v1.scheduler import router as scheduler_router
 from xqtrader.api.v1.security import router as security_router
 from xqtrader.api.v1.selection import router as selection_router
+from xqtrader.api.v1.sentiment import router as sentiment_router
 from xqtrader.api.v1.stocks import router as stocks_router
 from xqtrader.api.v1.strategies import router as strategies_router
 from xqtrader.api.v1.trading import router as trading_router
@@ -43,6 +44,7 @@ router.include_router(trading_router)
 router.include_router(stocks_router)
 router.include_router(indices_router)
 router.include_router(research_router)
+router.include_router(sentiment_router)
 # AI Agent
 router.include_router(agent_router, prefix="/agent", tags=["agent"])
 router.include_router(agent_memory_router)

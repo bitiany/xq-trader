@@ -93,3 +93,10 @@ groups:
     include:
       - operation_id: list_stock_research_reports
       - operation_id: get_research_report
+
+  sentiment:
+    title: 舆情快照
+    description: 市场级与个股级舆情快照（热度/情感分/正负面提及数）
+    include:
+      - operation_id: get_market_sentiment
+      - operation_id: get_stock_sentiment

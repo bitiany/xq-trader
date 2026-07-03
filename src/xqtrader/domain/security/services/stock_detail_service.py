@@ -342,7 +342,7 @@ class StockDetailService(SecurityMixin):
             "url": row.news_url,
             "publish_time": StockApiFormatter.value(row.publish_time),
             "keywords": row.keywords or [],
-            "content": (row.content or "")[:500],
+            "content": row.content,
         }
 
     def _quote_snapshot(self, symbol: str, candle: CandlestickDaily | None) -> dict[str, Any]:

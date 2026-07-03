@@ -4,7 +4,7 @@
 
 工具全部经 MCP 协议挂载（命名 `mcp_xq_<group>_xq_<operation_id>`），分组包括：
 `stocks`（行情/估值/技术/资金/新闻公告）、`factors`、`strategies`、`selection`、`positions`、
-`indices`、`research`（研报）。
+`indices`、`research`（研报）、`sentiment`（舆情快照）。
 
 禁止拼接 HTTP URL、禁止直连数据库。
 
