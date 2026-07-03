@@ -1,8 +1,9 @@
-import { Tabs, Button } from 'antd'
+import { Tabs, Button, Dropdown } from 'antd'
+import type { MenuProps } from 'antd'
 import { useEffect, useMemo, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { ArrowLeft, FlaskConical, Sparkles, Layers } from 'lucide-react'
+import { ArrowLeft, FlaskConical, Sparkles, Layers, LineChart, TrendingUp, Wallet } from 'lucide-react'
 
 import {
   fetchStockDiagnosis,
@@ -41,6 +42,30 @@ export function StockDetailPage() {
   const sendMessage = useAgentStore((s) => s.sendMessage)
   const setSessionScope = useAgentStore((s) => s.setSessionScope)
   const setAgentPanelOpen = useLayoutStore((s) => s.setAgentPanelOpen)
+
+  const triggerAnalysis = (promptKey: string) => {
+    const ctx = { stock_symbol: decodedSymbol, page_source: 'stock_detail' }
+    setAgentPanelOpen(true)
+    const name = stockOverview?.name ?? decodedSymbol
+    const sym = decodedSymbol
+    const prompts: Record<string, string> = {
+      full: `请对 ${sym}（${name}）进行全方位投研分析：按国泰君安五步法推演基本面（信息差→逻辑差→超预期差→催化剂→结论），结合技术面走势、资金面动向与市场情绪综合研判，交叉验证后给出交易策略建议（含入场价、止损价、目标位、仓位建议）。`,
+      technical: `请对 ${sym}（${name}）进行技术面深度分析：研判当前趋势方向与强度，识别关键支撑/压力位，分析 MACD/KDJ/RSI 指标信号，结合缠论笔/线段/中枢判断走势结构，给出 ATR 波动率与短期操作建议。`,
+      fund: `请对 ${sym}（${name}）进行资金面分析：研判近期主力资金净流入/流出趋势，分析超大单/大单/中单/小单资金博弈格局，识别资金流向与股价走势的背离信号，评估主力控盘程度。`,
+      basic: `请快速扫描 ${sym}（${name}）的基本面：最新估值水平（PE/PB/PS/股息率）、核心财务指标（营收/净利润/ROE/毛利率）、近期公告与新闻要闻，给出基本面评级与关键风险点。`,
+      position: `请评估 ${sym}（${name}）的持仓情况：查询当前持仓与账户资产，分析持仓成本与浮盈浮亏，结合技术面与资金面给出操作建议（加仓/持有/减仓/清仓）。`,
+    }
+    void sendMessage(prompts[promptKey] ?? prompts.full, ctx)
+  }
+
+  const analysisMenuItems: MenuProps['items'] = [
+    { key: 'full', label: t('stock.ai.full'), icon: <Sparkles size={14} /> },
+    { key: 'technical', label: t('stock.ai.technical'), icon: <LineChart size={14} /> },
+    { key: 'fund', label: t('stock.ai.fund'), icon: <TrendingUp size={14} /> },
+    { key: 'basic', label: t('stock.ai.basic'), icon: <Layers size={14} /> },
+    { type: 'divider' },
+    { key: 'position', label: t('stock.ai.position'), icon: <Wallet size={14} /> },
+  ]
 
   // 个股页注册标的私有会话：进入切到 stock:{symbol}，离开回退全局会话
   useEffect(() => {
@@ -135,19 +160,18 @@ export function StockDetailPage() {
           >
             {t('common.back')}
           </Button>
-          <Button
-            size="small"
-            type="primary"
-            icon={<Sparkles size={14} />}
-            onClick={() => {
-              const ctx = { stock_symbol: decodedSymbol, page_source: 'stock_detail' }
-              setAgentPanelOpen(true)
-              const name = stockOverview?.name ?? decodedSymbol
-              void sendMessage(`请对 ${decodedSymbol}（${name}）进行全方位分析，包括基本面、技术面和持仓情况`, ctx)
-            }}
+          <Dropdown
+            menu={{ items: analysisMenuItems, onClick: ({ key }) => triggerAnalysis(key) }}
+            trigger={['click']}
           >
-            {t('common.aiAnalysis')}
-          </Button>
+            <Button
+              size="small"
+              type="primary"
+              icon={<Sparkles size={14} />}
+            >
+              {t('common.aiAnalysis')}
+            </Button>
+          </Dropdown>
           <Button
             size="small"
             icon={<FlaskConical size={14} />}

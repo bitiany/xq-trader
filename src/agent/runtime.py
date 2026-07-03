@@ -136,33 +136,35 @@ def _write_runtime_config() -> None:
     )
 
 
-_bot_cache: dict[str, Nanobot] = {}
+_bot: Nanobot | None = None
 
 
 def build_bot(*, model: str | None = None) -> Nanobot:
+    """构建或复用 Nanobot 实例。
+
+    全局仅缓存一个 Nanobot（含 PgSessionManager / MCP 连接），切换模型时仅替换
+    bot._loop.model，避免多实例跨 event loop 的 Future 绑定冲突。
+    """
+    global _bot
     effective_model = model or agent_settings.LLM_MODEL_NAME
-    if effective_model in _bot_cache:
-        return _bot_cache[effective_model]
 
-    _write_runtime_config()
+    if _bot is None:
+        _write_runtime_config()
+        config: Config = resolve_config_env_vars(load_config(_CONFIG_PATH))
+        config.agents.defaults.workspace = str(_WORKSPACE)
+        loop = AgentLoop.from_config(
+            config,
+            session_manager=PgSessionManager(_WORKSPACE),
+            image_generation_provider_configs=image_gen_provider_configs(config),
+        )
+        _bot = Nanobot(loop)
+        logger.info(
+            "Nanobot created (PG session backend): workspace=%s model=%s base=%s mcp_groups=%s",
+            _WORKSPACE,
+            effective_model,
+            agent_settings.LLM_BASE_URL,
+            agent_settings.MCP_GROUPS,
+        )
 
-    config: Config = resolve_config_env_vars(load_config(_CONFIG_PATH))
-    config.agents.defaults.workspace = str(_WORKSPACE)
-
-    loop = AgentLoop.from_config(
-        config,
-        session_manager=PgSessionManager(_WORKSPACE),
-        image_generation_provider_configs=image_gen_provider_configs(config),
-    )
-    bot = Nanobot(loop)
-    if effective_model:
-        bot._loop.model = effective_model
-    _bot_cache[effective_model] = bot
-    logger.info(
-        "Nanobot created (PG session backend): workspace=%s model=%s base=%s mcp_groups=%s",
-        _WORKSPACE,
-        bot._loop.model,
-        agent_settings.LLM_BASE_URL,
-        agent_settings.MCP_GROUPS,
-    )
-    return bot
+    _bot._loop.model = effective_model
+    return _bot

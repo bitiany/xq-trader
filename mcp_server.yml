@@ -93,12 +93,3 @@ groups:
     include:
       - operation_id: list_stock_research_reports
       - operation_id: get_research_report
-
-  agent_memory:
-    title: 投研记忆
-    description: 论点卡读写、全局偏好（会话历史与语义召回已回归 Agent 内置能力，不再暴露为工具）
-    include:
-      - operation_id: get_stock_thesis
-      - operation_id: save_stock_thesis
-      - operation_id: mark_thesis_stale
-      - operation_id: get_preference

@@ -91,10 +91,16 @@
       }
     },
     "quick": {
-      "momentum": "Build a momentum factor strategy",
-      "backtest": "Interpret the latest backtest",
-      "risk": "Review portfolio risk exposure",
-      "brief": "Generate today's market brief"
+      "market": "Market overview & sector rotation",
+      "screening": "Multi-factor screening backtest",
+      "strategy": "Check running strategy status",
+      "risk": "Portfolio risk exposure analysis"
+    },
+    "quickStock": {
+      "full": "Full research (5-step)",
+      "technical": "Technical deep dive",
+      "fund": "Fund flow analysis",
+      "basic": "Fundamentals scan"
     }
   },
   "dashboard": {
@@ -768,6 +774,13 @@
     },
     "intro": {
       "title": "Company Profile"
+    },
+    "ai": {
+      "full": "Full research (5-step)",
+      "technical": "Technical deep dive",
+      "fund": "Fund flow analysis",
+      "basic": "Fundamentals scan",
+      "position": "Position review"
     },
     "tabs": {
       "news": "News",

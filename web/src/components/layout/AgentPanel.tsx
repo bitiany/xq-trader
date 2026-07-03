@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { ChevronDown, GripVertical, Send, Sparkles } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { GripVertical, Send, Sparkles } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { Select } from 'antd'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useAgentStore } from '@/stores/agentStore'
 import { useLayoutStore } from '@/stores/layoutStore'
 import { useLocaleStore } from '@/stores/localeStore'
+import { aiModelApi, normalizeModelList, type AiModelItem } from '@/api/ai/models'
 import { ActivityList } from './AgentTrace'
 import './AgentPanel.css'
 
@@ -23,6 +25,7 @@ export function AgentPanel() {
   const isTyping = useAgentStore((s) => s.isTyping)
   const traceRunning = useAgentStore((s) => s.traceRunning)
   const selectedModel = useAgentStore((s) => s.selectedModel)
+  const setSelectedModel = useAgentStore((s) => s.setSelectedModel)
   const sendMessage = useAgentStore((s) => s.sendMessage)
   const loadHistory = useAgentStore((s) => s.loadHistory)
   const sessionKey = useAgentStore((s) => s.sessionKey)
@@ -30,15 +33,48 @@ export function AgentPanel() {
   const setAgentPanelWidth = useLayoutStore((s) => s.setAgentPanelWidth)
 
   const [input, setInput] = useState('')
+  const [modelOptions, setModelOptions] = useState<{ label: string; value: string }[]>([])
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const dragging = useRef(false)
 
-  const quickPrompts = [
-    t('agent.quick.momentum'),
-    t('agent.quick.backtest'),
-    t('agent.quick.risk'),
-    t('agent.quick.brief'),
-  ]
+  // 加载可用模型列表
+  useEffect(() => {
+    aiModelApi
+      .list({ page: 1, page_size: 100 })
+      .then((res) => {
+        const items = normalizeModelList(res as never)
+        const options = items
+          .filter((m: AiModelItem) => m.status !== false)
+          .map((m: AiModelItem) => ({
+            label: m.name || String(m.id || ''),
+            value: m.name || String(m.id || ''),
+          }))
+        if (options.length > 0) {
+          setModelOptions(options)
+        }
+      })
+      .catch(() => {
+        // API 不可用时静默回退到默认模型
+      })
+  }, [])
+
+  // 根据 session scope 动态选择快捷指令：股票页显示标的相关指令，其他页面显示全局指令
+  const quickPrompts = useMemo(() => {
+    if (sessionKey?.startsWith('stock:')) {
+      return [
+        t('agent.quickStock.full'),
+        t('agent.quickStock.technical'),
+        t('agent.quickStock.fund'),
+        t('agent.quickStock.basic'),
+      ]
+    }
+    return [
+      t('agent.quick.market'),
+      t('agent.quick.screening'),
+      t('agent.quick.strategy'),
+      t('agent.quick.risk'),
+    ]
+  }, [sessionKey, t])
 
   // session_key 变化（含挂载、页面切换）或切换语言时，按当前 key 回载历史对话
   useEffect(() => {
@@ -109,10 +145,16 @@ export function AgentPanel() {
           <Sparkles size={14} className="agent-panel__title-icon" />
           <span>{t('agent.title')}</span>
         </div>
-        <button type="button" className="agent-panel__model-btn" disabled>
-          <span>{selectedModel}</span>
-          <ChevronDown size={12} />
-        </button>
+        <Select
+          size="small"
+          variant="borderless"
+          value={selectedModel}
+          options={modelOptions}
+          onChange={(val) => setSelectedModel(val)}
+          className="agent-panel__model-select"
+          popupMatchSelectWidth={false}
+          showSearch
+        />
       </header>
 
       <div className="agent-panel__messages">

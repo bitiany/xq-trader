@@ -42,6 +42,7 @@ interface AgentState {
 }
 
 const SESSION_KEY_STORAGE = 'xqtrader-agent-session-key'
+const MODEL_STORAGE = 'xqtrader-agent-model'
 
 function getOrCreateBaseKey(): string {
   try {
@@ -260,8 +261,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   messages: [createWelcomeMessage()],
   isTyping: false,
   traceRunning: false,
-  selectedModel: 'Qwen3-235B',
-  setSelectedModel: (model) => set({ selectedModel: model }),
+  selectedModel: localStorage.getItem(MODEL_STORAGE) || 'deepseek-ai/DeepSeek-V3',
+  setSelectedModel: (model) => {
+    localStorage.setItem(MODEL_STORAGE, model)
+    set({ selectedModel: model })
+  },
 
   setSessionScope: (scope) => {
     const nextScope = scope ?? null
@@ -500,7 +504,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
     try {
       const sessionId = await ensureSession()
-      const result = await agentChatApi.submitMessage(sessionId, trimmed, undefined, context)
+      const result = await agentChatApi.submitMessage(sessionId, trimmed, get().selectedModel, context)
       closeStream = subscribeAgentRun(result.run_id, {
         onEvent: handleStreamEvent,
         onError: () => {
