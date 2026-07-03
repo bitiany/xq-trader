@@ -22,9 +22,11 @@ keywords: 舆情, 情绪, 新闻, 消息面, 事件驱动, 利好, 利空, 公�
 |--------|------|---------|
 | `mcp_xq_stocks_xq_get_stock_news` | 个股新闻列表 | `symbol` |
 | `mcp_xq_stocks_xq_get_stock_announcements` | 个股公告列表 | `symbol` |
-| `mcp_xq_stocks_xq_get_stock_fund_flow` | 资金流向（验证情绪） | `symbol`, `limit` |
 | `web_search` | 搜索市场情绪、行业政策、突发事件 | `query` |
 | `web_fetch` | 抓取指定新闻全文 | `url` |
+
+> 本 skill 可被 stock-research 通过 spawn 委托执行（作为 Worker）。
+> 资金流向验证由 fund-flow Worker 负责，本 skill 不调用资金流工具。
 
 ## 执行流程
 
@@ -34,8 +36,7 @@ keywords: 舆情, 情绪, 新闻, 消息面, 事件驱动, 利好, 利空, 公�
 4. **补充搜索**：如新闻不足，用 `web_search` 搜索 "{股票名称} 最新消息" / "{股票名称} 重大事件"。
 5. **情感分类**：按 references 中的批量分类 prompt 模板，对新闻+公告批量做情感分类，得到每条的 sentiment/intensity/event_type。
 6. **情绪研判**：识别重大事件（利好/利空/政策）分类归集；按 references 情绪指数计算规则汇总生成情绪指数（贪婪/中性/恐慌）。
-7. **交叉验证**：调用 `mcp_xq_stocks_xq_get_stock_fund_flow` 看资金流向是否与情绪一致（如利好但资金流出，需提示分歧）。
-8. **输出报告**：新闻摘要 + 情绪研判 + 事件驱动信号 + 风险提示。
+7. **输出报告**：新闻摘要 + 情绪研判 + 事件驱动信号 + 风险提示。
 
 ## 输出格式
 
@@ -70,6 +71,22 @@ keywords: 舆情, 情绪, 新闻, 消息面, 事件驱动, 利好, 利空, 公�
 - 资金流向与情绪矛盾时必须提示分歧。
 - 信号方向仅给「偏多/偏空/中性」方向性判断，不输出具体买卖建议。
 
+## Worker 返回契约（被 spawn 调用时）
+
+当被 stock-research 通过 spawn 委托时，除输出上述报告外，在最后附上结构化 JSON 结论：
+
+```json
+{
+  "as_of": "2026-07-01",
+  "sentiment_index": "贪婪/中性/恐慌",
+  "bullish_factors": ["...", "..."],
+  "bearish_factors": ["...", "..."],
+  "policy_impact": "...",
+  "event_signal": "偏多/偏空/中性",
+  "conclusion": "情绪偏多/偏空/中性 + 简述"
+}
+```
+
 ## 示例对话
 
 用户: "比亚迪最近有什么新闻"
@@ -79,5 +96,4 @@ keywords: 舆情, 情绪, 新闻, 消息面, 事件驱动, 利好, 利空, 公�
 3. 调用 `mcp_xq_stocks_xq_get_stock_announcements`（symbol="002594.SZ"）
 4. 按 references 批量分类 prompt 模板对新闻+公告做情感分类
 5. 汇总情绪指数（贪婪/中性/恐慌）
-6. 调用 `mcp_xq_stocks_xq_get_stock_fund_flow`（symbol="002594.SZ"）交叉验证
-7. 输出舆情报告
+6. 输出舆情报告

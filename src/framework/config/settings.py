@@ -158,6 +158,17 @@ class AgentApiSettings(BaseSettings):
     AGENT_DEFAULT_MODEL: str = ""
 
 
+class QdrantSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="QDRANT_", extra="ignore")
+
+    HOST: str = "localhost"
+    HTTP_PORT: int = 56333
+    GRPC_PORT: int = 56334
+    COLLECTION: str = "research_memory"
+    EMBEDDING_MODEL_PATH: str = r"D:\app\models\BAAI\bge-large-zh-v1.5"
+    EMBEDDING_DIM: int = 1024
+
+
 class CollectSettings(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore")
 
@@ -203,6 +214,7 @@ class Settings:
         )
         self.REDIS = redis
         self.AGENT = AgentApiSettings()
+        self.QDRANT = QdrantSettings()
         self.COLLECT = CollectSettings()
         self.JUPYTER = JupyterSettings()
         self.CELERY = CelerySettings()

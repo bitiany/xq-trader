@@ -10,12 +10,14 @@ from xqtrader.domain.agent.protocol import RunStatus
 
 
 class CreateSessionRequest(BaseModel):
+    session_key: str | None = None
     title: str | None = None
     model: str | None = None
 
 
 class SessionResponse(BaseModel):
     session_id: str
+    session_key: str | None = None
     title: str | None = None
     model: str | None = None
     created_at: str
@@ -40,6 +42,31 @@ class RunStatusResponse(BaseModel):
     error: str | None = None
 
 
+class ToolCallFunction(BaseModel):
+    name: str
+    arguments: str
+
+
+class ToolCall(BaseModel):
+    id: str
+    type: str = "function"
+    function: ToolCallFunction
+
+
+class HistoryMessage(BaseModel):
+    role: str
+    content: str = ""
+    timestamp: str = ""
+    tool_calls: list[ToolCall] | None = None
+    tool_call_id: str | None = None
+    name: str | None = None
+
+
+class SessionHistoryResponse(BaseModel):
+    session_key: str
+    messages: list[HistoryMessage] = Field(default_factory=list)
+
+
 class AgentEventPayload(BaseModel):
     v: int = 1
     type: str
@@ -53,6 +80,7 @@ class RunTask(BaseModel):
     v: int = 1
     run_id: str
     session_id: str
+    session_key: str | None = None
     user_id: str = "anonymous"
     tenant_id: str = "default"
     message: str

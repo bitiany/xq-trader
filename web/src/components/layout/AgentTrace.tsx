@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import {
   BarChart3,
+  Bot,
   Check,
   ChevronRight,
-  Circle,
   DollarSign,
   FileText,
   FolderOpen,
@@ -20,136 +20,163 @@ import type { AgentActivity } from '@/stores/agentStore'
 import { formatToolTitle, shouldHideTool } from '@/utils/agentTrace'
 import './AgentTrace.css'
 
-interface AgentTraceProps {
-  activities: AgentActivity[]
-  isRunning: boolean
-}
-
-function toolIcon(name: string) {
+function toolIcon(name: string, size = 12) {
   switch (name) {
     case 'write_file':
     case 'edit_file':
     case 'notebook_edit':
-      return Pencil
+      return <Pencil size={size} />
     case 'read_file':
-      return FileText
+      return <FileText size={size} />
     case 'list_dir':
-      return FolderOpen
+      return <FolderOpen size={size} />
     case 'grep':
-      return Search
+      return <Search size={size} />
     case 'web_search':
     case 'web_fetch':
-      return Globe
+      return <Globe size={size} />
     case 'get_stock_overview':
-      return BarChart3
+      return <BarChart3 size={size} />
     case 'get_stock_financials':
-      return FileText
+      return <FileText size={size} />
     case 'get_stock_technicals':
-      return TrendingUp
+    case 'get_stock_technical':
+      return <TrendingUp size={size} />
     case 'get_stock_position':
-      return DollarSign
+      return <DollarSign size={size} />
     case 'get_stock_fund_flow':
-      return TrendingUp
+      return <TrendingUp size={size} />
     default:
-      return Terminal
+      return <Terminal size={size} />
   }
 }
 
-export function AgentTrace({ activities, isRunning }: AgentTraceProps) {
-  const { t } = useTranslation()
-  const visible = activities.filter((a) => a.kind === 'tool' && a.toolName && !shouldHideTool(a.toolName))
-
-  const [expanded, setExpanded] = useState(isRunning)
-
-  useEffect(() => {
-    queueMicrotask(() => {
-      if (isRunning) {
-        setExpanded(true)
-      } else if (visible.length > 0) {
-        setExpanded(false)
-      }
-    })
-  }, [isRunning, visible.length])
-
-  if (visible.length === 0 && !isRunning) {
-    return null
+function StatusIcon({ status }: { status: AgentActivity['status'] }) {
+  if (status === 'running') {
+    return <Loader2 size={12} className="tool-bubble__spin" />
   }
+  if (status === 'error') {
+    return <X size={12} />
+  }
+  return <Check size={12} />
+}
 
-  const doneCount = visible.filter((a) => a.status === 'done').length
-  const errorCount = visible.filter((a) => a.status === 'error').length
-  const runningCount = visible.filter((a) => a.status === 'running').length
+/** 工具调用气泡 — trae 风格独立卡片，上方说明，内部结果默认一行可展开。 */
+export function ToolBubble({ act }: { act: AgentActivity }) {
+  const { t } = useTranslation()
+  const [expanded, setExpanded] = useState(false)
 
-  const summary = isRunning
-    ? t('agent.trace.running', { count: visible.length })
-    : errorCount > 0
-      ? t('agent.trace.doneWithErrors', { done: doneCount, errors: errorCount })
-      : t('agent.trace.done', { count: doneCount || visible.length })
+  const hasDetail = Boolean(act.detail)
+  const hasArgs = act.args && Object.keys(act.args).length > 0
+  const expandable = hasDetail || hasArgs
 
   return (
-    <div
-      className={`agent-trace ${isRunning ? 'agent-trace--running' : 'agent-trace--done'}`}
-    >
+    <div className={`tool-bubble tool-bubble--${act.status}`}>
       <button
         type="button"
-        className="agent-trace__header"
-        onClick={() => setExpanded((v) => !v)}
+        className="tool-bubble__header"
+        onClick={() => expandable && setExpanded((v) => !v)}
         aria-expanded={expanded}
+        disabled={!expandable}
       >
-        <span className="agent-trace__chevron">
-          <ChevronRight size={14} className={expanded ? 'agent-trace__chevron-open' : ''} />
-        </span>
-        <span className="agent-trace__status-dot">
-          {isRunning ? (
-            <Loader2 size={12} className="agent-trace__spin" />
-          ) : errorCount > 0 ? (
-            <X size={12} />
+        <span className="tool-bubble__icon">
+          {act.status === 'running' ? (
+            <Loader2 size={12} className="tool-bubble__spin" />
           ) : (
-            <Check size={12} />
+            toolIcon(act.toolName)
           )}
         </span>
-        <span className="agent-trace__summary">{summary}</span>
-        {!expanded && runningCount > 0 ? (
-          <span className="agent-trace__badge">{runningCount}</span>
+        <span className="tool-bubble__title">
+          {formatToolTitle(act.toolName ?? 'tool', act.summary)}
+        </span>
+        <span className="tool-bubble__status">
+          <StatusIcon status={act.status} />
+        </span>
+        {expandable ? (
+          <ChevronRight
+            size={11}
+            className={`tool-bubble__caret ${expanded ? 'tool-bubble__caret--open' : ''}`}
+          />
         ) : null}
       </button>
-
-      {expanded ? (
-        <ul className="agent-trace__list">
-          {visible.map((act) => {
-            const Icon = toolIcon(act.toolName ?? '')
-            return (
-              <li
-                key={act.id}
-                className={`agent-trace__item agent-trace__item--${act.status}`}
-              >
-                <span className="agent-trace__item-icon">
-                  {act.status === 'running' ? (
-                    <Loader2 size={12} className="agent-trace__spin" />
-                  ) : act.status === 'error' ? (
-                    <X size={12} />
-                  ) : (
-                    <Icon size={12} />
-                  )}
-                </span>
-                <span className="agent-trace__item-label">
-                  {formatToolTitle(act.toolName ?? 'tool', act.summary)}
-                </span>
-                {act.status === 'done' ? (
-                  <Check size={11} className="agent-trace__item-check" />
-                ) : act.status === 'running' ? (
-                  <Circle size={6} className="agent-trace__item-pulse" />
-                ) : null}
-              </li>
-            )
-          })}
-          {isRunning && visible.length === 0 ? (
-            <li className="agent-trace__item agent-trace__item--running">
-              <Loader2 size={12} className="agent-trace__spin" />
-              <span className="agent-trace__item-label">{t('agent.trace.preparing')}</span>
-            </li>
-          ) : null}
-        </ul>
+      {hasDetail && !expanded ? (
+        <div className="tool-bubble__preview">{act.detail}</div>
       ) : null}
+      {expanded ? (
+        <div className="tool-bubble__body">
+          {hasArgs ? (
+            <pre className="tool-bubble__args">
+              {JSON.stringify(act.args, null, 2)}
+            </pre>
+          ) : null}
+          {hasDetail ? (
+            <pre className="tool-bubble__result">{act.detail}</pre>
+          ) : null}
+        </div>
+      ) : null}
+      {act.status === 'running' && !hasDetail ? (
+        <div className="tool-bubble__running">{t('agent.trace.preparing')}</div>
+      ) : null}
+    </div>
+  )
+}
+
+/** 子 Agent 气泡 — Bot 图标 + 标签 + 可展开结果。 */
+export function SubagentBubble({ act }: { act: AgentActivity }) {
+  const { t } = useTranslation()
+  const [expanded, setExpanded] = useState(false)
+  const hasDetail = Boolean(act.detail)
+
+  return (
+    <div className={`tool-bubble tool-bubble--subagent tool-bubble--${act.status}`}>
+      <div className="tool-bubble__subagent-bar" />
+      <button
+        type="button"
+        className="tool-bubble__header"
+        onClick={() => hasDetail && setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        disabled={!hasDetail}
+      >
+        <span className="tool-bubble__icon">
+          {act.status === 'running' ? (
+            <Loader2 size={13} className="tool-bubble__spin" />
+          ) : (
+            <Bot size={13} />
+          )}
+        </span>
+        <span className="tool-bubble__title">
+          {t('agent.trace.subagent', { label: act.label ?? '' })}
+        </span>
+        <span className="tool-bubble__status">
+          <StatusIcon status={act.status} />
+        </span>
+      </button>
+      {expanded && hasDetail ? (
+        <div className="tool-bubble__body">
+          <pre className="tool-bubble__result">{act.detail}</pre>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+/** 渲染一组 activity（工具 + 子 Agent），每项独立气泡。 */
+export function ActivityList({ activities }: { activities: AgentActivity[] }) {
+  const visible = activities.filter(
+    (a) => a.kind === 'subagent' || (a.toolName && !shouldHideTool(a.toolName)),
+  )
+  if (visible.length === 0) {
+    return null
+  }
+  return (
+    <div className="activity-list">
+      {visible.map((act) =>
+        act.kind === 'subagent' ? (
+          <SubagentBubble key={act.id} act={act} />
+        ) : (
+          <ToolBubble key={act.id} act={act} />
+        ),
+      )}
     </div>
   )
 }

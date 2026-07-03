@@ -80,6 +80,67 @@ class StockTechnicalService(SecurityMixin):
             "td9": self._td9_signal(close),
         }
 
+    async def get_technical(self, symbol: str) -> dict[str, Any]:
+        """趋势 + 动量 + 波动(ATR) + 近期量价，一次性返回连续型技术指标诊断。"""
+        trend = await self.get_trend(symbol, limit=120)
+        momentum = await self.get_momentum(symbol, limit=120)
+        rows = await self._load_candles(symbol, 30)
+        recent_bars = [StockApiFormatter.bar_item(row) for row in rows]
+        volatility = self._volatility_panel(symbol, await self._load_candles(symbol, 120))
+        trade_date = trend.get("trade_date") or momentum.get("trade_date")
+        available = bool(trend.get("available")) and bool(momentum.get("available"))
+        message: str | None = None
+        if not trend.get("available"):
+            message = str(trend.get("message") or "")
+        elif not momentum.get("available"):
+            message = str(momentum.get("message") or "")
+        return {
+            "symbol": symbol,
+            "trade_date": trade_date,
+            "available": available,
+            "message": message,
+            "trend": trend,
+            "momentum": momentum,
+            "volatility": volatility,
+            "recent_bars": recent_bars,
+        }
+
+    def _volatility_panel(
+        self, symbol: str, rows: list[CandlestickDaily],
+    ) -> dict[str, Any]:
+        if len(rows) < 15:
+            return {
+                "symbol": symbol,
+                "available": False,
+                "message": "K线数据不足(需≥15条)",
+            }
+        close, high, low = self._arrays(rows)
+        atr = talib.ATR(high, low, close, timeperiod=14)
+        atr_14 = _last(atr)
+        last_close = float(close[-1])
+        if atr_14 is None or atr_14 <= 0:
+            return {
+                "symbol": symbol,
+                "available": False,
+                "message": "ATR 计算失败",
+            }
+        stop_distance = atr_14 * 2
+        natr_14 = atr_14 / last_close * 100 if last_close > 0 else None
+        return {
+            "symbol": symbol,
+            "trade_date": self._date_str(rows[-1].trade_date),
+            "available": True,
+            "last_close": last_close,
+            "atr_14": round(atr_14, 4),
+            "natr_14": round(natr_14, 4) if natr_14 is not None else None,
+            "atr_multiplier": 2.0,
+            "stop_distance": round(stop_distance, 4),
+            "stop_price_long": round(last_close - stop_distance, 4),
+            "stop_price_short": round(last_close + stop_distance, 4),
+            "target_price_long": round(last_close + stop_distance, 4),
+            "target_price_short": round(last_close - stop_distance, 4),
+        }
+
     async def get_valuation(self, symbol: str, limit: int = 252) -> dict[str, Any]:
         await self._ensure_security(symbol)
         rows = await DailyIndicator.filter(

@@ -97,9 +97,11 @@ class ExpressionEvaluator:
         factor_values: dict[str, float],
         cross_section_df: pd.DataFrame | None,
     ) -> Any:
-        # 截面模式：从 DataFrame 列取值
-        if cross_section_df is not None and name in cross_section_df.columns:
-            return cross_section_df[name]
+        # 截面模式：从 DataFrame 列取值；缺失列视为 NaN（比较结果为 False）
+        if cross_section_df is not None:
+            if name in cross_section_df.columns:
+                return cross_section_df[name]
+            return pd.Series(float("nan"), index=cross_section_df.index)
         # 时序模式：从因子值字典取值
         if name in factor_values:
             return factor_values[name]

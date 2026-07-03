@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
@@ -40,6 +42,9 @@ class EventType(str, Enum):
     TOKEN = "token"
     TOOL_START = "tool_start"
     TOOL_END = "tool_end"
+    SUBAGENT_START = "subagent_start"
+    SUBAGENT_TOOL = "subagent_tool"
+    SUBAGENT_END = "subagent_end"
     MESSAGE = "message"
     ERROR = "error"
     DONE = "done"
@@ -67,9 +72,6 @@ def build_stream_fields(
     session_id: str = "",
     payload: dict[str, Any] | None = None,
 ) -> dict[str, str]:
-    import json
-    from datetime import datetime, timezone
-
     body: dict[str, Any] = {
         "v": PROTOCOL_VERSION,
         "type": str(event_type.value if isinstance(event_type, EventType) else event_type),

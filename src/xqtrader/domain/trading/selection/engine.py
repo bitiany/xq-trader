@@ -30,12 +30,13 @@ from framework.commons.logger import get_logger
 from framework.dal.transaction.transactional import transactional
 
 from ..backtest.core import FusionConfig, RuleResult
+from ..backtest.engine import _load_plugin_class
 from ..backtest.fusion import FusionEngine
 from ..enums import RuleDirection
 from ..models.decision import SelectionResult
 from ..models.rule import RuleRegistry as RuleRegistryModel
 from ..models.strategy import Strategy
-from ..rules.base import UniverseProvider
+from ..rules.base import RuleContext, UniverseProvider
 from ..rules.expression.evaluator import ExpressionEvaluator
 from ..rules.expression.parser import parse_expression
 
@@ -169,10 +170,7 @@ class SelectionEngine:
                 rule_type = rule_model.rule_type
 
                 if rule_type == "expression":
-                    # 截面表达式：使用 bullish_expr / bearish_expr 或 score_expr
-                    score_expr = definition.get("score_expr", "")
-                    bullish_expr = definition.get("bullish_expr", "")
-                    bearish_expr = definition.get("bearish_expr", "")
+                    score_expr, bullish_expr, bearish_expr = self._resolve_selection_exprs(definition)
 
                     if score_expr:
                         scores = self._evaluate_cross_section_expr(score_expr, cross_section_df, factors)
@@ -183,9 +181,10 @@ class SelectionEngine:
                                 bearish_expr, cross_section_df, factors,
                             )
                         else:
-                            bearish_mask = pd.Series(False, index=cross_section_df.index)
-                        scores = bullish_mask.astype(float) * 1.0 - bearish_mask.astype(float) * 1.0
+                            bearish_mask = pd.Series(0.0, index=cross_section_df.index)
+                        scores = bullish_mask - bearish_mask
                     else:
+                        logger.warning(f"规则缺少可执行表达式: {rid}")
                         continue
                     rule_scores[rid] = scores
                     filter_steps.append(self._build_rule_filter_step(
@@ -195,7 +194,31 @@ class SelectionEngine:
                         weight=rule_item.get("weight"),
                         expression=score_expr or bullish_expr,
                     ))
+                elif rule_type == "plugin":
+                    plugin_class = definition.get("plugin_class", "")
+                    if not plugin_class:
+                        logger.warning(f"插件规则缺少 plugin_class: {rid}")
+                        continue
+                    params = {
+                        **definition.get("default_params", {}),
+                        **(rule_item.get("params") or {}),
+                    }
+                    scores = self._evaluate_cross_section_plugin(
+                        plugin_class=plugin_class,
+                        cross_section_df=cross_section_df,
+                        signal_date=signal_date,
+                        params=params,
+                    )
+                    rule_scores[rid] = scores
+                    filter_steps.append(self._build_rule_filter_step(
+                        rule_model=rule_model,
+                        scores=scores,
+                        total_count=len(cross_section_df),
+                        weight=rule_item.get("weight"),
+                        expression=plugin_class,
+                    ))
                 else:
+                    logger.warning(f"未知规则类型: {rule_type}, rule_id={rid}")
                     continue
 
             if not rule_scores:
@@ -329,35 +352,85 @@ class SelectionEngine:
 
         return result_scores
 
+    @staticmethod
+    def _resolve_selection_exprs(definition: dict[str, Any]) -> tuple[str, str, str]:
+        """解析截面选股表达式字段（兼容 expr / buy_expr 等别名）。"""
+        score_expr = str(definition.get("score_expr") or "")
+        bullish_expr = str(
+            definition.get("bullish_expr")
+            or definition.get("expr")
+            or definition.get("buy_expr")
+            or "",
+        )
+        bearish_expr = str(
+            definition.get("bearish_expr")
+            or definition.get("sell_expr")
+            or "",
+        )
+        return score_expr, bullish_expr, bearish_expr
+
     def _evaluate_cross_section_expr(
         self,
         expr: str,
         cross_section_df: pd.DataFrame,
         factor_ids: list[str],
     ) -> pd.Series:
-        """求值截面表达式，返回 bool Series"""
+        """求值截面表达式，返回与 index 对齐的得分 Series（通过=1.0，未通过=0.0）。"""
+        del factor_ids  # 截面批量模式直接从 DataFrame 列读取
         try:
             ast = parse_expression(expr)
-            # 为 DataFrame 中每行构建 dict → 求值
-            results = cross_section_df.apply(
-                lambda row: self._evaluator.evaluate(
-                    ast=ast,
-                    factor_values={
-                        fid: float(row[fid])
-                        for fid in factor_ids
-                        if fid in row.index and pd.notna(row[fid])
-                    },
-                ),
-                axis=1,
+            result = self._evaluator.evaluate(
+                ast=ast,
+                cross_section_df=cross_section_df,
             )
-            if isinstance(results, pd.Series) and results.dtype == bool:
-                return results
-            if isinstance(results, pd.Series):
-                return results.astype(bool)
-            return pd.Series(False, index=cross_section_df.index)
+            if isinstance(result, pd.Series):
+                if result.dtype == bool:
+                    return result.fillna(False).astype(float)
+                numeric = pd.to_numeric(result, errors="coerce").fillna(0.0)
+                return numeric.astype(float)
+            if isinstance(result, (bool, int, float)):
+                return pd.Series(float(result), index=cross_section_df.index, dtype=float)
+            return pd.Series(0.0, index=cross_section_df.index, dtype=float)
         except Exception as e:
             logger.warning(f"截面表达式求值异常: expr='{expr}' error={e}")
-            return pd.Series(False, index=cross_section_df.index)
+            return pd.Series(0.0, index=cross_section_df.index, dtype=float)
+
+    @staticmethod
+    def _evaluate_cross_section_plugin(
+        plugin_class: str,
+        cross_section_df: pd.DataFrame,
+        signal_date: date,
+        params: dict[str, Any],
+    ) -> pd.Series:
+        """执行 SPI 插件截面评估，返回每标的得分 Series。"""
+        cls = _load_plugin_class(plugin_class)
+        plugin = cls()
+        scores = pd.Series(0.0, index=cross_section_df.index, dtype=float)
+
+        for symbol in cross_section_df.index:
+            row = cross_section_df.loc[symbol]
+            factor_values = {
+                str(col): float(val)
+                for col, val in row.items()
+                if pd.notna(val)
+            }
+            ctx = RuleContext(
+                symbol=str(symbol),
+                signal_date=signal_date,
+                factor_values=factor_values,
+                cross_section_df=cross_section_df,
+                config=params,
+            )
+            result = plugin.evaluate(ctx)
+            if not result.passed:
+                continue
+            magnitude = abs(float(result.score)) if result.score else 1.0
+            if result.direction in {"long", "bullish", "buy"}:
+                scores.loc[symbol] = magnitude
+            elif result.direction in {"short", "bearish", "sell"}:
+                scores.loc[symbol] = -magnitude
+
+        return scores
 
     @staticmethod
     def _collect_rule_ids(groups: list[dict]) -> list[str]:

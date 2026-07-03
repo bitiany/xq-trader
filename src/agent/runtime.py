@@ -7,9 +7,14 @@ import os
 from pathlib import Path
 from typing import Any
 
+from nanobot.agent.loop import AgentLoop
+from nanobot.config.loader import load_config, resolve_config_env_vars
+from nanobot.config.schema import Config
 from nanobot.nanobot import Nanobot
+from nanobot.providers.image_generation import image_gen_provider_configs
 
 from agent.config import agent_settings
+from agent.session_backend import PgSessionManager
 from framework.commons.logger import get_logger
 
 logger = get_logger("AGENT_RUNTIME")
@@ -99,7 +104,7 @@ def _write_runtime_config() -> None:
                 "max_tokens": 8192,
                 "context_window_tokens": 65536,
                 "temperature": 0.1,
-                "max_tool_iterations": 30,
+                "max_tool_iterations": agent_settings.MAX_TOOL_ITERATIONS,
                 "max_tool_result_chars": 16000,
                 "timezone": "Asia/Shanghai",
                 "disabled_skills": agent_settings.DISABLED_SKILLS,
@@ -140,12 +145,21 @@ def build_bot(*, model: str | None = None) -> Nanobot:
         return _bot_cache[effective_model]
 
     _write_runtime_config()
-    bot = Nanobot.from_config(_CONFIG_PATH, workspace=_WORKSPACE)
+
+    config: Config = resolve_config_env_vars(load_config(_CONFIG_PATH))
+    config.agents.defaults.workspace = str(_WORKSPACE)
+
+    loop = AgentLoop.from_config(
+        config,
+        session_manager=PgSessionManager(_WORKSPACE),
+        image_generation_provider_configs=image_gen_provider_configs(config),
+    )
+    bot = Nanobot(loop)
     if effective_model:
         bot._loop.model = effective_model
     _bot_cache[effective_model] = bot
     logger.info(
-        "Nanobot created: workspace=%s model=%s base=%s mcp_groups=%s",
+        "Nanobot created (PG session backend): workspace=%s model=%s base=%s mcp_groups=%s",
         _WORKSPACE,
         bot._loop.model,
         agent_settings.LLM_BASE_URL,

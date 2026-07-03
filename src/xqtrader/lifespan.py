@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+import xqtrader.domain.agent.models  # noqa: F401
 import xqtrader.domain.factor.models  # noqa: F401
 import xqtrader.domain.trading.models  # noqa: F401
 from framework.commons.logger import get_logger

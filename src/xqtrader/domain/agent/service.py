@@ -8,15 +8,19 @@ from collections.abc import AsyncIterator
 from fastapi import HTTPException, Request
 
 from framework.config.settings import settings
+from xqtrader.domain.agent.models.session import AgentMessage
 from xqtrader.domain.agent.protocol import MetaField, RunStatus, sse_event_name
 from xqtrader.domain.agent.redis_bus import AgentRedisBus
 from xqtrader.domain.agent.schemas import (
     CreateSessionRequest,
+    HistoryMessage,
     RunStatusResponse,
     RunTask,
+    SessionHistoryResponse,
     SessionResponse,
     SubmitMessageRequest,
     SubmitMessageResponse,
+    ToolCall,
 )
 from xqtrader.domain.agent.utils import new_id
 
@@ -40,6 +44,7 @@ class AgentService:
         session_id = new_id("sess")
         await self._bus.save_session(
             session_id,
+            session_key_value=body.session_key,
             title=body.title,
             model=body.model,
             user_id=user_id,
@@ -50,6 +55,7 @@ class AgentService:
             raise HTTPException(status_code=500, detail="Failed to create session")
         return SessionResponse(
             session_id=session_id,
+            session_key=data.get("session_key") or session_id,
             title=data.get("title") or None,
             model=data.get("model") or None,
             created_at=data.get("created_at", ""),
@@ -61,6 +67,7 @@ class AgentService:
             raise HTTPException(status_code=404, detail="Session not found")
         return SessionResponse(
             session_id=session_id,
+            session_key=data.get("session_key") or session_id,
             title=data.get("title") or None,
             model=data.get("model") or None,
             created_at=data.get("created_at", ""),
@@ -80,6 +87,7 @@ class AgentService:
         task = RunTask(
             run_id=run_id,
             session_id=session_id,
+            session_key=session.session_key,
             user_id=user_id,
             tenant_id=tenant_id,
             message=body.content,
@@ -93,6 +101,49 @@ class AgentService:
             session_id=session_id,
             status=RunStatus.QUEUED,
         )
+
+    async def get_history(self, session_key: str) -> SessionHistoryResponse:
+        """按 session_key 从 PG 读取历史对话（含工具调用轨迹，用于 UI 回载）。"""
+        rows = await AgentMessage.filter(
+            session_key=session_key,
+            order_by=AgentMessage.seq,
+        )
+        messages: list[HistoryMessage] = []
+        for row in rows:
+            payload = row.payload or {}
+            role = payload.get("role", "")
+            content = payload.get("content") or ""
+            timestamp = payload.get("timestamp") or ""
+            if role == "user":
+                if not content:
+                    continue
+                messages.append(HistoryMessage(role="user", content=content, timestamp=timestamp))
+            elif role == "assistant":
+                raw_calls = payload.get("tool_calls")
+                tool_calls = None
+                if isinstance(raw_calls, list) and raw_calls:
+                    tool_calls = [ToolCall.model_validate(tc) for tc in raw_calls]
+                # 有文本内容或工具调用的 assistant 消息都保留
+                if content or tool_calls:
+                    messages.append(
+                        HistoryMessage(
+                            role="assistant",
+                            content=content,
+                            timestamp=timestamp,
+                            tool_calls=tool_calls,
+                        )
+                    )
+            elif role == "tool":
+                messages.append(
+                    HistoryMessage(
+                        role="tool",
+                        content=content,
+                        timestamp=timestamp,
+                        tool_call_id=payload.get("tool_call_id") or "",
+                        name=payload.get("name") or "",
+                    )
+                )
+        return SessionHistoryResponse(session_key=session_key, messages=messages)
 
     async def get_run_status(self, run_id: str) -> RunStatusResponse:
         meta = await self._bus.get_run_meta(run_id)

@@ -12,7 +12,7 @@ keywords: 策略, 规则, rule, strategy, 规则组, 绑定
 
 ## 可用工具
 
-来自 MCP 分组 `xq_strategies`（必需）与 `xq_factors`（用于回查因子定义）。
+来自 MCP 分组 `xq_strategies`（必需）；因子定义从 `xq_factors` 的 `get_stock_factor_series` 返回的 `factors` 元数据回查。
 
 | 工具名 | 用途 | 关键参数 |
 |--------|------|---------|
@@ -22,14 +22,14 @@ keywords: 策略, 规则, rule, strategy, 规则组, 绑定
 | `mcp_xq_strategies_xq_list_rule_group_bindings` | 规则组下的规则绑定 | `strategy_id`, `group_id` |
 | `mcp_xq_strategies_xq_list_rules` | 规则注册表 | `category`, `type`, `status`, `keyword` |
 | `mcp_xq_strategies_xq_get_rule` | 规则详情 | `rule_id` |
-| `mcp_xq_factors_xq_get_factor` | 回查规则依赖的因子定义 | `factor_id` |
+| `mcp_xq_factors_xq_get_stock_factor_series` | 回查规则依赖的因子定义（读 `factors` 元数据） | `symbol` |
 
 ## 执行流程
 
 1. 用户给出 `strategy_id` 时，直接 `mcp_xq_strategies_xq_get_strategy` 获取一站式视图。
 2. 否则先 `mcp_xq_strategies_xq_list_strategies` 用 `keyword` 过滤候选，再让用户确认 `strategy_id`。
 3. 解读规则组职责（截面 / 时序）、规则绑定的权重与方向。
-4. 如需要，针对绑定的规则用 `mcp_xq_strategies_xq_get_rule` 看表达式，再 `mcp_xq_factors_xq_get_factor` 回查依赖因子。
+4. 如需要，针对绑定的规则用 `mcp_xq_strategies_xq_get_rule` 看表达式，再从 `get_stock_factor_series` 的 `factors` 中匹配 `factor_id` 定义。
 
 ## 约束
 
@@ -48,5 +48,5 @@ keywords: 策略, 规则, rule, strategy, 规则组, 绑定
 步骤:
 1. 调用 `mcp_xq_strategies_xq_list_rule_group_bindings`（strategy_id, group_id）
 2. 对每个规则调用 `mcp_xq_strategies_xq_get_rule` 看表达式
-3. 如规则依赖因子，调用 `mcp_xq_factors_xq_get_factor` 回查定义
+3. 如规则依赖因子，用上下文 `symbol` 调用 `get_stock_factor_series`，从 `factors` 回查定义
 4. 输出规则绑定表（binding_id / rule_name / weight / direction / 依赖因子）

@@ -37,6 +37,8 @@ dependencies = [
     "xgboost==3.2.0",
     "mcp>=1.27,<2.0",
     "starlette>=0.36,<1.0",
+    "qdrant-client>=1.9,<2.0",
+    "sentence-transformers>=2.7,<4.0",
 ]
 
 [project.optional-dependencies]
@@ -61,6 +63,8 @@ agent = [
     "pyyaml>=6.0,<7.0",
     "typing_extensions>=4.0,<5.0",
     "mcp>=1.27,<2.0",
+    "qdrant-client>=1.9,<2.0",
+    "sentence-transformers>=2.7,<4.0",
 ]
 mcp = [
     "mcp>=1.27,<2.0",
@@ -105,7 +109,7 @@ disallow_untyped_defs = true
 packages = ["framework", "xqtrader", "agent", "mcp_server", "skills"]
 
 [[tool.mypy.overrides]]
-module = ["psycopg2", "psycopg.*", "xtquant.*", "langgraph.checkpoint.postgres", "nanobot.*", "mcp.*", "backtrader", "quantstats", "quantstats.*", "akshare", "akshare.*"]
+module = ["psycopg2", "psycopg.*", "xtquant.*", "langgraph.checkpoint.postgres", "nanobot.*", "mcp.*", "backtrader", "quantstats", "quantstats.*", "akshare", "akshare.*", "qdrant_client", "qdrant_client.*", "sentence_transformers", "sentence_transformers.*", "framework.dal.transactional"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

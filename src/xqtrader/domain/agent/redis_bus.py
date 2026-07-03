@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -42,6 +44,7 @@ class AgentRedisBus:
         self,
         session_id: str,
         *,
+        session_key_value: str | None,
         title: str | None,
         model: str | None,
         user_id: str,
@@ -52,6 +55,7 @@ class AgentRedisBus:
             session_key(session_id),
             mapping={
                 "session_id": session_id,
+                "session_key": session_key_value or session_id,
                 "title": title or "",
                 "model": model or "",
                 "user_id": user_id,
@@ -122,9 +126,6 @@ class AgentRedisBus:
         block_ms: int = 5000,
         idle_timeout_s: float = 600.0,
     ) -> AsyncIterator[tuple[str, AgentEventPayload]]:
-        import asyncio
-        import time
-
         last_id = "0-0"
         idle_start = time.monotonic()
         while True:

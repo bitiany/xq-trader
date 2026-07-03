@@ -8,6 +8,7 @@ from starlette.responses import JSONResponse
 
 from xqtrader.domain.agent.schemas import (
     CreateSessionRequest,
+    SessionHistoryResponse,
     SessionResponse,
     SubmitMessageRequest,
     SubmitMessageResponse,
@@ -29,6 +30,11 @@ async def create_session(
 @router.get("/sessions/{session_id}", response_model=SessionResponse)
 async def get_session(session_id: str) -> SessionResponse:
     return await _service.get_session(session_id)
+
+
+@router.get("/history", response_model=SessionHistoryResponse)
+async def get_history(session_key: str) -> SessionHistoryResponse:
+    return await _service.get_history(session_key)
 
 
 @router.post(

@@ -42,7 +42,8 @@ services:
       ENV: /config/.env
       AGENT_WORKSPACE: /workspace
       AGENT_REDIS_HOST: host.docker.internal
-      AGENT_LLM_BASE_URL: http://host.docker.internal:8000/v1
+      AGENT_LLM_BASE_URL: http://192.168.10.22:8000/v1
+      AGENT_LLM_MODEL_NAME: deepseek-ai/DeepSeek-V4-Pro
       AGENT_MCP_BASE_URL: http://mcp:8097
       AGENT_SERVICE_BASE_URL: http://host.docker.internal:8096
       AGENT_WORKER_ID: worker-1

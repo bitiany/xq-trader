@@ -5,10 +5,9 @@ from __future__ import annotations
 import asyncio
 import signal
 import sys
-from typing import Any
 
 from agent.config import agent_settings
-from agent.hooks import RedisEventHook
+from agent.hooks import ContextInjectHook, MemoryRecallHook, RedisEventHook
 from agent.protocol import EventType, RunStatus
 from agent.redis_bus import AgentRedisBus
 from agent.runtime import build_bot
@@ -16,22 +15,6 @@ from agent.schemas import RunTask
 from framework.commons.logger import get_logger
 
 logger = get_logger("AGENT_WORKER")
-
-
-def _inject_context(message: str, context: dict[str, Any] | None) -> str:
-    if not context:
-        return message
-    parts: list[str] = []
-    stock_symbol = context.get("stock_symbol")
-    if stock_symbol:
-        parts.append(f"[上下文] 用户当前正在查看股票: {stock_symbol}")
-    page_source = context.get("page_source")
-    if page_source:
-        parts.append(f"页面来源: {page_source}")
-    if not parts:
-        return message
-    prefix = "\n".join(parts)
-    return f"{prefix}\n\n{message}"
 
 
 class AgentWorker:
@@ -100,12 +83,14 @@ class AgentWorker:
         hook = RedisEventHook(self._bus, run_id, session_id)
         try:
             bot = build_bot(model=task.model)
-            session_key = f"{task.tenant_id}:{session_id}"
-            message = _inject_context(task.message, task.context)
+            session_key = self._build_session_key(task)
+            symbol = (task.context or {}).get("stock_symbol")
+            context_hook = ContextInjectHook(task.context)
+            recall_hook = MemoryRecallHook(symbol=symbol, query=task.message)
             result = await bot.run(
-                message,
+                task.message,
                 session_key=session_key,
-                hooks=[hook],
+                hooks=[hook, context_hook, recall_hook],
             )
             if await self._bus.is_cancelled(run_id):
                 status = RunStatus.CANCELLED
@@ -151,6 +136,11 @@ class AgentWorker:
                     run_id,
                     exc_info=True,
                 )
+
+    @staticmethod
+    def _build_session_key(task: RunTask) -> str:
+        """会话隔离 key 由业务侧在创建会话时决定，Agent 层仅透传，不推导业务语义。"""
+        return task.session_key or f"session:{task.session_id}"
 
 
 async def _async_main() -> None:

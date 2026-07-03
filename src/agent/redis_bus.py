@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 from typing import Any
@@ -137,9 +139,6 @@ class AgentRedisBus:
         idle_timeout_s: float = 300.0,
     ) -> AsyncIterator[tuple[str, AgentEvent]]:
         last_id = "0-0"
-        import asyncio
-        import time
-
         idle_start = time.monotonic()
         while True:
             batch = await self.read_events(

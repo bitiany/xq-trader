@@ -24,11 +24,8 @@ invoker:
   unwrap_response_data: true
 
 # 全局黑名单（任何 group 都不会暴露）
+# 各 group 使用 include 白名单，仅暴露显式声明的 operation_id
 deny:
-  - method: POST
-  - method: PUT
-  - method: DELETE
-  - method: PATCH
   - path_glob: /api/v1/agent/**
 
 groups:
@@ -38,27 +35,19 @@ groups:
     include:
       - operation_id: search_stocks
       - operation_id: get_stock_overview
-      - operation_id: get_stock_kline
-      - operation_id: get_stock_kline_bars
-      - operation_id: get_stock_trend
-      - operation_id: get_stock_momentum
+      - operation_id: get_stock_technical
       - operation_id: get_stock_chanlun
       - operation_id: get_stock_valuation
       - operation_id: get_stock_financials
       - operation_id: get_stock_fund_flow
       - operation_id: get_stock_news
       - operation_id: get_stock_announcements
-      - operation_id: get_stock_diagnosis
 
   factors:
     title: 因子研究
-    description: 因子列表、分类、值与统计
+    description: 平台活跃因子宽表时序（单工具）
     include:
-      - operation_id: list_factors
-      - operation_id: list_factor_categories
-      - operation_id: get_factor
-      - operation_id: get_factor_values
-      - operation_id: get_factor_stats_latest
+      - operation_id: get_stock_factor_series
 
   strategies:
     title: 策略与规则
@@ -104,3 +93,12 @@ groups:
     include:
       - operation_id: list_stock_research_reports
       - operation_id: get_research_report
+
+  agent_memory:
+    title: 投研记忆
+    description: 论点卡读写、全局偏好（会话历史与语义召回已回归 Agent 内置能力，不再暴露为工具）
+    include:
+      - operation_id: get_stock_thesis
+      - operation_id: save_stock_thesis
+      - operation_id: mark_thesis_stale
+      - operation_id: get_preference

@@ -67,9 +67,11 @@
     "requestError": "Request failed. Ensure API and Agent Worker are running.",
     "trace": {
       "running": "Running {{count}} operations…",
+      "runningWithSub": "Running {{count}} operations ({{sub}} subtasks)…",
       "preparing": "Analyzing request…",
       "done": "Completed {{count}} operations",
       "doneWithErrors": "Completed {{done}}, {{errors}} failed",
+      "subagent": "Subtask: {{label}}",
       "tools": {
         "default": "{{name}}",
         "write_file": "Create file",

@@ -12,8 +12,11 @@ from framework.commons.pagination import build_paginated_response, paginate
 from xqtrader.domain.factor.models.factor_registry import FacFactorRegistry
 from xqtrader.domain.factor.models.factor_stats import FacFactorStats
 from xqtrader.domain.factor.models.factor_value import FacFactorValue
+from xqtrader.domain.factor.services.factor_series_service import FactorSeriesService
 
 router = APIRouter(prefix="/factors", tags=["因子查询"])
+
+_factor_series_service = FactorSeriesService()
 
 
 # ==================== 因子注册表 ====================
@@ -81,6 +84,26 @@ async def list_categories() -> list[dict]:
     for f in items:
         bucket[f.category] = bucket.get(f.category, 0) + 1
     return [{"category": k, "count": v} for k, v in sorted(bucket.items())]
+
+
+@router.get(
+    "/series/{symbol}",
+    summary="个股因子宽表时序（平台全部活跃因子）",
+    operation_id="get_stock_factor_series",
+)
+async def get_stock_factor_series(
+    symbol: str,
+    start_date: date | None = Query(default=None, description="起始日期（默认近120交易日）"),
+    end_date: date | None = Query(default=None, description="结束日期（默认今天）"),
+    pool_id: str = Query(default="all", description="样本池"),
+) -> dict:
+    """返回平台全部 active 因子元数据 + 单标的按 trade_date 宽字段时序 rows。"""
+    return await _factor_series_service.get_stock_factor_series(
+        symbol,
+        start_date=start_date,
+        end_date=end_date,
+        pool_id=pool_id,
+    )
 
 
 @router.get("/{factor_id}", summary="因子详情", operation_id="get_factor")

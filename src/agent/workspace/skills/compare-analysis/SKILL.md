@@ -22,7 +22,7 @@ keywords: 对比, 比较, 变化, 环比, 同比, 不同公司, 横向, 差异, 
 |--------|------|---------|
 | `mcp_xq_stocks_xq_get_stock_overview` | 行情、估值、行业定位 | `symbol` |
 | `mcp_xq_stocks_xq_get_stock_financials` | 财务摘要（利润/资产/现金流/指标，含多期） | `symbol` |
-| `mcp_xq_stocks_xq_get_stock_kline` | K线走势（对比股价表现） | `symbol`, `limit` |
+| `mcp_xq_stocks_xq_get_stock_technical` | K线走势与技术指标（对比股价表现） | `symbol` |
 | `mcp_xq_stocks_xq_get_stock_fund_flow` | 资金流向（对比资金偏好） | `symbol`, `limit` |
 
 ## 执行流程
@@ -42,7 +42,7 @@ keywords: 对比, 比较, 变化, 环比, 同比, 不同公司, 横向, 差异, 
 ### 跨期对比
 
 1. **确认标的与周期**：识别 symbol 与对比时间段（如今年 vs 去年、Q1 vs Q4）。
-2. **取数**：调用 `mcp_xq_stocks_xq_get_stock_financials` 获取多期财务数据；按需调用 `mcp_xq_stocks_xq_get_stock_kline` 对比不同时期股价走势。
+2. **取数**：调用 `mcp_xq_stocks_xq_get_stock_financials` 获取多期财务数据；按需调用 `mcp_xq_stocks_xq_get_stock_technical` 对比不同时期股价走势。
 3. **对比维度**：
    - 业绩变化：营收/净利同比、环比
    - 盈利能力变化：ROE/毛利率趋势

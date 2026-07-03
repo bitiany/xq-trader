@@ -68,9 +68,11 @@
     "requestError": "请求失败，请确认 API 与 Agent Worker 已启动。",
     "trace": {
       "running": "正在执行 {{count}} 个操作…",
+      "runningWithSub": "正在执行 {{count}} 个操作（含 {{sub}} 个子任务）…",
       "preparing": "正在分析任务…",
       "done": "已完成 {{count}} 个操作",
       "doneWithErrors": "已完成 {{done}} 个操作，{{errors}} 个失败",
+      "subagent": "子任务：{{label}}",
       "tools": {
         "default": "{{name}}",
         "write_file": "创建文件",
@@ -618,11 +620,13 @@
     "pipeline": {
       "stepCount": "{{count}} 个步骤",
       "name": {
-        "daily_factor_pipeline": "日频因子流水线",
+        "daily_pipeline": "日频流水线",
+        "daily_factor_pipeline": "日频流水线",
         "quarterly_factor_pipeline": "季度因子流水线"
       },
       "desc": {
-        "daily_factor_pipeline": "日频因子计算流水线：增量采集日行情数据 → 计算日频因子",
+        "daily_pipeline": "日频流水线：个股/指数/申万行业增量采集 → 日频因子计算",
+        "daily_factor_pipeline": "日频流水线：个股/指数/申万行业增量采集 → 日频因子计算",
         "quarterly_factor_pipeline": "季度财务因子计算流水线：采集财务四表 → 计算B2-B5因子"
       }
     }

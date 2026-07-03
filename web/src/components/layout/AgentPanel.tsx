@@ -1,26 +1,31 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Bot, ChevronDown, GripVertical, Send, Sparkles, X } from 'lucide-react'
+import { ChevronDown, GripVertical, Send, Sparkles } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useAgentStore } from '@/stores/agentStore'
 import { useLayoutStore } from '@/stores/layoutStore'
 import { useLocaleStore } from '@/stores/localeStore'
-import { AgentTrace } from './AgentTrace'
+import { ActivityList } from './AgentTrace'
 import './AgentPanel.css'
+
+function formatTime(ts: number): string {
+  const d = new Date(ts)
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mm = String(d.getMinutes()).padStart(2, '0')
+  return `${hh}:${mm}`
+}
 
 export function AgentPanel() {
   const { t } = useTranslation()
   const locale = useLocaleStore((s) => s.locale)
   const messages = useAgentStore((s) => s.messages)
-  const activities = useAgentStore((s) => s.activities)
   const isTyping = useAgentStore((s) => s.isTyping)
   const traceRunning = useAgentStore((s) => s.traceRunning)
   const selectedModel = useAgentStore((s) => s.selectedModel)
   const sendMessage = useAgentStore((s) => s.sendMessage)
-  const resetWelcome = useAgentStore((s) => s.resetWelcome)
-  const pageContext = useAgentStore((s) => s.pageContext)
-  const setPageContext = useAgentStore((s) => s.setPageContext)
+  const loadHistory = useAgentStore((s) => s.loadHistory)
+  const sessionKey = useAgentStore((s) => s.sessionKey)
   const agentPanelWidth = useLayoutStore((s) => s.agentPanelWidth)
   const setAgentPanelWidth = useLayoutStore((s) => s.setAgentPanelWidth)
 
@@ -35,13 +40,14 @@ export function AgentPanel() {
     t('agent.quick.brief'),
   ]
 
+  // session_key 变化（含挂载、页面切换）或切换语言时，按当前 key 回载历史对话
   useEffect(() => {
-    resetWelcome()
-  }, [locale, resetWelcome])
+    void loadHistory()
+  }, [sessionKey, locale, loadHistory])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, activities, isTyping, traceRunning])
+  }, [messages, isTyping, traceRunning])
 
   const handleSend = () => {
     if (!input.trim() || isTyping) {
@@ -78,16 +84,13 @@ export function AgentPanel() {
     [agentPanelWidth, setAgentPanelWidth],
   )
 
-  const lastUserIdx = messages.map((m) => m.role).lastIndexOf('user')
-  const showTrace =
-    (traceRunning || activities.length > 0) && lastUserIdx >= 0
-
+  // 判断是否显示打字指示器（assistant 消息为空、无 activities、正在运行）
   const showTypingDots =
     isTyping &&
     messages.length > 0 &&
     messages[messages.length - 1]?.role === 'assistant' &&
     !messages[messages.length - 1]?.content &&
-    activities.length === 0
+    (messages[messages.length - 1]?.activities ?? []).length === 0
 
   return (
     <aside className="agent-panel" style={{ width: agentPanelWidth }}>
@@ -107,46 +110,33 @@ export function AgentPanel() {
           <span>{t('agent.title')}</span>
         </div>
         <button type="button" className="agent-panel__model-btn" disabled>
-          <Bot size={12} />
           <span>{selectedModel}</span>
           <ChevronDown size={12} />
         </button>
       </header>
 
-      {pageContext?.stock_symbol ? (
-        <div className="agent-panel__context-tag">
-          <Sparkles size={10} />
-          <span>{pageContext.stock_symbol}</span>
-          <button
-            type="button"
-            className="agent-panel__context-tag-close"
-            onClick={() => setPageContext(null)}
-            aria-label="清除上下文"
-          >
-            <X size={10} />
-          </button>
-        </div>
-      ) : null}
-
       <div className="agent-panel__messages">
-        {messages.map((msg, index) => (
+        {messages.map((msg) => (
           <div key={msg.id} className="agent-panel__turn">
             {msg.role === 'user' ? (
               <div className="agent-panel__message agent-panel__message--user">
                 <div className="agent-panel__bubble">{msg.content}</div>
               </div>
             ) : null}
-
-            {msg.role === 'user' && index === lastUserIdx && showTrace ? (
-              <AgentTrace activities={activities} isRunning={traceRunning} />
+            {msg.role === 'user' ? (
+              <div className="agent-panel__msg-time">{formatTime(msg.timestamp)}</div>
             ) : null}
 
-            {msg.role === 'assistant' ? (
+            {msg.role === 'assistant' && msg.activities && msg.activities.length > 0 ? (
+              <ActivityList activities={msg.activities} />
+            ) : null}
+
+            {msg.role === 'assistant' && msg.content ? (
               <div className="agent-panel__message agent-panel__message--assistant">
                 <div className="agent-panel__avatar">
                   <Sparkles size={12} />
                 </div>
-                <div className="agent-panel__bubble agent-panel__bubble--md">
+                <div className="agent-panel__md">
                   <Markdown remarkPlugins={[remarkGfm]}>{msg.content}</Markdown>
                   {msg.streaming ? (
                     <span className="agent-panel__cursor">▍</span>
@@ -161,7 +151,7 @@ export function AgentPanel() {
             <div className="agent-panel__avatar">
               <Sparkles size={12} />
             </div>
-            <div className="agent-panel__bubble agent-panel__typing">
+            <div className="agent-panel__typing">
               <span />
               <span />
               <span />

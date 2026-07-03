@@ -25,7 +25,10 @@ function pipelineStatusClass(status: string): string {
 }
 
 const STEP_NAME_MAP: Record<string, string> = {
-  daily_incremental_collect: '日行情增量采集',
+  stock_daily_collect: '全市场个股增量采集',
+  daily_incremental_collect: '全市场个股增量采集',
+  index_daily_collect: '指数日线增量采集',
+  sw_daily_collect: '申万行业增量采集',
   daily_factor_compute: '日频因子计算',
   financial_indicator_collect: '财务指标采集',
   income_statement_collect: '利润表采集',

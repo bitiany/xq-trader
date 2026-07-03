@@ -3,6 +3,7 @@ import { request } from '@/api/client'
 
 export interface AgentSession {
   session_id: string
+  session_key?: string | null
   title?: string | null
   model?: string | null
   created_at: string
@@ -12,6 +13,31 @@ export interface SubmitMessageResult {
   run_id: string
   session_id: string
   status: string
+}
+
+export interface ToolCallFunction {
+  name: string
+  arguments: string
+}
+
+export interface ToolCallInfo {
+  id: string
+  type: string
+  function: ToolCallFunction
+}
+
+export interface HistoryMessage {
+  role: 'user' | 'assistant' | 'tool'
+  content: string
+  timestamp: string
+  tool_calls?: ToolCallInfo[]
+  tool_call_id?: string
+  name?: string
+}
+
+export interface SessionHistory {
+  session_key: string
+  messages: HistoryMessage[]
 }
 
 export interface AgentMessageContext {
@@ -30,8 +56,14 @@ export interface AgentStreamEvent {
 }
 
 export const agentChatApi = {
-  createSession(payload?: { title?: string; model?: string }) {
+  createSession(payload?: { session_key?: string; title?: string; model?: string }) {
     return request.post<AgentSession>('/agent/sessions', payload ?? {})
+  },
+
+  fetchHistory(sessionKey: string) {
+    return request.get<SessionHistory>('/agent/history', {
+      params: { session_key: sessionKey },
+    })
   },
 
   submitMessage(
@@ -84,6 +116,9 @@ export function subscribeAgentRun(
     'token',
     'tool_start',
     'tool_end',
+    'subagent_start',
+    'subagent_tool',
+    'subagent_end',
     'message',
     'error',
     'done',

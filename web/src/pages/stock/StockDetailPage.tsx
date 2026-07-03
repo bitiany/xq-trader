@@ -1,5 +1,5 @@
 import { Tabs, Button } from 'antd'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { ArrowLeft, FlaskConical, Sparkles } from 'lucide-react'
@@ -37,8 +37,14 @@ export function StockDetailPage() {
   const [mainIndicator, setMainIndicator] = useState<MainIndicator>('ma')
   const [subIndicator, setSubIndicator] = useState<SubIndicator>('macd')
   const sendMessage = useAgentStore((s) => s.sendMessage)
-  const setPageContext = useAgentStore((s) => s.setPageContext)
+  const setSessionScope = useAgentStore((s) => s.setSessionScope)
   const setAgentPanelOpen = useLayoutStore((s) => s.setAgentPanelOpen)
+
+  // 个股页注册标的私有会话：进入切到 stock:{symbol}，离开回退全局会话
+  useEffect(() => {
+    setSessionScope(`stock:${decodedSymbol}`)
+    return () => setSessionScope(null)
+  }, [decodedSymbol, setSessionScope])
 
   const requestDeps = useMemo(() => [decodedSymbol] as const, [decodedSymbol])
 
@@ -133,7 +139,6 @@ export function StockDetailPage() {
             icon={<Sparkles size={14} />}
             onClick={() => {
               const ctx = { stock_symbol: decodedSymbol, page_source: 'stock_detail' }
-              setPageContext(ctx)
               setAgentPanelOpen(true)
               const name = stockOverview?.name ?? decodedSymbol
               void sendMessage(`请对 ${decodedSymbol}（${name}）进行全方位分析，包括基本面、技术面和持仓情况`, ctx)

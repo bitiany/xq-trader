@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from framework.config.settings import settings
 from xqtrader.api.v1.agent.agent import router as agent_router
+from xqtrader.api.v1.agent_memory import router as agent_memory_router
 from xqtrader.api.v1.backtest import router as backtest_router
 from xqtrader.api.v1.broker import router as broker_router
 from xqtrader.api.v1.data import router as data_router
@@ -44,3 +45,4 @@ router.include_router(indices_router)
 router.include_router(research_router)
 # AI Agent
 router.include_router(agent_router, prefix="/agent", tags=["agent"])
+router.include_router(agent_memory_router)

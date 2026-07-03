@@ -402,10 +402,12 @@ stateDiagram-v2
 ## 十、调度编排
 
 ```yaml
-# 日频 — schedules/daily_factor_pipeline.yml
+# 日频 — schedules/daily_pipeline.yml（个股 / 指数 / 申万行业 三个独立插件 + 因子计算）
 steps:
-  - daily_incremental_collect              # 行情/指标/资金流 增量采集
-  - daily_factor_compute                   # Task 1 (depends_on: daily_incremental_collect)
+  - stock_daily_collect      # market.daily_incremental_collect — 全市场个股
+  - index_daily_collect      # market.index_daily_collect — 全市场指数
+  - sw_daily_collect         # market.sw_daily_collect — 全市场申万行业
+  - daily_factor_compute     # factor.compute_daily (depends_on: sw_daily_collect)
 ```
 
 ```yaml

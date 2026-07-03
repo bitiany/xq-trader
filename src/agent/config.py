@@ -34,7 +34,10 @@ class AgentSettings:
             os.getenv("LLM_BASE_URL", "http://127.0.0.1:8000/v1"),
         )
         self.LLM_API_KEY = os.getenv("LLM_API_KEY", "")
-        self.LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "Qwen/Qwen3-235B-A22B-Instruct-2507")
+        self.LLM_MODEL_NAME = os.getenv(
+            "AGENT_LLM_MODEL_NAME",
+            os.getenv("LLM_MODEL_NAME", "Qwen/Qwen3-235B-A22B-Instruct-2507"),
+        )
         self.WORKSPACE = os.getenv("AGENT_WORKSPACE", str(_AGENT_ROOT / "workspace"))
         self.MAX_CONCURRENT_RUNS = int(os.getenv("AGENT_MAX_CONCURRENT_RUNS", "8"))
         self.QUEUE_BLOCK_SECONDS = int(os.getenv("AGENT_QUEUE_BLOCK_SECONDS", "5"))
@@ -52,11 +55,12 @@ class AgentSettings:
             g.strip()
             for g in os.getenv(
                 "MCP_GROUPS",
-                "stocks,factors,strategies,selection,positions,indices,research",
+                "stocks,factors,strategies,selection,positions,indices,research,agent_memory",
             ).split(",")
             if g.strip()
         ]
         self.MCP_TOOL_TIMEOUT = int(os.getenv("MCP_TOOL_TIMEOUT", "30"))
+        self.MAX_TOOL_ITERATIONS = int(os.getenv("AGENT_MAX_TOOL_ITERATIONS", "45"))
         self.DISABLED_SKILLS = [
             s.strip()
             for s in os.getenv(

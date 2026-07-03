@@ -25,7 +25,9 @@ def build_input_schema(op: Operation) -> dict[str, Any]:
     schema: dict[str, Any] = {
         "type": "object",
         "properties": properties,
-        "additionalProperties": False,
+        # 与 HttpInvoker._partition 的容忍契约保持一致：未声明的入参由调用器静默丢弃，
+        # 不在 schema 层硬拒绝，避免单个幻觉字段（如 limit）导致整次调用失败而丢失真实数据。
+        "additionalProperties": True,
     }
     if required:
         schema["required"] = required
@@ -34,10 +36,8 @@ def build_input_schema(op: Operation) -> dict[str, Any]:
 
 def _parameter_schema(p: Parameter) -> dict[str, Any]:
     base = dict(p.schema) if p.schema else {"type": "string"}
-    desc = p.description or f"{p.name} ({p.location})"
-    base["description"] = (
-        f"{desc} [in={p.location}]" if "[in=" not in desc else desc
-    )
+    # 参数已扁平化进单一 object，位置标记（[in=path] 等）对模型无意义且会诱导其虚构 path/query 字段。
+    base["description"] = p.description or p.name
     return base
 
 

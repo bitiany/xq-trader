@@ -83,6 +83,11 @@ async def get_stock_kline_bars(
     return await _kline_service.get_kline_bars(symbol=symbol, limit=limit)
 
 
+@router.get("/{symbol}/technical", summary="查询个股技术面综合诊断", operation_id="get_stock_technical")
+async def get_stock_technical(symbol: str) -> dict:
+    return await _technical_service.get_technical(symbol)
+
+
 @router.get("/{symbol}/chanlun", summary="查询缠论图形元素", operation_id="get_stock_chanlun")
 async def get_stock_chanlun(symbol: str) -> dict:
     return await _chanlun_service.get_chanlun(symbol)
