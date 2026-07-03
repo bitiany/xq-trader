@@ -413,7 +413,8 @@ class StockKlineService(SecurityMixin):
         close = np.array([row.close for row in rows], dtype=float)
         high = np.array([row.high for row in rows], dtype=float)
         low = np.array([row.low for row in rows], dtype=float)
-        ma = {f"ma{period}": StockApiFormatter.series(talib.MA(close, timeperiod=period)) for period in [5, 10, 20, 60]}
+        ma_periods = [5, 10, 20, 30, 60, 120]
+        ma = {f"ma{p}": StockApiFormatter.series(talib.MA(close, timeperiod=p)) for p in ma_periods}
         dif, dea, macd = talib.MACD(close, fastperiod=12, slowperiod=26, signalperiod=9)
         upper, middle, lower = talib.BBANDS(close, timeperiod=20, nbdevup=2, nbdevdn=2)
         k, d = talib.STOCH(high, low, close, fastk_period=9, slowk_period=3, slowd_period=3)

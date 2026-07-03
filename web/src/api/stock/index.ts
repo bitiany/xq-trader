@@ -266,7 +266,8 @@ export async function fetchStockChanlun(symbol: string): Promise<ChanlunResponse
 }
 
 export function buildStockQuoteTopic(symbol: string): string {
-  return `market.stock.${symbol}`
+  // 与后端 WsTopic.MARKET_STOCK_QUOTE_PREFIX 对齐，前缀匹配单例 job
+  return `ws.market.stock_quotes.${symbol}`
 }
 
 export async function fetchTagDefinitions(): Promise<TagDefinitionItem[]> {
@@ -275,4 +276,56 @@ export async function fetchTagDefinitions(): Promise<TagDefinitionItem[]> {
 
 export async function fetchStockTags(symbol: string): Promise<StockTagItem[]> {
   return request.get<StockTagItem[]>(`/stocks/tags/${encodeURIComponent(symbol)}`)
+}
+
+// ==================== 截面因子 ====================
+
+export interface FactorMeta {
+  factor_id: string
+  display_name: string
+  category: string
+  direction: string
+  signal_type: string
+  data_origin: string
+  factor_grade: string | null
+  is_composite: boolean
+  composite_method: string | null
+  description: string | null
+  latest_stats: FactorStats | null
+}
+
+export interface FactorStats {
+  factor_id: string
+  pool_id: string
+  calc_date: string
+  window: number
+  ic_mean: number | null
+  ic_std: number | null
+  icir: number | null
+  ic_win_rate: number | null
+  turnover: number | null
+  coverage: number | null
+  factor_grade: string | null
+  long_short_annual_ret: number | null
+  long_short_sharpe: number | null
+}
+
+export interface FactorSeriesResponse {
+  symbol: string
+  pool_id: string
+  start_date: string
+  end_date: string
+  factor_count: number
+  factors: FactorMeta[]
+  columns: string[]
+  rows: Array<Record<string, string | number | null>>
+}
+
+export async function fetchStockFactorSeries(
+  symbol: string,
+  days = 10,
+): Promise<FactorSeriesResponse> {
+  return request.get<FactorSeriesResponse>(`/factors/series/${encodeURIComponent(symbol)}`, {
+    params: { days },
+  })
 }

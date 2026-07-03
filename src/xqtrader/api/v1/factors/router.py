@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 from fastapi import APIRouter, Query
 from sqlalchemy import desc
@@ -96,8 +96,18 @@ async def get_stock_factor_series(
     start_date: date | None = Query(default=None, description="起始日期（默认近120交易日）"),
     end_date: date | None = Query(default=None, description="结束日期（默认今天）"),
     pool_id: str = Query(default="all", description="样本池"),
+    days: int | None = Query(default=None, ge=1, le=60, description="近N个自然日（优先于 start_date）"),
 ) -> dict:
     """返回平台全部 active 因子元数据 + 单标的按 trade_date 宽字段时序 rows。"""
+    if days is not None:
+        end = end_date or date.today()
+        start = end - timedelta(days=days)
+        return await _factor_series_service.get_stock_factor_series(
+            symbol,
+            start_date=start,
+            end_date=end,
+            pool_id=pool_id,
+        )
     return await _factor_series_service.get_stock_factor_series(
         symbol,
         start_date=start_date,

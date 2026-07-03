@@ -84,6 +84,8 @@ class FactorSeriesService:
             "signal_type": reg.signal_type,
             "data_origin": reg.data_origin,
             "factor_grade": reg.factor_grade,
+            "is_composite": bool(reg.is_composite),
+            "composite_method": reg.composite_method,
             "description": reg.description,
             "latest_stats": latest_stats,
         }

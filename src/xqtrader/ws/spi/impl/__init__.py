@@ -2,4 +2,5 @@
 
 from .broker_status import BrokerStatusSpi  # noqa: F401
 from .pnl import PnlSpi  # noqa: F401
+from .stock_quote import StockQuoteSpi  # noqa: F401
 from .watchlist_quotes import WatchlistQuotesSpi  # noqa: F401

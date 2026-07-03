@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as echarts from 'echarts'
-import { Segmented, Switch } from 'antd'
+import { Checkbox, Popover, Segmented, Switch } from 'antd'
 import { useTranslation } from 'react-i18next'
 
 import type { ChanlunPivot, ChanlunResponse, ChanlunStroke, MainIndicator, SubIndicator, KlineBarItem, StockFundFlowItem } from '@/api/stock'
@@ -30,6 +30,7 @@ interface StockKlineChartProps {
 
 const VISIBLE_WINDOW = 90
 const LINE_COLORS = ['#f5a623', '#6ea8fe', '#b37feb', '#ff7875']
+const MA_PERIOD_OPTIONS = [5, 10, 20, 30, 60, 120]
 
 function formatDateLabel(value: string): string {
   return value.slice(5)
@@ -167,26 +168,53 @@ function buildTd9MarkSeries(
 ): echarts.SeriesOption | null {
   const buySetup = overlays.buy_setup ?? []
   const sellSetup = overlays.sell_setup ?? []
-  const data: Array<{ value: [number, number, number]; symbolOffset: [number, number]; itemStyle: { color: string } }> = []
+  const data: Array<{ value: [number, number, number]; symbolOffset: [number, number]; label: { color: string } }> = []
 
-  bars.forEach((bar, index) => {
-    const sellValue = sellSetup[index]
-    if (typeof sellValue === 'number') {
-      data.push({
-        value: [index, bar.high, sellValue],
-        symbolOffset: [0, -10],
-        itemStyle: { color: 'rgba(239, 68, 68, 0.65)' },
-      })
+  function collectCompleteSequence(setup: Array<number | null>, isBuy: boolean) {
+    let i = setup.length - 1
+    while (i >= 8) {
+      if (setup[i] !== 9) {
+        i--
+        continue
+      }
+      const startIdx = i - 8
+      let isComplete = true
+      for (let j = 0; j <= 8; j++) {
+        if (setup[startIdx + j] !== j + 1) {
+          isComplete = false
+          break
+        }
+      }
+      if (isComplete) {
+        for (let j = 0; j <= 8; j++) {
+          const idx = startIdx + j
+          const bar = bars[idx]
+          const val = setup[idx]!
+          const isLast = j === 8
+          const textColor = isBuy
+            ? isLast
+              ? '#22c55e'
+              : 'rgba(34, 197, 94, 0.7)'
+            : isLast
+            ? '#ef4444'
+            : 'rgba(239, 68, 68, 0.7)'
+          data.push({
+            value: [idx, isBuy ? bar.low : bar.high, val],
+            symbolOffset: isBuy ? [0, 8] : [0, -8],
+            label: {
+              color: textColor,
+            },
+          })
+        }
+        i = startIdx - 1
+      } else {
+        i--
+      }
     }
-    const buyValue = buySetup[index]
-    if (typeof buyValue === 'number') {
-      data.push({
-        value: [index, bar.low, buyValue],
-        symbolOffset: [0, 10],
-        itemStyle: { color: 'rgba(34, 197, 94, 0.65)' },
-      })
-    }
-  })
+  }
+
+  collectCompleteSequence(sellSetup, false)
+  collectCompleteSequence(buySetup, true)
 
   if (data.length === 0) return null
 
@@ -197,18 +225,15 @@ function buildTd9MarkSeries(
     yAxisIndex: 0,
     data,
     symbol: 'circle',
-    symbolSize: 11,
+    symbolSize: 1,
+    itemStyle: {
+      color: 'transparent',
+    },
     label: {
       show: true,
       formatter: '{@[2]}',
-      position: 'inside',
-      color: '#ffffff',
-      fontSize: 8,
-      fontWeight: 600,
-    },
-    itemStyle: {
-      borderWidth: 1,
-      borderColor: 'rgba(255, 255, 255, 0.6)',
+      fontSize: 10,
+      fontWeight: 700,
     },
     z: 4,
   } as echarts.SeriesOption
@@ -342,6 +367,9 @@ export function StockKlineChart({
   const chartRef = useRef<echarts.ECharts | null>(null)
   const zoomStateRef = useRef<{ start: number; end: number } | null>(null)
   const [showTd9, setShowTd9] = useState(false)
+  // 均线显示控制：总开关 + 周期多选（后端已返回 ma5/10/20/30/60/120）
+  const [showMa, setShowMa] = useState(true)
+  const [maPeriods, setMaPeriods] = useState<number[]>([5, 10, 20, 60])
   const hasBars = bars.length > 0
   const barsKey = `${bars[0]?.trade_date ?? ''}-${bars[bars.length - 1]?.trade_date ?? ''}-${bars.length}`
   const markersKey = tradeMarkers.map((marker) => `${marker.date}:${marker.direction}:${marker.price}`).join('|')
@@ -353,7 +381,18 @@ export function StockKlineChart({
   const safeIndex = currentIndex != null && currentIndex >= 0 && currentIndex < bars.length ? currentIndex : bars.length - 1
   const currentBar = hasBars ? bars[safeIndex] : undefined
 
-  const mainMa = maOverlays
+  // 按用户选择的周期过滤均线，showMa=false 时返回空对象
+  const mainMa = useMemo(() => {
+    if (!showMa) return {}
+    const result: Record<string, Array<number | null>> = {}
+    for (const period of maPeriods) {
+      const key = `ma${period}`
+      if (key in maOverlays) {
+        result[key] = maOverlays[key]
+      }
+    }
+    return result
+  }, [maOverlays, maPeriods, showMa])
 
   const currentSubValues = useMemo(() => {
     if (!hasBars) return null
@@ -608,7 +647,9 @@ export function StockKlineChart({
           return String(value)
         },
       },
-      legend: { top: 4, textStyle: { color: '#cbd5e1' } },
+      // 移除图例：组合指标子指标（dif/dea/macdHist）会冗余显示，
+      // 当前值已通过十字星面板和副图面板展示，图例无信息增量
+      legend: { show: false },
       grid: grids,
       xAxis,
       yAxis,
@@ -637,7 +678,6 @@ export function StockKlineChart({
     // Init chart if needed
     if (!chartRef.current) {
       chartRef.current = echarts.init(container)
-      // Set up resize observer (only on init)
       const onResize = () => chartRef.current?.resize()
       window.addEventListener('resize', onResize)
       const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => chartRef.current?.resize()) : null
@@ -649,15 +689,19 @@ export function StockKlineChart({
     }
     const chart = chartRef.current
 
-    // Apply option if available
+    // Apply option directly（2s 推送间隔无需节流，直接 setOption 确保实时更新可靠）
     if (option) {
       if (zoomSourceKeyRef.current !== zoomSourceKey) {
         zoomSourceKeyRef.current = zoomSourceKey
         zoomStateRef.current = null
       }
-      // Preserve dataZoom state
+      // 先从当前 chart 读取 dataZoom 状态并更新 ref（修复时序：必须先更新再用于构造 nextOption）
       const currentOption = chart.getOption()
       const dz = currentOption?.dataZoom as Array<{ start?: number; end?: number }> | undefined
+      if (dz && dz.length > 0 && dz[0].start != null && dz[0].end != null) {
+        zoomStateRef.current = { start: dz[0].start, end: dz[0].end }
+      }
+      // 用最新的 zoomStateRef 构造 nextOption，保留用户缩放视图
       const preservedZoom = zoomStateRef.current
       const nextOption = preservedZoom
         ? {
@@ -668,9 +712,6 @@ export function StockKlineChart({
           ],
         }
         : option
-      if (dz && dz.length > 0 && dz[0].start != null && dz[0].end != null) {
-        zoomStateRef.current = { start: dz[0].start, end: dz[0].end }
-      }
       // 使用 replaceMerge 仅替换 series，保留 tooltip/axisPointer 状态，
       // 避免盘中实时行情推送时 setOption 全量替换导致十字星面板闪烁消失
       chart.setOption(nextOption, { replaceMerge: ['series'] })
@@ -748,6 +789,24 @@ export function StockKlineChart({
           options={subIndicatorOptions}
           onChange={(value) => onSubIndicatorChange(value as SubIndicator)}
         />
+        <span className="stock-chart__td9-toggle">
+          <Switch size="small" checked={showMa} onChange={setShowMa} />
+          <Popover
+            trigger="click"
+            placement="bottom"
+            content={
+              <Checkbox.Group
+                value={maPeriods}
+                onChange={(values) => setMaPeriods(values as number[])}
+                options={MA_PERIOD_OPTIONS.map((p) => ({ label: `MA${p}`, value: p }))}
+              />
+            }
+          >
+            <span className="stock-chart__td9-label" style={{ cursor: 'pointer' }}>
+              均线
+            </span>
+          </Popover>
+        </span>
         <span className="stock-chart__td9-toggle">
           <Switch size="small" checked={showTd9} onChange={setShowTd9} />
           <span className="stock-chart__td9-label">{t('stock.indicators.td9')}</span>

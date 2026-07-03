@@ -2,7 +2,7 @@ import { Tabs, Button } from 'antd'
 import { useEffect, useMemo, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { ArrowLeft, FlaskConical, Sparkles } from 'lucide-react'
+import { ArrowLeft, FlaskConical, Sparkles, Layers } from 'lucide-react'
 
 import {
   fetchStockDiagnosis,
@@ -17,6 +17,7 @@ import { AsyncSection } from '@/components/common/AsyncSection'
 import { StockAnnouncementsPanel } from '@/components/stock/StockAnnouncementsPanel'
 import { StockDiagnosisPanel } from '@/components/stock/StockDiagnosisPanel'
 import { StockFinancialsPanel } from '@/components/stock/StockFinancialsPanel'
+import { StockFactorDrawer } from '@/components/stock/StockFactorDrawer'
 import { StockFundFlowPanel } from '@/components/stock/StockFundFlowPanel'
 import { StockKlineChart } from '@/components/stock/StockKlineChart'
 import { StockNewsPanel } from '@/components/stock/StockNewsPanel'
@@ -36,6 +37,7 @@ export function StockDetailPage() {
   const navigate = useNavigate()
   const [mainIndicator, setMainIndicator] = useState<MainIndicator>('ma')
   const [subIndicator, setSubIndicator] = useState<SubIndicator>('macd')
+  const [factorDrawerOpen, setFactorDrawerOpen] = useState(false)
   const sendMessage = useAgentStore((s) => s.sendMessage)
   const setSessionScope = useAgentStore((s) => s.setSessionScope)
   const setAgentPanelOpen = useLayoutStore((s) => s.setAgentPanelOpen)
@@ -153,6 +155,13 @@ export function StockDetailPage() {
           >
             {t('common.backtest')}
           </Button>
+          <Button
+            size="small"
+            icon={<Layers size={14} />}
+            onClick={() => setFactorDrawerOpen(true)}
+          >
+            截面因子
+          </Button>
         </div>
       </div>
 
@@ -228,6 +237,12 @@ export function StockDetailPage() {
           </>
         ) : null}
       </AsyncSection>
+      <StockFactorDrawer
+        open={factorDrawerOpen}
+        symbol={decodedSymbol}
+        stockName={stockOverview?.name}
+        onClose={() => setFactorDrawerOpen(false)}
+      />
     </div>
   )
 }
