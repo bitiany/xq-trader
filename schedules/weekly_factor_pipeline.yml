@@ -13,10 +13,10 @@ steps:
   - name: factor_evaluate
     task: factor.evaluate_weekly
     args:
-      window: 252
+      window: 504
 
   - name: alpha_synthesize
     task: factor.synthesize_weekly
     depends_on: [factor_evaluate]
     args:
-      window: 252
+      window: 504

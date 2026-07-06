@@ -10,6 +10,7 @@ from typing import Any
 from uuid import uuid4
 
 from fastapi import WebSocket, WebSocketDisconnect
+from starlette.websockets import WebSocketState
 
 from framework.commons.logger import get_logger
 from framework.commons.redis_client import redis_client
@@ -149,7 +150,7 @@ class ConnectionManager:
         self._subscriptions.pop(conn_id, None)
         self._last_active.pop(conn_id, None)
 
-        if ws:
+        if ws and ws.client_state == WebSocketState.CONNECTED:
             try:
                 await ws.close()
             except WsConnectionError:

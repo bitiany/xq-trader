@@ -4,6 +4,16 @@ from xqtrader.domain.factor.models.factor_pool import FacFactorPool
 from xqtrader.domain.factor.models.factor_registry import FacFactorRegistry
 from xqtrader.domain.factor.models.factor_stats import FacFactorStats
 from xqtrader.domain.factor.models.factor_value import FacFactorValue
+from xqtrader.domain.factor.models.financial_composite_value import FacFinancialCompositeValue
+from xqtrader.domain.factor.models.financial_factor_stats import FacFinancialFactorStats
 from xqtrader.domain.factor.models.financial_factor_value import FacFinancialFactorValue
 
-__all__ = ["FacFactorPool", "FacFactorRegistry", "FacFactorStats", "FacFactorValue", "FacFinancialFactorValue"]
+__all__ = [
+    "FacFactorPool",
+    "FacFactorRegistry",
+    "FacFactorStats",
+    "FacFactorValue",
+    "FacFinancialCompositeValue",
+    "FacFinancialFactorStats",
+    "FacFinancialFactorValue",
+]

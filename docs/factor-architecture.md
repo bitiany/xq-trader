@@ -1,7 +1,7 @@
 # xqtrader 因子系统技术架构（个人版）
 
-> **版本**: v6.0
-> **更新**: 2026-06-26（取代旧版，原文档已归档至 `docs/archive/factor-arch-v6-20260626/`）
+> **版本**: v6.1
+> **更新**: 2026-07-03（v6.1：IC 窗口 252→504 多年统计；压缩策略 6 months→1 year 与 DB 对齐；样本池 8 池 active；补充 D4 交互因子与评估排除类别）
 > **依赖**: [factor-catalog.md](./factor-catalog.md) 因子规格目录
 > **框架**: Pipeline 引擎 + Celery 插件 + DAL/ORM
 > **定位**: **个人单机**量化平台的因子基础设施
@@ -17,7 +17,7 @@
 | 因子生命周期 | 7 态状态机（Registered→Testing→Active→Watchlist→Deprecated→Dormant→Archived）+ 复活/冷却 | **2 态：active / deprecated** | 旧版 7 态**未实现**，代码已收敛为 2 态（移除 draft/testing） |
 | 因子评估 ML 管线 | XGBoost 特征重要性 + MLP 非线性 IC + AutoEncoder/HDBSCAN 共线性诊断 | **移除**；共线性用相关系数矩阵去冗余 | ML 管线**未实现**（`src/` 无代码），安全移除；T9 已落地 `factor_dedup.py` |
 | 存储分层 | 热/温/冷三层 + Parquet 归档 + 按因子类别差异化保留 | **单层 + TimescaleDB 自动压缩** | 三层归档**未实现**；5 年总量仅 ~4GB，无需归档 |
-| 样本池 | 8 池（含行业/风格池）全量评估 | **默认 `all` + 1 个目标交易池**；其余按需开启 | T5 已落地：`pool_init.py` 默认 `all + idx_300` active，其余 deprecated |
+| 样本池 | 8 池（含行业/风格池）全量评估 | **8 池 active**：`all + idx_300/idx_500/idx_1000 + 4 风格池`；`idx_50/idx_kcb50/idx_cybz` deprecated | 已落地：`pool_init.py` DEFAULT_ACTIVE_POOL_IDS 8 池 |
 | 因子合成 | 等权/IC/ICIR/ML 多方案 + Stacking 集成 | **默认等权（组内）+ ICIR 加权（跨组）**；ML 为远期可选 | ML 合成为远期可选；T9 组内去冗余已落地 |
 
 > **个人版第一设计原则**：能用既有组件与简单统计方法解决的，不引入 ML/分层存储/复杂状态机。**简单即可维护**。
@@ -123,6 +123,21 @@ L2 跨组合成：ICIR 加权（不同组代表不同 Alpha 维度，ICIR 兼顾
 | L1 | composite_fund_flow | cs_main_net_pct, huge_net_pct, big_net_pct | equal_weight |
 | L2 | composite_alpha | 上述 6 个 L1 合成因子 | icir_weight |
 
+### 3.1.1 D4 交互因子（interaction）
+
+交互因子在 L1/L2 之外独立合成：对两个原始因子截面 Z-score 后相乘，捕捉非线性协同效应。`composite_method='interaction'`，共 6 个：
+
+| factor_id | 输入因子 | 语义 |
+|-----------|---------|------|
+| mom_vol_cross | mom_20d × atr_ratio | 动量×波动协同 |
+| adx_rsi_cross | adx_14 × rsi_14 | 趋势强度×超买超卖 |
+| vol_ratio_mom_cross | cs_volume_ratio × mom_20d | 量比×动量 |
+| rsi_bbands_cross | rsi_14 × boll_position | 超买超卖×布林位置 |
+| macd_adx_cross | macd_hist_ratio × adx_14 | MACD×趋势强度 |
+| vol_mom_accel_cross | atr_ratio × macd_hist_delta | 波动×动量加速度 |
+
+> 交互因子属 `category='interaction'`，不参与评估（同 composite_*），仅作为合成产物落库供下游信号引擎使用。
+
 ### 3.2 截面预处理（合成前）
 
 ```
@@ -143,15 +158,31 @@ L2 跨组合成：ICIR 加权（不同组代表不同 Alpha 维度，ICIR 兼顾
 > **输出**: fac_factor_stats + 注册表 factor_grade
 > **说明**: 不产生新因子值，对所有因子统计评估
 
+### 4.0 评估排除类别
+
+评估任务仅对 `status='active'` 且 `category` 不属于以下 5 类的因子统计：
+
+| 排除类别 | 原因 |
+|---------|------|
+| `return` | 评估标签（fwd_ret_*），是评估的因变量而非被评估因子 |
+| `chanlun` | 非截面连续值（缠论笔数等），无截面可比性 |
+| `composite_group` | L1 组内合成产物，由合成任务生成，不重复评估 |
+| `composite_cross` | L2 跨组合成产物（composite_alpha），不重复评估 |
+| `interaction` | D4 交互因子合成产物，不重复评估 |
+
+> 排除规则定义在 `task.py` 的 `_EXCLUDED_CATEGORIES`，确保评估只针对原始 Alpha 因子。
+
 ### 4.1 评估指标
 
 | 指标 | 计算方式 | 阈值 |
 |------|---------|------|
-| IC | Spearman(factor_t, return_{t+1})，滚动 252 日 | \|IC\| > 0.03 |
-| ICIR | IC_mean / IC_std | > 0.5 可用, > 1.0 优良 |
-| 多空年化 | (Q5 - Q1) 年化 | > 5% |
+| IC | Spearman(factor_t, return_{t+1})，统计窗口 504 日（约 2 年） | \|IC\| > 0.03 |
+| ICIR | IC_mean / IC_std（取末 504 日） | > 0.5 可用, > 1.0 优良 |
+| 多空年化 | (Q5 - Q1) 年化（年化交易日数 252） | > 5% |
 | 换手率 | Σ\|w_t - w_{t-1}\| / 2 | < 70% |
 | 衰减半衰期 | IC(h=1..20) 拟合 | > 3 日 |
+
+> **窗口选型**：1 年（252 日）样本量不足导致 ICIR 统计不稳定，本系统统一采用 504 日（约 2 年）作为 IC 统计窗口，兼顾近期表现与多年统计稳定性。合成任务的滚动 IC/ICIR 权重窗口同步为 504，保持评估与合成语义一致。`layered_backtest` 年化时仍用 252 交易日标准（金融惯例，非统计窗口）。
 
 ### 4.2 因子等级（A/B/C/D）
 
@@ -310,7 +341,7 @@ src/xqtrader/domain/factor/            # 业务领域层
 
 ```python
 @timescale(time_column="trade_date", chunk_interval="6 month",
-           compress_after="6 months", compress_segmentby="symbol")
+           compress_after="1 year", compress_segmentby="symbol")
 class FacFactorValue(Base):
     __bind_key__ = "stock"
     symbol: Mapped[str]       # String(10), PK
@@ -348,19 +379,31 @@ class FacFinancialFactorValue(Base):
 | 因子统计 | — | < 1 MB |
 | **合计** | | **≈ 4 GB** |
 
-> 个人版只需：`fac_factor_value` 6 个月后 TimescaleDB 自动压缩；其余普通表永久保留。**真正需关注的是查询性能（索引），而非存储容量**，无需归档层。
+> 个人版只需：`fac_factor_value` 1 年后 TimescaleDB 自动压缩（`compress_after='1 year'`，与 DB 实际 policy 一致）；其余普通表永久保留。**真正需关注的是查询性能（索引），而非存储容量**，无需归档层。
 
 ---
 
 ## 八、样本池（个人版收敛）
 
-### 8.1 现状与建议
+### 8.1 现状
 
-代码当前在 `pool_init.py` 配置 7 个池：`all` + `idx_50/idx_300/idx_500/idx_1000/idx_kcb50/idx_cybz`，每池均全量评估全部因子。
+`pool_init.py` 配置 11 个池，其中 **8 池 active**、3 池 deprecated：
 
-**个人版建议**：评估默认仅启用 **`all` + 1 个实际交易的目标池**（如 `idx_300`），其余池保留定义但默认不参与周频评估，避免 `N 池 × M 因子` 的无谓计算。可通过样本池的 `status` 或调度参数控制启用范围。
+| status | pool_id | pool_type | 说明 |
+|--------|---------|-----------|------|
+| active | `all` | market | 全 A 股 |
+| active | `idx_300` | index | 沪深 300 |
+| active | `idx_500` | index | 中证 500 |
+| active | `idx_1000` | index | 中证 1000 |
+| active | `style_growth` | style | 成长股 |
+| active | `style_value` | style | 价值股 |
+| active | `style_blue_chip` | style | 蓝筹股 |
+| active | `style_large_cap` | style | 大盘股 |
+| deprecated | `idx_50` | index | 上证 50（标的与 idx_300 高度重合） |
+| deprecated | `idx_kcb50` | index | 科创 50 |
+| deprecated | `idx_cybz` | index | 创业板指 |
 
-> 多池评估的价值（同因子在不同池预测力差异大）真实存在，但个人通常只交易 1~2 个池，无需为不交易的池持续算 IC。
+> 多池评估的价值（同因子在不同池预测力差异大）真实存在，8 池覆盖主要指数与风格维度，`factor_scope` 可按 include/exclude/category 进一步收敛单池评估因子范围。
 
 ### 8.2 样本池配置
 
@@ -466,7 +509,7 @@ steps:
 | 2 态生命周期 | `registry.py` sync_to_registry 默认 `active`；评估/合成任务仅过滤 `active` | 一致 |
 | 移除 ML 评估 | `src/` 无 ML 评估实现 | 一致 |
 | 单层 + 压缩 | 无归档代码；`@timescale` 已配压缩 | 一致 |
-| 样本池收敛 | `pool_init.py` 默认 `all + idx_300` active，其余 deprecated（T5 已落地） | 一致 |
+| 样本池 | `pool_init.py` 8 池 active（all + 3 指数 + 4 风格），3 池 deprecated | 一致 |
 | 周频调度 | `weekly_factor_pipeline.yml` 编排 DAG，但 `plugin.yaml` 的 schedule 注释禁用，手动触发 | 一致 |
 
 ---

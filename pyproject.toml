@@ -110,7 +110,7 @@ disallow_untyped_defs = true
 packages = ["framework", "xqtrader", "agent", "mcp_server", "skills"]
 
 [[tool.mypy.overrides]]
-module = ["psycopg2", "psycopg.*", "xtquant.*", "langgraph.checkpoint.postgres", "nanobot.*", "mcp.*", "backtrader", "quantstats", "quantstats.*", "akshare", "akshare.*", "qdrant_client", "qdrant_client.*", "sentence_transformers", "sentence_transformers.*", "pdfplumber", "pdfplumber.*", "framework.dal.transactional"]
+module = ["psycopg2", "psycopg.*", "xtquant.*", "langgraph.checkpoint.postgres", "nanobot.*", "mcp.*", "backtrader", "quantstats", "quantstats.*", "akshare", "akshare.*", "qdrant_client", "qdrant_client.*", "sentence_transformers", "sentence_transformers.*", "pdfplumber", "pdfplumber.*", "framework.dal.transactional", "framework.dal.session"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

@@ -277,9 +277,12 @@ class FactorQuarterlyTask(BaseTask):
                 "grossprofit_margin": rec.grossprofit_margin,
                 "netprofit_margin": rec.netprofit_margin,
                 "assets_turn": rec.assets_turn,
+                "op_of_gr": rec.op_of_gr,
+                "ebit_of_gr": rec.ebit_of_gr,
+                "expense_of_sales": rec.expense_of_sales,
                 # B3 成长（单季度原始值，用于跨期计算）
                 "q_roe": rec.q_roe,
-                # B3 成长（增长率，直接取值）
+                # B3 成长（单季度增长率，直接取值）
                 "q_or_yoy": rec.q_or_yoy,
                 "q_netprofit_yoy": rec.q_netprofit_yoy,
                 "q_dtprofit_yoy": rec.q_dtprofit_yoy,
@@ -290,20 +293,35 @@ class FactorQuarterlyTask(BaseTask):
                 "q_orgrow_qoq": rec.q_orgrow_qoq,
                 "q_opgrow_qoq": rec.q_opgrow_qoq,
                 "q_roegrow_qoq": rec.q_roegrow_qoq,
-                # B4 质量
+                # B3 成长（年度增长率，直接取值）
+                "dt_netprofit_yoy": rec.dt_netprofit_yoy,
+                "equity_yoy": rec.equity_yoy,
+                "assets_yoy": rec.assets_yoy,
+                # B4 质量营运
                 "ocf_to_profit": rec.ocf_to_profit,
                 "ocf_to_or": rec.ocf_to_or,
                 "salescash_to_or": rec.salescash_to_or,
                 "dtprofit_to_profit": rec.dtprofit_to_profit,
                 "inv_turn": rec.inv_turn,
                 "ar_turn": rec.ar_turn,
-                # B5 杠杆
+                "fa_turn": rec.fa_turn,
+                "ca_turn": rec.ca_turn,
+                # B5 杠杆偿债
                 "debt_to_assets": rec.debt_to_assets,
                 "current_ratio": rec.current_ratio,
                 "eqt_to_talcapital": rec.eqt_to_talcapital,
                 "ebit_to_interest": rec.ebit_to_interest,
                 "ocf_to_debt": rec.ocf_to_debt,
                 "assets_to_eqt": rec.assets_to_eqt,
+                "quick_ratio": rec.quick_ratio,
+                "cash_ratio": rec.cash_ratio,
+                "debt_to_eqt": rec.debt_to_eqt,
+                "ebitda_to_debt": rec.ebitda_to_debt,
+                "int_to_talcap": rec.int_to_talcap,
+                "tangibleasset_to_debt": rec.tangibleasset_to_debt,
+                "ocf_to_shortdebt": rec.ocf_to_shortdebt,
+                "ocf_to_interestdebt": rec.ocf_to_interestdebt,
+                "ocf_to_netdebt": rec.ocf_to_netdebt,
             }
             data.append(row)
 

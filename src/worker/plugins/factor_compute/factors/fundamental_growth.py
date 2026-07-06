@@ -13,9 +13,22 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 import pandas as pd
 
 from xqtrader.domain.factor.base import FactorPlugin
+
+# 季频财务因子数据起始日期（sdc_financial_indicator 自 2012-08-24 起有数据）
+_FINANCIAL_DATA_START = date(2012, 8, 24)
+# 部分同比/环比因子自 2019-04-29 起有数据（数据源补充字段）
+_GROWTH_QOQ_DATA_START = date(2019, 4, 29)
+# q_or_yoy 自 2019-10-31 起有数据
+_Q_OR_YOY_DATA_START = date(2019, 10, 31)
+# q_roe_yoy 自 2013-08-21 起有数据
+_Q_ROE_YOY_DATA_START = date(2013, 8, 21)
+# q_roegrow_qoq 自 2012-10-31 起有数据
+_Q_ROEGROW_QOQ_DATA_START = date(2012, 10, 31)
 
 
 class QOrYoyFactor(FactorPlugin):
@@ -32,6 +45,7 @@ class QOrYoyFactor(FactorPlugin):
     min_periods: int = 1
     requires_full_history: bool = False
     data_origin: str = "fina_indicator"
+    data_start_date: date = _Q_OR_YOY_DATA_START
     update_freq: str = "quarterly"
     report_lag_days: int = 120
 
@@ -53,6 +67,7 @@ class QNetprofitYoyFactor(FactorPlugin):
     min_periods: int = 1
     requires_full_history: bool = False
     data_origin: str = "fina_indicator"
+    data_start_date: date = _FINANCIAL_DATA_START
     update_freq: str = "quarterly"
     report_lag_days: int = 120
 
@@ -74,6 +89,7 @@ class QDtprofitYoyFactor(FactorPlugin):
     min_periods: int = 1
     requires_full_history: bool = False
     data_origin: str = "fina_indicator"
+    data_start_date: date = _FINANCIAL_DATA_START
     update_freq: str = "quarterly"
     report_lag_days: int = 120
 
@@ -95,6 +111,7 @@ class QOpYoyFactor(FactorPlugin):
     min_periods: int = 1
     requires_full_history: bool = False
     data_origin: str = "fina_indicator"
+    data_start_date: date = _FINANCIAL_DATA_START
     update_freq: str = "quarterly"
     report_lag_days: int = 120
 
@@ -116,6 +133,7 @@ class QOcfYoyFactor(FactorPlugin):
     min_periods: int = 1
     requires_full_history: bool = False
     data_origin: str = "fina_indicator"
+    data_start_date: date = _FINANCIAL_DATA_START
     update_freq: str = "quarterly"
     report_lag_days: int = 120
 
@@ -137,6 +155,7 @@ class QRoeYoyFactor(FactorPlugin):
     min_periods: int = 1
     requires_full_history: bool = False
     data_origin: str = "fina_indicator"
+    data_start_date: date = _Q_ROE_YOY_DATA_START
     update_freq: str = "quarterly"
     report_lag_days: int = 120
 
@@ -158,6 +177,7 @@ class QNetprofitgrowQoqFactor(FactorPlugin):
     min_periods: int = 1
     requires_full_history: bool = False
     data_origin: str = "fina_indicator"
+    data_start_date: date = _GROWTH_QOQ_DATA_START
     update_freq: str = "quarterly"
     report_lag_days: int = 120
 
@@ -179,6 +199,7 @@ class QOrgrowQoqFactor(FactorPlugin):
     min_periods: int = 1
     requires_full_history: bool = False
     data_origin: str = "fina_indicator"
+    data_start_date: date = _GROWTH_QOQ_DATA_START
     update_freq: str = "quarterly"
     report_lag_days: int = 120
 
@@ -200,6 +221,7 @@ class QOpgrowQoqFactor(FactorPlugin):
     min_periods: int = 1
     requires_full_history: bool = False
     data_origin: str = "fina_indicator"
+    data_start_date: date = _GROWTH_QOQ_DATA_START
     update_freq: str = "quarterly"
     report_lag_days: int = 120
 
@@ -221,6 +243,82 @@ class QRoegrowQoqFactor(FactorPlugin):
     min_periods: int = 1
     requires_full_history: bool = False
     data_origin: str = "fina_indicator"
+    data_start_date: date = _Q_ROEGROW_QOQ_DATA_START
+    update_freq: str = "quarterly"
+    report_lag_days: int = 120
+
+    def compute(self, df: pd.DataFrame) -> pd.DataFrame:
+        return pd.DataFrame({self.factor_id: df[self.dependencies[0]].astype(float)}, index=df.index)
+
+
+class DtNetprofitYoyFactor(FactorPlugin):
+    """年度扣非净利润同比增长因子 — 直接取值。
+
+    与单季度同比（q_dtprofit_yoy）互补，反映长期成长趋势。
+    """
+
+    factor_id: str = "dt_netprofit_yoy"
+    display_name: str = "年度扣非净利润同比"
+    category: str = "fundamental"
+    group_id: str = "dt_netprofit_yoy"
+    direction: str = "DESC"
+    scope: str = "both"
+    signal_type: str = "continuous"
+    dependencies: list[str] = ["dt_netprofit_yoy"]
+    min_periods: int = 1
+    requires_full_history: bool = False
+    data_origin: str = "fina_indicator"
+    data_start_date: date = _FINANCIAL_DATA_START
+    update_freq: str = "quarterly"
+    report_lag_days: int = 120
+
+    def compute(self, df: pd.DataFrame) -> pd.DataFrame:
+        return pd.DataFrame({self.factor_id: df[self.dependencies[0]].astype(float)}, index=df.index)
+
+
+class EquityYoyFactor(FactorPlugin):
+    """净资产同比增长因子 — 直接取值。
+
+    衡量企业规模扩张速度，与盈利增长配合验证成长质量。
+    """
+
+    factor_id: str = "equity_yoy"
+    display_name: str = "净资产同比"
+    category: str = "fundamental"
+    group_id: str = "equity_yoy"
+    direction: str = "DESC"
+    scope: str = "both"
+    signal_type: str = "continuous"
+    dependencies: list[str] = ["equity_yoy"]
+    min_periods: int = 1
+    requires_full_history: bool = False
+    data_origin: str = "fina_indicator"
+    data_start_date: date = _FINANCIAL_DATA_START
+    update_freq: str = "quarterly"
+    report_lag_days: int = 120
+
+    def compute(self, df: pd.DataFrame) -> pd.DataFrame:
+        return pd.DataFrame({self.factor_id: df[self.dependencies[0]].astype(float)}, index=df.index)
+
+
+class AssetsYoyFactor(FactorPlugin):
+    """总资产同比增长因子 — 直接取值。
+
+    衡量企业资产规模扩张速度，反映外延式成长能力。
+    """
+
+    factor_id: str = "assets_yoy"
+    display_name: str = "总资产同比"
+    category: str = "fundamental"
+    group_id: str = "assets_yoy"
+    direction: str = "DESC"
+    scope: str = "both"
+    signal_type: str = "continuous"
+    dependencies: list[str] = ["assets_yoy"]
+    min_periods: int = 1
+    requires_full_history: bool = False
+    data_origin: str = "fina_indicator"
+    data_start_date: date = _FINANCIAL_DATA_START
     update_freq: str = "quarterly"
     report_lag_days: int = 120
 

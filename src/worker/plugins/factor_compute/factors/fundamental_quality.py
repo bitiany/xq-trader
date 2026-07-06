@@ -15,10 +15,15 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 import numpy as np
 import pandas as pd
 
 from xqtrader.domain.factor.base import FactorPlugin
+
+# 季频财务因子数据起始日期（sdc_financial_indicator 自 2012-08-24 起有数据）
+_FINANCIAL_DATA_START = date(2012, 8, 24)
 
 
 class OcfToProfitFactor(FactorPlugin):
@@ -35,6 +40,7 @@ class OcfToProfitFactor(FactorPlugin):
     min_periods: int = 1
     requires_full_history: bool = False
     data_origin: str = "fina_indicator"
+    data_start_date: date = _FINANCIAL_DATA_START
     update_freq: str = "quarterly"
     report_lag_days: int = 120
 
@@ -56,6 +62,7 @@ class OcfToOrFactor(FactorPlugin):
     min_periods: int = 1
     requires_full_history: bool = False
     data_origin: str = "fina_indicator"
+    data_start_date: date = _FINANCIAL_DATA_START
     update_freq: str = "quarterly"
     report_lag_days: int = 120
 
@@ -77,6 +84,7 @@ class SalescashToOrFactor(FactorPlugin):
     min_periods: int = 1
     requires_full_history: bool = False
     data_origin: str = "fina_indicator"
+    data_start_date: date = _FINANCIAL_DATA_START
     update_freq: str = "quarterly"
     report_lag_days: int = 120
 
@@ -98,6 +106,7 @@ class DtprofitToProfitFactor(FactorPlugin):
     min_periods: int = 1
     requires_full_history: bool = False
     data_origin: str = "fina_indicator"
+    data_start_date: date = _FINANCIAL_DATA_START
     update_freq: str = "quarterly"
     report_lag_days: int = 120
 
@@ -119,6 +128,7 @@ class AssetsTurnFactor(FactorPlugin):
     min_periods: int = 1
     requires_full_history: bool = False
     data_origin: str = "fina_indicator"
+    data_start_date: date = _FINANCIAL_DATA_START
     update_freq: str = "quarterly"
     report_lag_days: int = 120
 
@@ -140,6 +150,7 @@ class InvTurnFactor(FactorPlugin):
     min_periods: int = 1
     requires_full_history: bool = False
     data_origin: str = "fina_indicator"
+    data_start_date: date = _FINANCIAL_DATA_START
     update_freq: str = "quarterly"
     report_lag_days: int = 120
 
@@ -161,6 +172,7 @@ class ArTurnFactor(FactorPlugin):
     min_periods: int = 1
     requires_full_history: bool = False
     data_origin: str = "fina_indicator"
+    data_start_date: date = _FINANCIAL_DATA_START
     update_freq: str = "quarterly"
     report_lag_days: int = 120
 
@@ -186,6 +198,7 @@ class AccraFactor(FactorPlugin):
     min_periods: int = 1
     requires_full_history: bool = False
     data_origin: str = "fina_indicator"
+    data_start_date: date = _FINANCIAL_DATA_START
     update_freq: str = "quarterly"
     report_lag_days: int = 120
 
@@ -199,3 +212,53 @@ class AccraFactor(FactorPlugin):
             np.nan,
         )
         return pd.DataFrame({self.factor_id: result}, index=df.index)
+
+
+class FaTurnFactor(FactorPlugin):
+    """固定资产周转率因子 — 直接取值。
+
+    衡量固定资产利用效率，业界营运能力核心指标。
+    """
+
+    factor_id: str = "fa_turn"
+    display_name: str = "固定资产周转率"
+    category: str = "fundamental"
+    group_id: str = "fa_turn"
+    direction: str = "DESC"
+    scope: str = "both"
+    signal_type: str = "continuous"
+    dependencies: list[str] = ["fa_turn"]
+    min_periods: int = 1
+    requires_full_history: bool = False
+    data_origin: str = "fina_indicator"
+    data_start_date: date = _FINANCIAL_DATA_START
+    update_freq: str = "quarterly"
+    report_lag_days: int = 120
+
+    def compute(self, df: pd.DataFrame) -> pd.DataFrame:
+        return pd.DataFrame({self.factor_id: df[self.dependencies[0]].astype(float)}, index=df.index)
+
+
+class CaTurnFactor(FactorPlugin):
+    """流动资产周转率因子 — 直接取值。
+
+    衡量流动资产利用效率，补充总资产周转率的细分维度。
+    """
+
+    factor_id: str = "ca_turn"
+    display_name: str = "流动资产周转率"
+    category: str = "fundamental"
+    group_id: str = "ca_turn"
+    direction: str = "DESC"
+    scope: str = "both"
+    signal_type: str = "continuous"
+    dependencies: list[str] = ["ca_turn"]
+    min_periods: int = 1
+    requires_full_history: bool = False
+    data_origin: str = "fina_indicator"
+    data_start_date: date = _FINANCIAL_DATA_START
+    update_freq: str = "quarterly"
+    report_lag_days: int = 120
+
+    def compute(self, df: pd.DataFrame) -> pd.DataFrame:
+        return pd.DataFrame({self.factor_id: df[self.dependencies[0]].astype(float)}, index=df.index)

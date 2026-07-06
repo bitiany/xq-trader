@@ -18,10 +18,15 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 import numpy as np
 import pandas as pd
 
 from xqtrader.domain.factor.base import FactorPlugin
+
+# 季频财务因子数据起始日期（sdc_financial_indicator 自 2012-08-24 起有数据）
+_FINANCIAL_DATA_START = date(2012, 8, 24)
 
 
 class RoeFactor(FactorPlugin):
@@ -38,6 +43,7 @@ class RoeFactor(FactorPlugin):
     min_periods: int = 1
     requires_full_history: bool = False
     data_origin: str = "fina_indicator"
+    data_start_date: date = _FINANCIAL_DATA_START
     update_freq: str = "quarterly"
     report_lag_days: int = 120
 
@@ -59,6 +65,7 @@ class RoeWaaFactor(FactorPlugin):
     min_periods: int = 1
     requires_full_history: bool = False
     data_origin: str = "fina_indicator"
+    data_start_date: date = _FINANCIAL_DATA_START
     update_freq: str = "quarterly"
     report_lag_days: int = 120
 
@@ -80,6 +87,7 @@ class RoeDtFactor(FactorPlugin):
     min_periods: int = 1
     requires_full_history: bool = False
     data_origin: str = "fina_indicator"
+    data_start_date: date = _FINANCIAL_DATA_START
     update_freq: str = "quarterly"
     report_lag_days: int = 120
 
@@ -101,6 +109,7 @@ class RoaFactor(FactorPlugin):
     min_periods: int = 1
     requires_full_history: bool = False
     data_origin: str = "fina_indicator"
+    data_start_date: date = _FINANCIAL_DATA_START
     update_freq: str = "quarterly"
     report_lag_days: int = 120
 
@@ -122,6 +131,7 @@ class RoicFactor(FactorPlugin):
     min_periods: int = 1
     requires_full_history: bool = False
     data_origin: str = "fina_indicator"
+    data_start_date: date = _FINANCIAL_DATA_START
     update_freq: str = "quarterly"
     report_lag_days: int = 120
 
@@ -143,6 +153,7 @@ class GrossprofitMarginFactor(FactorPlugin):
     min_periods: int = 1
     requires_full_history: bool = False
     data_origin: str = "fina_indicator"
+    data_start_date: date = _FINANCIAL_DATA_START
     update_freq: str = "quarterly"
     report_lag_days: int = 120
 
@@ -164,6 +175,7 @@ class NetprofitMarginFactor(FactorPlugin):
     min_periods: int = 1
     requires_full_history: bool = False
     data_origin: str = "fina_indicator"
+    data_start_date: date = _FINANCIAL_DATA_START
     update_freq: str = "quarterly"
     report_lag_days: int = 120
 
@@ -189,6 +201,7 @@ class GpToAssetsFactor(FactorPlugin):
     min_periods: int = 1
     requires_full_history: bool = False
     data_origin: str = "fina_indicator"
+    data_start_date: date = _FINANCIAL_DATA_START
     update_freq: str = "quarterly"
     report_lag_days: int = 120
 
@@ -201,3 +214,72 @@ class GpToAssetsFactor(FactorPlugin):
             np.nan,
         )
         return pd.DataFrame({self.factor_id: result}, index=df.index)
+
+
+class OpOfGrFactor(FactorPlugin):
+    """营业利润率因子 — 营业利润/营业总收入，直接取值。"""
+
+    factor_id: str = "op_of_gr"
+    display_name: str = "营业利润率"
+    category: str = "fundamental"
+    group_id: str = "op_of_gr"
+    direction: str = "DESC"
+    scope: str = "both"
+    signal_type: str = "continuous"
+    dependencies: list[str] = ["op_of_gr"]
+    min_periods: int = 1
+    requires_full_history: bool = False
+    data_origin: str = "fina_indicator"
+    data_start_date: date = _FINANCIAL_DATA_START
+    update_freq: str = "quarterly"
+    report_lag_days: int = 120
+
+    def compute(self, df: pd.DataFrame) -> pd.DataFrame:
+        return pd.DataFrame({self.factor_id: df[self.dependencies[0]].astype(float)}, index=df.index)
+
+
+class EbitOfGrFactor(FactorPlugin):
+    """EBIT利润率因子 — 息税前利润/营业总收入，直接取值。"""
+
+    factor_id: str = "ebit_of_gr"
+    display_name: str = "EBIT利润率"
+    category: str = "fundamental"
+    group_id: str = "ebit_of_gr"
+    direction: str = "DESC"
+    scope: str = "both"
+    signal_type: str = "continuous"
+    dependencies: list[str] = ["ebit_of_gr"]
+    min_periods: int = 1
+    requires_full_history: bool = False
+    data_origin: str = "fina_indicator"
+    data_start_date: date = _FINANCIAL_DATA_START
+    update_freq: str = "quarterly"
+    report_lag_days: int = 120
+
+    def compute(self, df: pd.DataFrame) -> pd.DataFrame:
+        return pd.DataFrame({self.factor_id: df[self.dependencies[0]].astype(float)}, index=df.index)
+
+
+class ExpenseOfSalesFactor(FactorPlugin):
+    """期间费用率因子 — 销售期间费用率，直接取值。
+
+    方向 ASC：期间费用率越低，成本控制能力越强，盈利质量越高。
+    """
+
+    factor_id: str = "expense_of_sales"
+    display_name: str = "期间费用率"
+    category: str = "fundamental"
+    group_id: str = "expense_of_sales"
+    direction: str = "ASC"
+    scope: str = "both"
+    signal_type: str = "continuous"
+    dependencies: list[str] = ["expense_of_sales"]
+    min_periods: int = 1
+    requires_full_history: bool = False
+    data_origin: str = "fina_indicator"
+    data_start_date: date = _FINANCIAL_DATA_START
+    update_freq: str = "quarterly"
+    report_lag_days: int = 120
+
+    def compute(self, df: pd.DataFrame) -> pd.DataFrame:
+        return pd.DataFrame({self.factor_id: df[self.dependencies[0]].astype(float)}, index=df.index)

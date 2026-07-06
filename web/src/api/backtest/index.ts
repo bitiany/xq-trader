@@ -45,18 +45,18 @@ export interface SimpleBacktestRequest {
 }
 
 export interface BacktestSymbolMetrics {
-  total_return?: number
-  annual_return?: number
-  annualized_return?: number
-  avg_daily_return?: number
-  max_drawdown?: number
+  total_return?: number | string
+  annual_return?: number | string
+  annualized_return?: number | string
+  avg_daily_return?: number | string
+  max_drawdown?: number | string
   max_dd_length?: number
-  sharpe_ratio?: number
+  sharpe_ratio?: number | string
   total_trades?: number
   num_trades?: number
-  win_rate?: number
-  profit_loss_ratio?: number
-  sqn?: number
+  win_rate?: number | string
+  profit_loss_ratio?: number | string
+  sqn?: number | string
   final_value?: number
   initial_cash?: number
   equity_curve?: { date: string; value: number }[]

@@ -22,7 +22,7 @@ class FacFactorStats(AuditedBase):
     factor_id: Mapped[str] = mapped_column(String(32), nullable=False, comment="因子标识")
     pool_id: Mapped[str] = mapped_column(String(16), nullable=False, comment="样本池标识")
     calc_date: Mapped[date] = mapped_column(Date, nullable=False, comment="计算日期")
-    window: Mapped[int] = mapped_column(Integer, nullable=False, default=252, comment="滚动窗口(交易日)")
+    window: Mapped[int] = mapped_column(Integer, nullable=False, default=504, comment="IC统计窗口(交易日，约2年)")
     ic_mean: Mapped[float | None] = mapped_column(Float, nullable=True, comment="IC均值")
     ic_std: Mapped[float | None] = mapped_column(Float, nullable=True, comment="IC标准差")
     icir: Mapped[float | None] = mapped_column(Float, nullable=True, comment="ICIR = IC_mean / IC_std")

@@ -21,6 +21,7 @@ from datetime import date, timedelta
 from typing import Any
 
 import numpy as np
+import pandas as pd
 
 from framework.commons.concurrent import ConcurrentRunner
 from framework.commons.logger import get_logger
@@ -29,6 +30,7 @@ from worker.plugins.utils import parse_list_param
 from xqtrader.domain.factor.models.factor_pool import FacFactorPool
 from xqtrader.domain.factor.models.factor_registry import FacFactorRegistry
 from xqtrader.domain.factor.models.factor_stats import FacFactorStats
+from xqtrader.domain.factor.services import factor_data_loader as fdl
 from xqtrader.domain.factor.services.cross_section_reader import CrossSectionReader
 from xqtrader.domain.factor.services.grade_evaluator import GradeEvaluator
 from xqtrader.domain.factor.services.ic_calculator import ICCalculator
@@ -39,14 +41,29 @@ from xqtrader.domain.factor.services.registry import (
     register_factor_variants,
     sync_to_registry,
 )
+from xqtrader.domain.watermark.models.trade_calendar import TradeCalendar
 
 logger = get_logger("factor.evaluate")
 
 _RETENTION_YEARS = 5
-_DEFAULT_WINDOW = 504  # IC 统计窗口（约 2 年），平衡近期表现与统计稳定性
-_EVAL_CONCURRENCY = 12  # 评估任务消费者数量（stock 连接池 20+30=50，12×2=24 ≤ 50，余量充足）
+# Forward-walk 多窗口并行评估：每个因子在每个样本池下产生 4 条 stats 记录
+# - 63天（3月）: 短周期窗口，捕捉动量/技术/资金流因子的短期有效性
+# - 126天（半年）: 中短周期窗口
+# - 252天（1年）: 中长周期窗口，价值/质量因子开始稳定
+# - 504天（2年）: 长周期窗口，长期稳定因子（价值/红利）的基准窗口
+_EVAL_WINDOWS: tuple[int, ...] = (63, 126, 252, 504)
+_DEFAULT_WINDOW = 504  # 兼容 plugin.yaml 入参（单窗口模式已废弃，仅在入参显式指定时使用）
+# 评估任务消费者数量。
+# 性能调优（2026-07-05）：
+#   - 12 并发：DB 同时执行 12 个大批量 SELECT（每个 2000 symbols × 1210 天 = 2.4M rows），
+#     磁盘 I/O 饱和，单批次查询从 110s 退化到 3320s（30 倍慢），1h45m 仅完成 30/132 因子
+#   - 4 并发（旧方案，逐因子加载）：DB 同时执行 4 个 SELECT，单批次 110s，132 因子 3-4 小时
+#   - 8 并发（新方案，预加载宽表）：computed 类因子已预加载到内存宽表，评估阶段为 CPU 密集型，
+#     8 并发可充分利用 CPU；独立加载因子（fina_indicator 等）仍受 DB I/O 限制但数量少
+#   - 连接池约束：stock 连接池 30，预加载阶段占用 1-5 连接（已释放），评估阶段 8 并发 + 独立加载 ≤ 12
+_EVAL_CONCURRENCY = 8
 
-# 不参与评估的因子类别：
+# 不参与日频评估的因子类别：
 # - return: 评估标签（fwd_ret_*），不评估
 # - chanlun: 非截面连续值（缠论笔数等），覆盖率仅6%，IC异常，不入因子评估和合成
 # - composite_group/composite_cross: 合成产物，不评估
@@ -54,6 +71,11 @@ _EVAL_CONCURRENCY = 12  # 评估任务消费者数量（stock 连接池 20+30=50
 _EXCLUDED_CATEGORIES: tuple[str, ...] = (
     "return", "chanlun", "composite_group", "composite_cross", "interaction",
 )
+
+# 不参与日频评估的更新频率：
+# - quarterly: 季频财务因子（B2-B5，32个）由 factor_evaluate_quarterly 任务独立评估，
+#   避免在日频评估中因 PIT 前向填充导致评估结果失真
+_EXCLUDED_UPDATE_FREQS: tuple[str, ...] = ("quarterly",)
 
 # 因子数据门禁阈值
 _MIN_FACTOR_ROWS = 1000  # 最少有效数据行数（低于此值视为数据不完整）
@@ -80,6 +102,8 @@ class _EvalContext:
     end_date: date
     window: int
     today: date
+    pool_start_time: float  # 池评估启动时间（time.monotonic），用于单因子日志输出累计耗时
+    factor_raw_panels: dict[str, Any] | None  # 预加载的因子原始面板（None 表示未预加载，回退到逐因子加载）
 
 
 class FactorEvaluateTask(BaseTask):
@@ -99,6 +123,9 @@ class FactorEvaluateTask(BaseTask):
 
         logger.info("[factor.evaluate] === 任务启动 === params: pool_ids=%s factor_ids=%s window=%d",
                     pool_ids, factor_ids, window)
+
+        # 清空空池缓存（防止上次任务的缓存残留）
+        fdl.clear_empty_pool_cache()
 
         # 同步默认样本池配置（含 status 收敛至 active 池集合）
         t0 = time.monotonic()
@@ -126,7 +153,9 @@ class FactorEvaluateTask(BaseTask):
 
         # 解析全量活跃因子列表
         # 排除：return(评估标签) / chanlun(非截面连续值) / composite_*(合成产物) / interaction(交互因子)
+        # 排除：quarterly(季频财务因子) — 由 factor_evaluate_quarterly 任务独立评估
         excluded_set = set(_EXCLUDED_CATEGORIES)
+        excluded_freq_set = set(_EXCLUDED_UPDATE_FREQS)
         if factor_ids:
             all_factors = await FacFactorRegistry.filter(
                 factor_id__in=factor_ids,
@@ -134,18 +163,30 @@ class FactorEvaluateTask(BaseTask):
             )
         else:
             all_factors = await FacFactorRegistry.filter(status="active")
-        factors = [f for f in all_factors if f.category not in excluded_set]
+        factors = [
+            f for f in all_factors
+            if f.category not in excluded_set
+            and (f.update_freq or "daily") not in excluded_freq_set
+        ]
 
         if not factors:
             return {"status": "FAILED", "message": "No active factors to evaluate"}
 
         all_factor_ids = [f.factor_id for f in factors]
 
-        # 计算日期范围
+        # 计算日期范围：以最新交易日作为评估日（calc_date），避免跨 UTC 0 点导致非交易日写入
+        # 周频长跑任务可能跨越 UTC 0 点，date.today() 会变成非交易日（如周六），
+        # 导致同一次评估产生两个 calc_date，破坏周频评估日期一致性。
+        ref_trade_date = await TradeCalendar.get_latest_trade_date()
+        if ref_trade_date is None:
+            # 交易日历缺失时回退到 today（仅作兜底，正常情况不会触发）
+            logger.warning("[factor.evaluate] 交易日历查询失败，回退使用 date.today()")
+            ref_trade_date = date.today()
+
         if not end_date:
-            end_date = date.today().strftime("%Y-%m-%d")
+            end_date = ref_trade_date.strftime("%Y-%m-%d")
         if not start_date:
-            start = date.today() - timedelta(days=_RETENTION_YEARS * 365)
+            start = ref_trade_date - timedelta(days=_RETENTION_YEARS * 365)
             start_date = start.strftime("%Y-%m-%d")
 
         logger.info(
@@ -170,8 +211,9 @@ class FactorEvaluateTask(BaseTask):
             # 根据样本池的 factor_scope 解析实际评估的因子
             pool_factor_ids = await PoolInitService.resolve_factor_ids(pool, all_factor_ids)
             logger.info(
-                "[factor.evaluate] >>> 池进度 %d/%d pool=%s factors=%d",
+                "[factor.evaluate] >>> 池进度 %d/%d pool=%s factors=%d (累计耗时=%.1fs)",
                 pool_idx, total_pools, pool.pool_id, len(pool_factor_ids),
+                time.monotonic() - task_start_time,
             )
 
             pool_start = time.monotonic()
@@ -181,6 +223,7 @@ class FactorEvaluateTask(BaseTask):
                 start_date=start_dt,
                 end_date=end_dt,
                 window=window,
+                today=ref_trade_date,
                 reader=reader,
                 ic_calc=ic_calc,
                 backtester=backtester,
@@ -189,10 +232,17 @@ class FactorEvaluateTask(BaseTask):
             pool_elapsed = time.monotonic() - pool_start
             total_stats += count
             evaluated_pool_ids.append(pool.pool_id)
+
+            # 基于已完成池的平均耗时预估剩余
+            avg_pool_time = (time.monotonic() - task_start_time) / pool_idx
+            remaining_pools = total_pools - pool_idx
+            eta_seconds = avg_pool_time * remaining_pools
             logger.info(
-                "[factor.evaluate] <<< 池完成 %d/%d pool=%s 成功=%d/%d 耗时=%.1fs 累计耗时=%.1fs",
+                "[factor.evaluate] <<< 池完成 %d/%d pool=%s 成功=%d/%d 耗时=%.1fs "
+                "累计stats=%d 累计耗时=%.1fs 剩余%d池 预估ETA=%.0f分钟",
                 pool_idx, total_pools, pool.pool_id, count, len(pool_factor_ids),
-                pool_elapsed, time.monotonic() - task_start_time,
+                pool_elapsed, total_stats, time.monotonic() - task_start_time,
+                remaining_pools, eta_seconds / 60.0,
             )
 
         # 更新因子注册表全局等级
@@ -220,6 +270,7 @@ class FactorEvaluateTask(BaseTask):
         start_date: date,
         end_date: date,
         window: int,
+        today: date,
         reader: CrossSectionReader,
         ic_calc: ICCalculator,
         backtester: LayeredBacktester,
@@ -231,6 +282,10 @@ class FactorEvaluateTask(BaseTask):
         - 预加载共享只读数据（symbols/returns_panel 等）
         - N 个消费者并发处理各因子（加载面板→计算 stats→持久化）
         - 单因子失败不影响其他，错误隔离
+
+        Args:
+            today: 评估日（calc_date），由调用方统一传入最新交易日，
+                   避免跨池跨 UTC 0 点导致 calc_date 不一致
         """
         pool_id = pool.pool_id
         total_factors = len(factor_ids)
@@ -239,6 +294,22 @@ class FactorEvaluateTask(BaseTask):
             "[factor.evaluate] >>> 进入样本池: %s (%s) factors=%d concurrency=%d",
             pool_id, pool.pool_name, total_factors, _EVAL_CONCURRENCY,
         )
+
+        # 预探测 pool_id 在 fac_factor_value 中是否有数据
+        # 风格池（style_value/style_growth 等）在 fac_factor_value 中无数据，
+        # 探测一次后加入空池缓存，后续所有因子直接查 all 池，避免 100-190s/因子的空查询
+        t0 = time.monotonic()
+        has_factor_data = await fdl.probe_pool_has_factor_data(pool_id)
+        logger.info(
+            "[factor.evaluate] pool=%s 因子数据探测: has_factor_data=%s 耗时=%.2fs",
+            pool_id, has_factor_data, time.monotonic() - t0,
+        )
+        if not has_factor_data:
+            logger.info(
+                "[factor.evaluate] pool=%s 在 fac_factor_value 中无数据,"
+                "所有因子将直接使用 all 池（symbol 已按样本池过滤）",
+                pool_id,
+            )
 
         # 预加载共享只读数据（所有因子共用）
         t0 = time.monotonic()
@@ -294,6 +365,22 @@ class FactorEvaluateTask(BaseTask):
             pool_id, len(direction_map), time.monotonic() - t0,
         )
 
+        # 预加载因子原始面板宽表（消除 computed 类因子的重复 DB 查询）
+        # computed/fund_flow/market/derived 类因子（约 114 个）通过一次 DB 查询批量加载，
+        # 评估阶段从内存宽表切片，CPU 密集型可支持 8 并发；其他类因子保持独立加载
+        t0 = time.monotonic()
+        factor_raw_panels = await fdl.preload_factor_raw_panels(
+            start_date=start_date,
+            end_date=end_date,
+            factor_ids=factor_ids,
+            symbols=symbols,
+            pool_id=pool_id,
+        )
+        logger.info(
+            "[factor.evaluate] pool=%s 因子原始面板预加载: %d/%d 耗时=%.2fs",
+            pool_id, len(factor_raw_panels), len(factor_ids), time.monotonic() - t0,
+        )
+
         logger.info(
             "[factor.evaluate] pool=%s 共享数据预加载完成 总耗时=%.2fs, 开始并发评估 %d 因子",
             pool_id, time.monotonic() - pool_t0, total_factors,
@@ -316,7 +403,9 @@ class FactorEvaluateTask(BaseTask):
             start_date=start_date,
             end_date=end_date,
             window=window,
-            today=date.today(),
+            today=today,
+            pool_start_time=pool_t0,
+            factor_raw_panels=factor_raw_panels,
         )
 
         # 生产者-消费者并发评估
@@ -324,15 +413,21 @@ class FactorEvaluateTask(BaseTask):
             concurrency=_EVAL_CONCURRENCY,
             log_name=f"factor.evaluate[{pool_id}]",
         )
+        eval_t0 = time.monotonic()
         result = await runner.run_items(
             items=factor_ids,
             processor=lambda fid: self._evaluate_single_factor(fid, ctx),
         )
+        eval_elapsed = time.monotonic() - eval_t0
 
+        # 估算剩余时间（基于已评估因子平均耗时）
+        avg_per_factor = eval_elapsed / total_factors if total_factors > 0 else 0.0
         logger.info(
-            "[factor.evaluate] <<< 样本池 %s 评估完成: 成功=%d/%d 失败=%d 耗时=%.1fs",
+            "[factor.evaluate] <<< 样本池 %s 评估完成: 成功=%d/%d 失败=%d "
+            "并发评估=%.1fs (平均%.1fs/因子) 预加载=%.1fs 池总耗时=%.1fs",
             pool_id, result.success_count, total_factors,
-            result.failure_count, time.monotonic() - pool_t0,
+            result.failure_count, eval_elapsed, avg_per_factor,
+            eval_t0 - pool_t0, time.monotonic() - pool_t0,
         )
         return result.success_count
 
@@ -346,9 +441,10 @@ class FactorEvaluateTask(BaseTask):
         """
         reader = ctx.reader
         factor_t0 = time.monotonic()
+        pool_elapsed = time.monotonic() - ctx.pool_start_time
         logger.info(
-            "[factor.evaluate] pool=%s >>> 开始评估 factor=%s",
-            ctx.pool_id, factor_id,
+            "[factor.evaluate] pool=%s >>> 开始评估 factor=%s (池累计=%.1fs)",
+            ctx.pool_id, factor_id, pool_elapsed,
         )
 
         # 加载单因子截面面板（含截面预处理：缺失值填充→MAD→Z-score→行业+市值中性化→再Z-score）
@@ -358,15 +454,33 @@ class FactorEvaluateTask(BaseTask):
         effective_start = max(ctx.start_date, factor_data_start) if factor_data_start else ctx.start_date
 
         t0 = time.monotonic()
-        factor_panel = await reader.load_single_factor_panel(
-            start_date=effective_start,
-            end_date=ctx.end_date,
-            pool_id=ctx.pool_id,
-            symbols=ctx.symbols,
-            factor_id=factor_id,
-            industry_map=ctx.industry_map,
-            market_cap_panel=ctx.market_cap_panel,
-        )
+        # 优先从预加载宽表切片（消除 computed 类因子的 DB I/O 瓶颈），
+        # 未命中（fina_indicator/daily_indicator/cross_section_* 等独立加载因子）时回退到逐因子加载
+        if ctx.factor_raw_panels is not None and factor_id in ctx.factor_raw_panels:
+            raw_panel = ctx.factor_raw_panels[factor_id]
+            # 按 effective_start 过滤（因子级 start_date，避免数据源限制因子被门禁拦截）
+            # trade_date 可能是 date 对象或 Timestamp，统一用 pd.to_datetime 转换后比较
+            if factor_data_start and effective_start > ctx.start_date:
+                td_index = pd.to_datetime(raw_panel.index.get_level_values("trade_date"))
+                mask = td_index >= pd.Timestamp(effective_start)
+                raw_panel = raw_panel[mask]
+            factor_panel = reader.process_preloaded_factor_panel(
+                factor_df=raw_panel,
+                pool_id=ctx.pool_id,
+                factor_id=factor_id,
+                industry_map=ctx.industry_map,
+                market_cap_panel=ctx.market_cap_panel,
+            )
+        else:
+            factor_panel = await reader.load_single_factor_panel(
+                start_date=effective_start,
+                end_date=ctx.end_date,
+                pool_id=ctx.pool_id,
+                symbols=ctx.symbols,
+                factor_id=factor_id,
+                industry_map=ctx.industry_map,
+                market_cap_panel=ctx.market_cap_panel,
+            )
         factor_panel = reader.filter_panel_by_membership(factor_panel, ctx.membership)
         logger.info(
             "[factor.evaluate] pool=%s factor=%s 面板加载完成: rows=%d 耗时=%.2fs",
@@ -417,36 +531,69 @@ class FactorEvaluateTask(BaseTask):
             single_factor = single_factor.copy()
             single_factor[factor_id] = -single_factor[factor_id]
 
-        # 计算统计指标
-        t0 = time.monotonic()
-        stats = self._calc_factor_stats(
-            factor_id=factor_id,
-            factor_panel=single_factor,
-            returns_panel=ctx.returns_panel,
-            window=ctx.window,
-            ic_calc=ctx.ic_calc,
-            backtester=ctx.backtester,
+        # === 预计算阶段：不依赖 window 的全量指标（窗口循环外，仅计算 1 次） ===
+        # 性能优化（2026-07-04）：
+        #   优化前：calc_ic_series(1d) + calc_ic_series_multi_horizon(5/10/20d) 共 4 次遍历 dates，
+        #           每次调用 spearmanr（含内部 rank），1210 日期 × 4 = 4840 次 spearmanr。
+        #   优化后：calc_all_ic_series 一次遍历，预计算每个日期的因子 rank（多 horizon 共用），
+        #           用 numpy Pearson 替代 scipy spearmanr，预计提速 5-10 倍。
+        t_pre = time.monotonic()
+        all_ic_series = ctx.ic_calc.calc_all_ic_series(
+            single_factor, ctx.returns_panel, horizons=(1, 5, 10, 20),
         )
+        ic_series_1d = all_ic_series.get(1, pd.Series(dtype=float, name="ic_1d"))
+        multi_ic_series = {
+            h: all_ic_series[h] for h in (5, 10, 20) if h in all_ic_series
+        }
+        turnover = ctx.ic_calc.calc_turnover(single_factor)
+        ic_decay_curve, decay_half_life = ctx.ic_calc.calc_decay_info(
+            single_factor, ctx.returns_panel,
+        )
+        pre_elapsed = time.monotonic() - t_pre
         logger.info(
-            "[factor.evaluate] pool=%s factor=%s stats 计算完成 耗时=%.2fs",
-            ctx.pool_id, factor_id, time.monotonic() - t0,
+            "[factor.evaluate] pool=%s factor=%s 预计算完成: ic_1d_n=%d multi_horizons=%d "
+            "turnover=%.4f decay_half_life=%s 耗时=%.2fs",
+            ctx.pool_id, factor_id, len(ic_series_1d), len(multi_ic_series),
+            turnover or 0.0, decay_half_life, pre_elapsed,
         )
 
-        stats["factor_id"] = factor_id
-        stats["pool_id"] = ctx.pool_id
-        stats["calc_date"] = ctx.today
-        stats["window"] = ctx.window
-        stats["coverage"] = coverage  # 复用门禁检查中已计算的覆盖度
+        # === 窗口循环：仅做依赖 window 的截取计算 ===
+        t_win = time.monotonic()
+        window_results: list[dict[str, Any]] = []
+        for win in _EVAL_WINDOWS:
+            stats = self._calc_window_stats(
+                window=win,
+                ic_series_1d=ic_series_1d,
+                multi_ic_series=multi_ic_series,
+                factor_panel=single_factor,
+                returns_panel=ctx.returns_panel,
+                turnover=turnover,
+                ic_decay_curve=ic_decay_curve,
+                decay_half_life=decay_half_life,
+                ic_calc=ctx.ic_calc,
+                backtester=ctx.backtester,
+            )
+            stats["factor_id"] = factor_id
+            stats["pool_id"] = ctx.pool_id
+            stats["calc_date"] = ctx.today
+            stats["window"] = win
+            stats["coverage"] = coverage  # 复用门禁检查中已计算的覆盖度
 
-        # 评定等级
-        grade = ctx.grade_eval.evaluate(stats)
-        stats["factor_grade"] = grade
+            # 评定等级（每个窗口独立评级）
+            grade = ctx.grade_eval.evaluate(stats)
+            stats["factor_grade"] = grade
+            window_results.append(stats)
 
-        # 即时持久化（单因子）
-        t0 = time.monotonic()
-        model = self._build_stats_model(stats)
+        logger.info(
+            "[factor.evaluate] pool=%s factor=%s 多窗口 stats 计算完成 windows=%d 耗时=%.2fs",
+            ctx.pool_id, factor_id, len(window_results), time.monotonic() - t_win,
+        )
+
+        # 即时持久化（单因子多窗口批量写入）
+        t_persist = time.monotonic()
+        models = [self._build_stats_model(s) for s in window_results]
         await FacFactorStats.bulk_create_or_update(
-            [model],
+            models,
             on_conflict=["factor_id", "pool_id", "calc_date", "window"],
             update_fields=[
                 "ic_mean", "ic_std", "icir", "ic_win_rate",
@@ -459,14 +606,18 @@ class FactorEvaluateTask(BaseTask):
             ],
         )
 
+        # 取长周期窗口（504天）作为日志输出的代表等级
+        primary_stats = next((s for s in window_results if s["window"] == 504), window_results[0])
         logger.info(
-            "[factor.evaluate] pool=%s factor=%s <<< 评估完成 grade=%s icir=%.3f "
-            "coverage=%.2f 持久化=%.2fs 总耗时=%.2fs",
-            ctx.pool_id, factor_id, grade,
-            stats.get("icir", 0) or 0, stats.get("coverage", 0) or 0,
-            time.monotonic() - t0, time.monotonic() - factor_t0,
+            "[factor.evaluate] pool=%s factor=%s <<< 评估完成 windows=%d grades=%s "
+            "icir_504=%.3f coverage=%.2f 预计算=%.2fs 窗口计算=%.2fs 持久化=%.2fs 总耗时=%.2fs 池累计=%.1fs",
+            ctx.pool_id, factor_id, len(window_results),
+            {s["window"]: s["factor_grade"] for s in window_results},
+            primary_stats.get("icir", 0) or 0, primary_stats.get("coverage", 0) or 0,
+            pre_elapsed, time.monotonic() - t_win, time.monotonic() - t_persist,
+            time.monotonic() - factor_t0, time.monotonic() - ctx.pool_start_time,
         )
-        return stats
+        return primary_stats
 
     @staticmethod
     async def _load_factor_metadata(
@@ -490,32 +641,45 @@ class FactorEvaluateTask(BaseTask):
         return direction_map, data_start_map
 
     @staticmethod
-    def _calc_factor_stats(
-        factor_id: str,
+    def _calc_window_stats(
+        window: int,
+        ic_series_1d: Any,
+        multi_ic_series: dict[int, Any],
         factor_panel: Any,
         returns_panel: Any,
-        window: int,
+        turnover: float | None,
+        ic_decay_curve: list[dict[str, Any]],
+        decay_half_life: float | None,
         ic_calc: ICCalculator,
         backtester: LayeredBacktester,
     ) -> dict[str, Any]:
-        """计算单个因子的统计指标。"""
-        # IC 序列与统计
-        ic_series = ic_calc.calc_ic_series(factor_panel, returns_panel, window=window)
-        ic_stats = ic_calc.calc_ic_stats(ic_series, window=window)
-        ic_sig = ic_calc.calc_ic_significance(ic_series, window=window)
-        multi_ic = ic_calc.calc_multi_horizon_ic(
-            factor_panel, returns_panel, window=window,
-        )
+        """计算单个窗口的 stats（基于预计算的全量指标按 window 截取）。
 
-        # 分层回测
-        backtest_result = backtester.run(factor_panel, returns_panel)
+        Forward-walk 优化：不依赖 window 的指标（IC 序列/换手率/衰减）已在窗口循环外
+        预计算完成，本方法只做依赖 window 的截取计算（ic_stats/ic_sig/multi_ic_stats/backtest）。
 
-        # 换手率
-        turnover = ic_calc.calc_turnover(factor_panel)
+        Args:
+            window: forward-walk 窗口天数
+            ic_series_1d: 预计算的全量 1d IC 序列
+            multi_ic_series: 预计算的多 horizon 全量 IC 序列 {horizon: ic_series}
+            factor_panel: 单因子截面面板（已应用方向翻转）
+            returns_panel: 收益率面板
+            turnover: 预计算的换手率
+            ic_decay_curve: 预计算的 IC 衰减曲线
+            decay_half_life: 预计算的半衰期
+            ic_calc: ICCalculator 实例
+            backtester: LayeredBacktester 实例
 
-        # IC 衰减曲线（持久化为 JSONB，供前端绘制衰减图）与半衰期（共享底层计算）
-        ic_decay_curve = ic_calc.calc_ic_decay_curve(factor_panel, returns_panel)
-        decay_half_life = ic_calc.calc_decay_half_life(factor_panel, returns_panel)
+        Returns:
+            该窗口的统计指标字典
+        """
+        # IC 截面统计（按末 window 日截取 IC 序列）
+        ic_stats = ic_calc.calc_ic_stats(ic_series_1d, window=window)
+        ic_sig = ic_calc.calc_ic_significance(ic_series_1d, window=window)
+        multi_ic = ic_calc.calc_multi_horizon_ic_stats(multi_ic_series, window=window)
+
+        # 分层回测（forward-walk 窗口截取）
+        backtest_result = backtester.run(factor_panel, returns_panel, window=window)
 
         return {
             "ic_mean": ic_stats.get("ic_mean"),
@@ -576,7 +740,11 @@ class FactorEvaluateTask(BaseTask):
 
     @staticmethod
     async def _update_global_grades(factor_ids: list[str], pool_ids: list[str]) -> None:
-        """更新因子注册表的全局等级（最优样本池规则）。"""
+        """更新因子注册表的全局等级（多窗口×多池最优规则）。
+
+        多窗口评估下，每个因子有 4 窗口 × 8 池 = 32 条 stats 记录。
+        全局等级取所有窗口×所有池的最高等级，捕捉因子在不同周期下的最优表现。
+        """
         grade_eval = GradeEvaluator()
         total = len(factor_ids)
         updated = 0
@@ -592,6 +760,7 @@ class FactorEvaluateTask(BaseTask):
             if not pool_stats:
                 continue
 
+            # 多窗口×多池：所有 stats 的等级合并计算，取最高等级
             pool_grades = {s.pool_id: s.factor_grade for s in pool_stats if s.factor_grade}
             if not pool_grades:
                 continue

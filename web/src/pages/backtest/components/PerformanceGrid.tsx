@@ -1,19 +1,33 @@
 import { useMemo } from 'react'
 import type { BacktestSymbolMetrics } from '@/api/backtest'
 
-function fmtValue(v: number | null | undefined, digits = 4) {
-  if (v == null) return '\u2014'
-  return v.toFixed(digits)
+function toNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value !== 'string') return null
+  const normalized = value.trim()
+  if (!normalized || normalized === 'N/A') return null
+  const parsed = Number(normalized.replace('%', ''))
+  if (!Number.isFinite(parsed)) return null
+  return normalized.includes('%') ? parsed / 100 : parsed
 }
 
-function fmtMoney(v: number | null | undefined) {
+function fmtValue(v: unknown, digits = 4) {
   if (v == null) return '\u2014'
-  return v.toLocaleString(undefined, { maximumFractionDigits: 2 })
+  if (typeof v === 'string') return v === 'N/A' ? '\u2014' : v
+  if (typeof v === 'number' && Number.isFinite(v)) return v.toFixed(digits)
+  return '\u2014'
 }
 
-function fmtColor(v: number | null | undefined) {
-  if (v == null) return undefined
-  return v > 0 ? 'var(--color-rise)' : v < 0 ? 'var(--color-fall)' : undefined
+function fmtMoney(v: unknown) {
+  const n = toNumber(v)
+  if (n == null) return '\u2014'
+  return n.toLocaleString(undefined, { maximumFractionDigits: 2 })
+}
+
+function fmtColor(v: unknown) {
+  const n = toNumber(v)
+  if (n == null) return undefined
+  return n > 0 ? 'var(--color-rise)' : n < 0 ? 'var(--color-fall)' : undefined
 }
 
 export interface PerformanceGridProps {

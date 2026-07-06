@@ -396,4 +396,12 @@ _FACTOR_VARIANTS: list[tuple[str, dict[str, Any]]] = [
     ("worker.plugins.factor_synthesize.factors:RsiBbandsCrossFactor", {}),
     ("worker.plugins.factor_synthesize.factors:MacdAdxCrossFactor", {}),
     ("worker.plugins.factor_synthesize.factors:VolMomAccelCrossFactor", {}),
+    # F3 季频合成因子（由 factor_synthesize_quarterly 任务产出，按 ann_date 存储）
+    # 组内等权合成（第一层）：质量/成长/杠杆/运营效率
+    ("worker.plugins.factor_synthesize_quarterly.factors:CompositeQualityQuarterlyFactor", {}),
+    ("worker.plugins.factor_synthesize_quarterly.factors:CompositeGrowthQuarterlyFactor", {}),
+    ("worker.plugins.factor_synthesize_quarterly.factors:CompositeLeverageQuarterlyFactor", {}),
+    ("worker.plugins.factor_synthesize_quarterly.factors:CompositeEfficiencyQuarterlyFactor", {}),
+    # 跨组 ICIR 加权合成（第二层）
+    ("worker.plugins.factor_synthesize_quarterly.factors:CompositeAlphaQuarterlyFactor", {}),
 ]

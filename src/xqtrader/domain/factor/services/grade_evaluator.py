@@ -6,7 +6,17 @@ _GRADE_ORDER: dict[str, int] = {"A": 4, "B": 3, "C": 2, "D": 1}
 
 
 class GradeEvaluator:
-    """因子评级评估服务，基于 IC/ICIR 和分层回测结果评定因子等级（A/B/C/D）。"""
+    """因子评级评估服务，基于 IC/ICIR 和分层回测结果评定因子等级（A/B/C/D）。
+
+    阈值口径适配 A 股个人版实际（技术因子 IC 普遍 0.02~0.05，ICIR 0.1~0.3）：
+      - A 级：ICIR > 0.3 + 多空正收益 + 低换手（业界优秀，可实盘）
+      - B 级：ICIR > 0.15 + 多空正收益（有效且可交易）
+      - C 级：ICIR > 0.05 或 多空正收益（有微弱信号，待观察）
+      - D 级：ICIR ≤ 0.05 且 多空非正（明显无效）
+
+    主维度 ICIR（预测稳定性，不受成本扣除影响），辅维度 long_short_annual_ret
+    （扣成本后实际选股能力），约束 turnover（可交易性）。
+    """
 
     def evaluate(self, stats: dict) -> str:
         """根据统计指标评估因子等级。
@@ -29,11 +39,14 @@ class GradeEvaluator:
             return "D"
 
         # 阈值口径：long_short_annual_ret / turnover 均为小数（10% = 0.10，换手 50% = 0.50）
-        if icir > 1.0 and long_short_annual_ret > 0.10 and turnover < 0.50:
+        # A 级：ICIR 强 + 多空盈利 + 低换手（业界优秀，可实盘）
+        if icir > 0.3 and long_short_annual_ret > 0 and turnover < 0.50:
             return "A"
-        if icir > 0.5 and long_short_annual_ret > 0.05 and turnover < 0.70:
+        # B 级：ICIR 有效 + 多空盈利（有效且可交易）
+        if icir > 0.15 and long_short_annual_ret > 0:
             return "B"
-        if icir > 0.3 and long_short_annual_ret > 0.03:
+        # C 级：ICIR 有信号 或 多空微盈利（有微弱预测力，待观察）
+        if icir > 0.05 or long_short_annual_ret > 0:
             return "C"
         return "D"
 

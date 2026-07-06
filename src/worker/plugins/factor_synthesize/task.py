@@ -35,7 +35,10 @@ from xqtrader.domain.factor.services.registry import auto_discover_factors, regi
 logger = get_logger("factor.synthesize")
 
 _RETENTION_YEARS = 5
-_DEFAULT_WINDOW = 252
+_DEFAULT_WINDOW = 504  # IC 权重滚动窗口（约 2 年），与评估统计窗口保持一致
+# 合成时筛选优秀因子的评估窗口（forward-walk 多窗口中最具代表性的中长周期窗口）
+# 252 天（1年）平衡了时效性与统计稳定性，能覆盖价值+质量+部分技术因子
+_DEFAULT_EVAL_WINDOW = 252
 _PERSIST_BATCH_SIZE = 5000
 _SYNTH_CONCURRENCY = 4  # 合成持久化消费者数量
 _COMPOSITE_FACTOR_IDS = [
@@ -100,8 +103,10 @@ class AlphaSynthesizeTask(BaseTask):
         await self._decompress_factor_chunks(start_dt, end_dt)
 
         for pool_idx, pool in enumerate(pools, 1):
-            # 解析该样本池的输入因子
-            pool_factor_ids = factor_ids or await self._resolve_pool_factors(pool.pool_id)
+            # 解析该样本池的输入因子（按 eval_window 筛选 A/B 级因子）
+            pool_factor_ids = factor_ids or await self._resolve_pool_factors(
+                pool.pool_id, eval_window=_DEFAULT_EVAL_WINDOW,
+            )
             if not pool_factor_ids:
                 logger.warning(
                     "[alpha.synth] pool=%s 无可用因子，跳过", pool.pool_id,
@@ -217,22 +222,32 @@ class AlphaSynthesizeTask(BaseTask):
         return count
 
     @staticmethod
-    async def _resolve_pool_factors(pool_id: str) -> list[str]:
-        """解析样本池内 A/B 级因子列表。
+    async def _resolve_pool_factors(pool_id: str, eval_window: int = _DEFAULT_EVAL_WINDOW) -> list[str]:
+        """解析样本池内 A/B 级因子列表（按指定评估窗口筛选）。
 
-        优先从 fac_factor_stats 读取该样本池的因子等级，
-        若无评估数据则回退到注册表中全局 A/B 级因子。
+        Forward-walk 多窗口评估下，每个因子在每个池有 4 个窗口的等级。
+        合成时按指定窗口筛选 A/B 级因子，避免长周期窗口掩盖短周期因子的有效性。
+
+        Args:
+            pool_id: 样本池标识
+            eval_window: 评估窗口（63/126/252/504），默认 252（中长周期）
+
+        优先级：
+          1. 指定窗口的 A/B 级因子
+          2. 全局 A/B 级因子（registry）
+          3. 回退：活跃因子按 ICIR 降序取 top 30
         """
-        # 从 stats 表读取该池的 A/B 级因子
+        # 从 stats 表读取该池指定窗口的 A/B 级因子
         stats = await FacFactorStats.filter(
             pool_id=pool_id,
+            window=eval_window,
             factor_grade__in=["A", "B"],
         )
         if stats:
             factor_ids = list({s.factor_id for s in stats})
             logger.info(
-                "[alpha.synth] pool=%s 从 stats 读取 A/B 级因子: %d",
-                pool_id, len(factor_ids),
+                "[alpha.synth] pool=%s window=%d 从 stats 读取 A/B 级因子: %d",
+                pool_id, eval_window, len(factor_ids),
             )
             return factor_ids
 
@@ -244,8 +259,8 @@ class AlphaSynthesizeTask(BaseTask):
         if registry:
             factor_ids = [f.factor_id for f in registry]
             logger.info(
-                "[alpha.synth] pool=%s 从 registry 读取 A/B 级因子: %d",
-                pool_id, len(factor_ids),
+                "[alpha.synth] pool=%s window=%d 无 A/B 级因子，回退到 registry 全局 A/B 级: %d",
+                pool_id, eval_window, len(factor_ids),
             )
             return factor_ids
 
@@ -262,6 +277,7 @@ class AlphaSynthesizeTask(BaseTask):
         # 尝试从 stats 表获取 ICIR 排序，取 top 30
         stats = await FacFactorStats.filter(
             pool_id=pool_id,
+            window=eval_window,
             factor_id__in=candidate_ids,
         )
         if stats:
@@ -270,8 +286,8 @@ class AlphaSynthesizeTask(BaseTask):
             candidate_ids = candidate_ids[:30]
 
         logger.info(
-            "[alpha.synth] pool=%s 无等级数据，使用 top %d 活跃因子",
-            pool_id, len(candidate_ids),
+            "[alpha.synth] pool=%s window=%d 无等级数据，使用 top %d 活跃因子",
+            pool_id, eval_window, len(candidate_ids),
         )
         return candidate_ids
 

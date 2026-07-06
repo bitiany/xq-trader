@@ -102,7 +102,7 @@ class AlphaSynthesizer:
         factor_ids: list[str],
         start_date: date,
         end_date: date,
-        window: int = 252,
+        window: int = 504,
         composite_configs: dict[str, dict] | None = None,
     ) -> dict[str, pd.DataFrame]:
         """合成单个样本池的合成因子。
@@ -477,7 +477,7 @@ class AlphaSynthesizer:
     def _calc_rolling_ic_weights(
         factor_panel: pd.DataFrame,
         returns_panel: pd.DataFrame,
-        window: int = 252,
+        window: int = 504,
         min_periods: int = 20,
     ) -> dict[str, dict[date, pd.Series]]:
         """计算各因子（或组内Alpha）的滚动 IC 均值和 ICIR，作为加权权重。

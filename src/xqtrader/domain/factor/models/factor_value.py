@@ -15,7 +15,7 @@ from framework.dal.timescale import timescale
 @timescale(
     time_column="trade_date",
     chunk_interval="6 month",
-    compress_after="6 months",
+    compress_after="1 year",
     compress_segmentby="symbol",
 )
 class FacFactorValue(Base):

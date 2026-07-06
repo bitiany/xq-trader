@@ -39,6 +39,6 @@ params_schema:
       title: 合成结束日期
     window:
       type: integer
-      title: IC滚动窗口
-      default: 252
-      description: IC/ICIR计算滚动窗口(交易日)
+      title: IC统计窗口
+      default: 504
+      description: IC/ICIR权重计算滚动窗口(交易日，约2年，与评估统计窗口一致)

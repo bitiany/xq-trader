@@ -39,6 +39,6 @@ params_schema:
       title: 评估结束日期
     window:
       type: integer
-      title: 滚动窗口
-      default: 252
-      description: IC滚动计算窗口(交易日)
+      title: IC统计窗口
+      default: 504
+      description: IC统计窗口(交易日，约2年，多年数据保证统计稳定性)
