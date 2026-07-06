@@ -18,7 +18,12 @@ import pandas as pd
 import talib as ta
 
 from framework.dal.transaction.transactional import transactional
+from xqtrader.domain.factor.models.factor_registry import FacFactorRegistry
 from xqtrader.domain.factor.models.factor_value import FacFactorValue
+from xqtrader.domain.factor.services.factor_data_loader import (
+    load_financial_composite_panel,
+    load_financial_pit_panel,
+)
 from xqtrader.domain.market.models.candlestick import CandlestickDaily
 
 from ..backtest.core import StrategyConfig
@@ -155,7 +160,11 @@ class BacktestService:
     ) -> pd.DataFrame | None:
         """加载标的 OHLCV + 因子数据
 
-        从 CandlestickDaily 加载行情，从 DailyIndicator/FactorValue 加载因子。
+        从 CandlestickDaily 加载行情，从因子表加载因子值：
+          - 日频因子（含日频合成因子）: FacFactorValue（按 trade_date 精确匹配）
+          - 季频单因子: FacFinancialFactorValue（PIT + 向前填充到日频）
+          - 季频合成因子: FacFinancialCompositeValue（PIT + 向前填充到日频）
+
         合并为一个 DataFrame，列名小写。
 
         内置技术因子（MACD/RSI 等）需要预热数据，因此加载时向前扩展 120 个交易日，
@@ -190,26 +199,89 @@ class BacktestService:
             for c in candles
         ])
 
-        # 加载因子（仅 fac_factor_value 内的因子，DailyIndicator/FinancialIndicator 按需扩展）
+        # 因子分流加载：内置因子 / 日频因子 / 季频因子 / 季频合成因子
         # 内置技术因子由 _add_builtin_technical_factors 计算，
         # 此处仅加载非内置因子，避免 merge 时列名冲突产生 _x/_y 后缀
         db_factor_ids = [fid for fid in factor_ids if fid not in builtin_factor_ids]
         if db_factor_ids:
-            factor_records = await FacFactorValue.filter(
-                symbol=symbol,
-                pool_id="all",
-                trade_date__gte=warmup_start,
-                trade_date__lte=end_date,
-                factor_id__in=db_factor_ids,
-            )
-            if factor_records:
-                factor_df = pd.DataFrame([
-                    {"trade_date": pd.Timestamp(r.trade_date), r.factor_id: float(r.factor_value)}
-                    for r in factor_records
-                    if r.factor_value is not None
-                ])
-                factor_df = factor_df.groupby("trade_date").agg("first").reset_index()
-                df = df.merge(factor_df, on="trade_date", how="left")
+            # 查询因子注册表，按 update_freq 分流
+            regs = await FacFactorRegistry.filter(factor_id__in=db_factor_ids)
+            reg_map: dict[str, FacFactorRegistry] = {r.factor_id: r for r in regs}
+
+            # 仅日频因子走 FacFactorValue（含日频合成因子 composite_alpha 等）
+            daily_factor_ids: list[str] = []
+            quarterly_pit_ids: list[str] = []      # 季频单因子（fina_indicator）
+            quarterly_composite_ids: list[str] = []  # 季频合成因子（update_freq=quarterly）
+
+            for fid in db_factor_ids:
+                reg = reg_map.get(fid)
+                if reg is None:
+                    daily_factor_ids.append(fid)
+                    continue
+                update_freq = reg.update_freq or "daily"
+                origin = reg.data_origin or "computed"
+                if update_freq == "quarterly" and origin == "computed":
+                    quarterly_composite_ids.append(fid)
+                elif origin == "fina_indicator":
+                    quarterly_pit_ids.append(fid)
+                else:
+                    daily_factor_ids.append(fid)
+
+            # 1) 日频因子：批量从 FacFactorValue 加载
+            if daily_factor_ids:
+                factor_records = await FacFactorValue.filter(
+                    symbol=symbol,
+                    pool_id="all",
+                    trade_date__gte=warmup_start,
+                    trade_date__lte=end_date,
+                    factor_id__in=daily_factor_ids,
+                )
+                if factor_records:
+                    factor_df = pd.DataFrame([
+                        {"trade_date": pd.Timestamp(r.trade_date), r.factor_id: float(r.factor_value)}
+                        for r in factor_records
+                        if r.factor_value is not None
+                    ])
+                    factor_df = factor_df.groupby("trade_date").agg("first").reset_index()
+                    df = df.merge(factor_df, on="trade_date", how="left")
+                    # 周频合成因子（update_freq=weekly，如 composite_alpha）向前填充到日频：
+                    # 周频更新日之间保持上一次值，使信号在非更新日也能正常触发
+                    weekly_factor_ids = [
+                        fid for fid in daily_factor_ids
+                        if reg_map.get(fid) and (reg_map[fid].update_freq or "daily") == "weekly"
+                    ]
+                    if weekly_factor_ids:
+                        df[weekly_factor_ids] = df[weekly_factor_ids].ffill()
+
+            # 2) 季频单因子：PIT + 向前填充到日频
+            for fid in quarterly_pit_ids:
+                pit_panel = await load_financial_pit_panel(
+                    warmup_start, end_date, fid, [symbol],
+                )
+                if pit_panel.empty:
+                    continue
+                sym_series = pit_panel.xs(symbol, level="symbol")[fid]
+                sym_series.index = pd.to_datetime(sym_series.index)
+                df = df.merge(
+                    sym_series.rename(fid).reset_index(),
+                    on="trade_date",
+                    how="left",
+                )
+
+            # 3) 季频合成因子：PIT + 向前填充到日频
+            for fid in quarterly_composite_ids:
+                comp_panel = await load_financial_composite_panel(
+                    warmup_start, end_date, fid, [symbol], pool_id="all",
+                )
+                if comp_panel.empty:
+                    continue
+                sym_series = comp_panel.xs(symbol, level="symbol")[fid]
+                sym_series.index = pd.to_datetime(sym_series.index)
+                df = df.merge(
+                    sym_series.rename(fid).reset_index(),
+                    on="trade_date",
+                    how="left",
+                )
 
         # 缺失因子列填 0（避免 backtrader 数据源报错）
         for fid in factor_ids:

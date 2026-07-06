@@ -45,22 +45,60 @@ class LayeredBacktester:
         returns_panel: pd.DataFrame,
         n_groups: int = 5,
         round_trip_cost: float = _DEFAULT_ROUND_TRIP_COST,
+        window: int | None = None,
+        returns_column: str = "fwd_ret_1d",
+        annualization_factor: int = 252,
     ) -> dict:
-        """对单个因子执行分层回测。
+        """对单个因子执行分层回测（forward-walk 滑动窗口）。
 
         Args:
             factor_panel: MultiIndex (trade_date, symbol)，单因子列
-            returns_panel: MultiIndex (trade_date, symbol)，列名 'fwd_ret_1d'
+            returns_panel: MultiIndex (trade_date, symbol)，至少包含 returns_column 指定的列
             n_groups: 分组数量，默认 5
+            round_trip_cost: 单次调仓双边成本
+            window: forward-walk 窗口天数；为 None 时使用全量数据，
+                    否则仅取末 window 个交易日的数据回测，避免早期市场环境稀释当前特征
+            returns_column: 收益率列名，日频评估用 'fwd_ret_1d'（默认），
+                    季频评估用 'fwd_ret_63d'（1Q horizon，与 IC 计算一致）
+            annualization_factor: 年化因子，日频=252（默认），季频=4（按季度年化）
 
         Returns:
             包含 group_returns / long_short_annual_ret / long_short_sharpe / monotonic 的字典
         """
+        if returns_column not in returns_panel.columns:
+            logger.warning(
+                "分层回测收益率列不存在: column=%s available=%s，返回空结果",
+                returns_column, list(returns_panel.columns),
+            )
+            return {
+                "group_returns": {},
+                "long_short_annual_ret": 0.0,
+                "long_short_sharpe": 0.0,
+                "monotonic": False,
+            }
+
         factor_col = factor_panel.columns[0]
         merged = factor_panel[[factor_col]].join(
-            returns_panel[["fwd_ret_1d"]], how="inner"
+            returns_panel[[returns_column]], how="inner"
         )
-        merged = merged.dropna(subset=[factor_col, "fwd_ret_1d"])
+        merged = merged.dropna(subset=[factor_col, returns_column])
+
+        # forward-walk 滑动窗口：取末 window 个交易日的数据
+        if window is not None and window > 0 and not merged.empty:
+            unique_dates = merged.index.get_level_values("trade_date").unique().sort_values()
+            if len(unique_dates) > window:
+                cutoff_date = unique_dates[-window]
+                before_rows = len(merged)
+                merged = merged.loc[merged.index.get_level_values("trade_date") >= cutoff_date]
+                logger.info(
+                    "forward-walk 窗口截取: window=%d total_dates=%d cutoff=%s rows=%d→%d",
+                    window, len(unique_dates), cutoff_date, before_rows, len(merged),
+                )
+            else:
+                logger.info(
+                    "forward-walk 窗口未截取（数据量不足）: window=%d unique_dates=%d",
+                    window, len(unique_dates),
+                )
 
         if merged.empty:
             logger.warning("分层回测数据为空，返回空结果")
@@ -79,7 +117,7 @@ class LayeredBacktester:
 
         for trade_date, cross in merged.groupby(level="trade_date"):
             factor_values = cross[factor_col]
-            fwd_rets = cross["fwd_ret_1d"]
+            fwd_rets = cross[returns_column]
 
             group_labels = self._split_groups(factor_values, n_groups)
             for g in range(1, n_groups + 1):
@@ -111,14 +149,22 @@ class LayeredBacktester:
         for g in range(1, n_groups + 1):
             daily = group_daily_rets[g]
             if daily:
-                group_returns[f"Q{g}"] = self._calc_annual_ret(pd.Series(daily))
+                group_returns[f"Q{g}"] = self._calc_annual_ret(
+                    pd.Series(daily), trading_days=annualization_factor,
+                )
             else:
                 group_returns[f"Q{g}"] = 0.0
 
         # 多空年化收益与夏普
         ls_series = pd.Series(ls_daily_rets) if ls_daily_rets else pd.Series(dtype=float)
-        long_short_annual_ret = self._calc_annual_ret(ls_series) if not ls_series.empty else 0.0
-        long_short_sharpe = self._calc_sharpe(ls_series) if not ls_series.empty else 0.0
+        long_short_annual_ret = (
+            self._calc_annual_ret(ls_series, trading_days=annualization_factor)
+            if not ls_series.empty else 0.0
+        )
+        long_short_sharpe = (
+            self._calc_sharpe(ls_series, trading_days=annualization_factor)
+            if not ls_series.empty else 0.0
+        )
 
         # 单调性检验：Spearman 相关系数 > 0.8
         monotonic = self._check_monotonic(group_returns)
@@ -191,7 +237,11 @@ class LayeredBacktester:
     def _calc_annual_ret(
         self, daily_returns: pd.Series, trading_days: int = 252
     ) -> float:
-        """计算年化收益率。
+        """计算年化收益率（几何年化，对极端值稳健）。
+
+        使用对数收益年化：log_ret = sum(log(1+r))，annual_ret = exp(log_ret * 252 / n) - 1
+        相比算术平均年化 (1+mean(r))^252 - 1，几何年化对单日极端值不敏感，
+        避免资金流等高换手因子因少数极端日收益被放大到 1000%+ 的虚假年化。
 
         Args:
             daily_returns: 日收益率序列
@@ -202,13 +252,20 @@ class LayeredBacktester:
         """
         if daily_returns.empty:
             return 0.0
-        mean_ret = float(daily_returns.mean())
-        return (1.0 + mean_ret) ** trading_days - 1.0
+        # 过滤掉 -100% 收益（会导致 log(1+r) = -inf）
+        valid = daily_returns[daily_returns > -1.0]
+        if valid.empty:
+            return 0.0
+        log_ret = float(np.log1p(valid).sum())
+        n = len(valid)
+        if n == 0:
+            return 0.0
+        return float(np.expm1(log_ret * trading_days / n))
 
     def _calc_sharpe(
         self, daily_returns: pd.Series, trading_days: int = 252
     ) -> float:
-        """计算年化夏普比率。
+        """计算年化夏普比率（基于几何年化收益与日收益标准差）。
 
         Args:
             daily_returns: 日收益率序列
@@ -219,9 +276,19 @@ class LayeredBacktester:
         """
         if daily_returns.empty or daily_returns.std() == 0:
             return 0.0
-        mean_ret = float(daily_returns.mean())
+        # 使用几何年化收益计算夏普，与 _calc_annual_ret 保持一致
+        valid = daily_returns[daily_returns > -1.0]
+        if valid.empty:
+            return 0.0
+        log_ret = float(np.log1p(valid).sum())
+        n = len(valid)
+        if n == 0:
+            return 0.0
+        annual_ret = float(np.expm1(log_ret * trading_days / n))
         std_ret = float(daily_returns.std())
-        return mean_ret / std_ret * float(np.sqrt(trading_days))
+        if std_ret == 0:
+            return 0.0
+        return annual_ret / std_ret * float(np.sqrt(trading_days))
 
     def _check_monotonic(self, group_returns: dict[str, float]) -> bool:
         """检验组收益是否单调递增（Spearman 相关系数 > 0.8）。

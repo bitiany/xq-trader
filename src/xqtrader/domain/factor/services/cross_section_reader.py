@@ -12,7 +12,7 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date
 
 import numpy as np
 import pandas as pd
@@ -39,7 +39,7 @@ _POOL_INDEX_MAP: dict[str, str] = {
 }
 
 # 查询分片大小，避免单次 IN 列表过长
-_QUERY_BATCH_SIZE = 500
+_QUERY_BATCH_SIZE = 2000
 
 # MAD 去极值倍数（Barra CNE6 标准为 5，华泰金工推荐 3~5）
 _WINSORIZE_MAD_N = 5.0
@@ -84,17 +84,18 @@ class CrossSectionReader:
         industry_map: dict[str, str],
         market_cap_panel: pd.Series | None = None,
     ) -> pd.DataFrame:
-        """加载单因子截面面板并完成截面预处理。
+        """加载单因子截面面板并完成截面预处理（全量加载模式）。
 
         截面预处理流程：
           原始值 → 缺失值填充(行业均值) → MAD去极值 → Z-score → 行业+市值中性化 → 再Z-score
 
-        按月滚动加载，降低单次查询数据量。每月内先做 MAD 去极值和 Z-score，
-        合并后再做行业+市值中性化和再 Z-score（中性化需要跨月截面数据）。
+        性能优化（2026-07-04）：
+          原实现按月分片加载（60月 × 11 symbol批次 = 660 次 DB 查询/因子），
+          12 并发因子同时冲击 PostgreSQL 30 连接池，单因子加载耗时 23 分钟。
+          现改为全量一次性加载（3 次 DB 查询/因子），耗时降至 1-2 分钟。
 
-        对于 cross_section_beta / cross_section_compute 类因子（beta_250、stom 等），
-        其计算本身需要全量历史数据做滚动回归/派生，按月分片会导致重复全量计算。
-        因此这类因子一次性计算全量面板，再统一做截面预处理。
+          截面预处理（MAD/Z-score/中性化）均使用 groupby(level="trade_date") 矢量化
+          截面操作，全量加载与按月加载的预处理结果完全等价。
 
         Args:
             start_date: 起始日期
@@ -108,99 +109,79 @@ class CrossSectionReader:
         Returns:
             MultiIndex(trade_date, symbol), columns=[factor_id]
         """
-        # 需要全量计算的 data_origin 类型 — 按月分片会重复加载历史数据
-        full_range_origins = {"cross_section_beta", "cross_section_compute"}
-        origin = await fdl.resolve_data_origin(factor_id)
+        t_load = pd.Timestamp.now()
+        factor_df = await fdl.load_factor_raw_chunk(
+            start_date, end_date, factor_id, symbols, pool_id,
+        )
+        load_elapsed = (pd.Timestamp.now() - t_load).total_seconds()
 
-        if origin in full_range_origins:
-            return await self._load_full_range_factor_panel(
-                start_date, end_date, pool_id, symbols, factor_id,
-                industry_map, market_cap_panel,
-            )
-
-        factor_parts: list[pd.DataFrame] = []
-
-        month_start = date(start_date.year, start_date.month, 1)
-        month_idx = 0
-        while month_start <= end_date:
-            if month_start.month == 12:
-                month_end = date(month_start.year + 1, 1, 1) - timedelta(days=1)
-            else:
-                month_end = date(month_start.year, month_start.month + 1, 1) - timedelta(days=1)
-
-            chunk_start = max(month_start, start_date)
-            chunk_end = min(month_end, end_date)
-
-            if chunk_start > chunk_end:
-                month_start = date(month_start.year + (month_start.month // 12), (month_start.month % 12) + 1, 1)
-                continue
-
-            factor_df = await fdl.load_factor_raw_chunk(
-                chunk_start, chunk_end, factor_id, symbols, pool_id,
-            )
-
-            if not factor_df.empty:
-                # 月内：缺失值填充 → MAD去极值 → Z-score
-                filled = self._fill_missing_industry_mean(factor_df, industry_map)
-                winsorized = self._winsorize_mad(filled)
-                month_panel = self._zscore_standardize(winsorized)
-                factor_parts.append(month_panel)
-
-            month_idx += 1
-            # 每年输出一次进度（避免日志爆炸，但能让用户感知任务在推进）
-            if month_idx % 12 == 0:
-                logger.info(
-                    "[cross_section] pool=%s factor=%s 月度加载进度: %d 月已完成, 累计 rows=%d",
-                    pool_id, factor_id, month_idx,
-                    sum(len(p) for p in factor_parts),
-                )
-
-            if month_start.month == 12:
-                month_start = date(month_start.year + 1, 1, 1)
-            else:
-                month_start = date(month_start.year, month_start.month + 1, 1)
-
-        if not factor_parts:
+        if factor_df.empty:
             logger.info(
-                "[cross_section] pool=%s factor=%s 月度加载完成但数据为空 (0 月有数据)",
+                "[cross_section] pool=%s factor=%s 全量加载完成但数据为空 耗时=%.2fs",
+                pool_id, factor_id, load_elapsed,
+            )
+            return pd.DataFrame()
+
+        raw_rows = len(factor_df)
+        logger.info(
+            "[cross_section] pool=%s factor=%s 全量加载完成: rows=%d 耗时=%.2fs",
+            pool_id, factor_id, raw_rows, load_elapsed,
+        )
+
+        # 截面预处理：缺失值填充 → MAD去极值 → Z-score → 行业+市值中性化 → 再Z-score
+        t_pre = pd.Timestamp.now()
+        filled = self._fill_missing_industry_mean(factor_df, industry_map)
+        winsorized = self._winsorize_mad(filled)
+        zscored = self._zscore_standardize(winsorized)
+        factor_panel = self._industry_market_cap_neutralize(
+            zscored, industry_map, market_cap_panel,
+        )
+        factor_panel = self._zscore_standardize(factor_panel)
+        pre_elapsed = (pd.Timestamp.now() - t_pre).total_seconds()
+
+        logger.info(
+            "[cross_section] pool=%s factor=%s 截面预处理完成: rows=%d→%d 预处理=%.2fs 总耗时=%.2fs",
+            pool_id, factor_id, raw_rows, len(factor_panel),
+            pre_elapsed, load_elapsed + pre_elapsed,
+        )
+        return factor_panel
+
+    def process_preloaded_factor_panel(
+        self,
+        factor_df: pd.DataFrame,
+        pool_id: str,
+        factor_id: str,
+        industry_map: dict[str, str],
+        market_cap_panel: pd.Series | None = None,
+    ) -> pd.DataFrame:
+        """对预加载的原始面板做截面预处理（不重新加载 DB）。
+
+        与 load_single_factor_panel 的区别：跳过 DB 加载步骤，直接对传入的 raw_panel
+        做截面预处理。用于预加载宽表场景，避免每个因子重复 DB 查询。
+
+        截面预处理流程与 load_single_factor_panel 完全一致：
+          原始值 → 缺失值填充(行业均值) → MAD去极值 → Z-score → 行业+市值中性化 → 再Z-score
+
+        Args:
+            factor_df: 预加载的单因子原始面板（MultiIndex: trade_date, symbol, 单列）
+            pool_id: 样本池标识（仅用于日志）
+            factor_id: 因子 ID（仅用于日志）
+            industry_map: 行业映射 {symbol: industry_name}
+            market_cap_panel: 市值面板 Series(MultiIndex)，按截面日 PIT 中性化
+
+        Returns:
+            MultiIndex(trade_date, symbol), columns=[factor_id]
+        """
+        if factor_df.empty:
+            logger.info(
+                "[cross_section] pool=%s factor=%s 预加载面板为空，跳过",
                 pool_id, factor_id,
             )
             return pd.DataFrame()
 
-        # 跨月合并：行业+市值中性化 → 再Z-score
-        factor_panel = pd.concat(factor_parts)
-        factor_panel = self._industry_market_cap_neutralize(
-            factor_panel, industry_map, market_cap_panel,
-        )
-        factor_panel = self._zscore_standardize(factor_panel)
+        raw_rows = len(factor_df)
 
-        logger.info(
-            "[cross_section] pool=%s factor=%s 月度加载完成: %d 月 rows=%d",
-            pool_id, factor_id, month_idx, len(factor_panel),
-        )
-        return factor_panel
-
-    async def _load_full_range_factor_panel(
-        self,
-        start_date: date,
-        end_date: date,
-        pool_id: str,
-        symbols: list[str],
-        factor_id: str,
-        industry_map: dict[str, str],
-        market_cap_panel: pd.Series | None,
-    ) -> pd.DataFrame:
-        """全量计算因子面板（用于 beta/stom 等需全量历史的因子）。
-
-        一次性加载全期面板 → 缺失值填充 → MAD去极值 → Z-score → 行业+市值中性化 → 再Z-score。
-        """
-        factor_df = await fdl.load_factor_raw_chunk(
-            start_date, end_date, factor_id, symbols, pool_id,
-        )
-        if factor_df.empty:
-            logger.debug("[full_range] 因子 %s 数据为空", factor_id)
-            return pd.DataFrame()
-
+        # 截面预处理：缺失值填充 → MAD去极值 → Z-score → 行业+市值中性化 → 再Z-score
         filled = self._fill_missing_industry_mean(factor_df, industry_map)
         winsorized = self._winsorize_mad(filled)
         zscored = self._zscore_standardize(winsorized)
@@ -209,9 +190,9 @@ class CrossSectionReader:
         )
         factor_panel = self._zscore_standardize(factor_panel)
 
-        logger.debug(
-            "全量因子面板加载完成: pool=%s factor=%s rows=%d",
-            pool_id, factor_id, len(factor_panel),
+        logger.info(
+            "[cross_section] pool=%s factor=%s 预加载面板预处理完成: rows=%d→%d",
+            pool_id, factor_id, raw_rows, len(factor_panel),
         )
         return factor_panel
 
@@ -220,47 +201,39 @@ class CrossSectionReader:
         start_date: date,
         end_date: date,
         symbols: list[str],
+        horizons: tuple[int, ...] = (1, 5, 10, 20),
     ) -> pd.DataFrame:
-        """加载收益率面板（所有因子共用，按月滚动加载）。
+        """加载收益率面板（所有因子共用，全量加载模式）。
+
+        性能优化（2026-07-04）：
+          原按月分片加载（60月 × 11 symbol批次 = 660 次 DB 查询），耗时 160s。
+          现全量一次性加载（3 次 DB 查询），耗时降至 10-20s。
 
         Args:
             start_date: 起始日期
             end_date: 结束日期
             symbols: 样本池标的列表
+            horizons: 前向收益周期列表（默认 1/5/10/20 日频）；
+                      季频评估可传 (63, 126, 252) 计算 1Q/2Q/4Q 收益
 
         Returns:
-            MultiIndex(trade_date, symbol), columns fwd_ret_1d/5d/10d/20d
+            MultiIndex(trade_date, symbol), columns fwd_ret_{h}d
         """
-        returns_parts: list[pd.DataFrame] = []
+        t0 = pd.Timestamp.now()
+        returns_panel = await self._load_returns(start_date, end_date, symbols, horizons)
+        elapsed = (pd.Timestamp.now() - t0).total_seconds()
 
-        month_start = date(start_date.year, start_date.month, 1)
-        while month_start <= end_date:
-            if month_start.month == 12:
-                month_end = date(month_start.year + 1, 1, 1) - timedelta(days=1)
-            else:
-                month_end = date(month_start.year, month_start.month + 1, 1) - timedelta(days=1)
-
-            chunk_start = max(month_start, start_date)
-            chunk_end = min(month_end, end_date)
-
-            if chunk_start > chunk_end:
-                month_start = date(month_start.year + (month_start.month // 12), (month_start.month % 12) + 1, 1)
-                continue
-
-            ret_df = await self._load_returns(chunk_start, chunk_end, symbols)
-            if not ret_df.empty:
-                returns_parts.append(ret_df)
-
-            if month_start.month == 12:
-                month_start = date(month_start.year + 1, 1, 1)
-            else:
-                month_start = date(month_start.year, month_start.month + 1, 1)
-
-        if not returns_parts:
+        if returns_panel.empty:
+            logger.info(
+                "收益率面板加载完成但为空: symbols=%d 耗时=%.2fs",
+                len(symbols), elapsed,
+            )
             return pd.DataFrame()
 
-        returns_panel = pd.concat(returns_parts)
-        logger.info("收益率面板加载完成: rows=%d", len(returns_panel))
+        logger.info(
+            "收益率面板加载完成: rows=%d symbols=%d horizons=%s 耗时=%.2fs",
+            len(returns_panel), len(symbols), horizons, elapsed,
+        )
         return returns_panel
 
     async def load_pool_symbols(self, pool_id: str) -> list[str]:
@@ -338,16 +311,26 @@ class CrossSectionReader:
             return pd.Series(dtype=float)
 
         rows: list[tuple] = []
+        batch_count = (len(symbols) + _QUERY_BATCH_SIZE - 1) // _QUERY_BATCH_SIZE
         for i in range(0, len(symbols), _QUERY_BATCH_SIZE):
+            batch_idx = i // _QUERY_BATCH_SIZE + 1
             batch = symbols[i:i + _QUERY_BATCH_SIZE]
+            t_q = pd.Timestamp.now()
             records = await DailyIndicator.filter(
                 symbol__in=batch,
                 trade_date__gte=start_date,
                 trade_date__lte=end_date,
             )
+            q_elapsed = (pd.Timestamp.now() - t_q).total_seconds()
+            valid_count = 0
             for r in records:
                 if r.total_mv is not None:
                     rows.append((r.trade_date, r.symbol, float(r.total_mv)))
+                    valid_count += 1
+            logger.info(
+                "[market_cap] 查询批次 %d/%d: batch_symbols=%d rows=%d valid=%d 耗时=%.2fs",
+                batch_idx, batch_count, len(batch), len(records), valid_count, q_elapsed,
+            )
 
         if not rows:
             return pd.Series(dtype=float)
@@ -461,31 +444,44 @@ class CrossSectionReader:
         start_date: date,
         end_date: date,
         symbols: list[str],
+        horizons: tuple[int, ...] = (1, 5, 10, 20),
     ) -> pd.DataFrame:
-        """加载日行情并计算 fwd_ret_1d，按样本池标的过滤。"""
+        """加载日行情并计算 fwd_ret_{h}d，按样本池标的过滤。"""
         all_rows: list[dict] = []
+        batch_count = (len(symbols) + _QUERY_BATCH_SIZE - 1) // _QUERY_BATCH_SIZE
         for i in range(0, len(symbols), _QUERY_BATCH_SIZE):
+            batch_idx = i // _QUERY_BATCH_SIZE + 1
             batch = symbols[i:i + _QUERY_BATCH_SIZE]
+            t_q = pd.Timestamp.now()
             records = await CandlestickDaily.filter(
                 trade_date__gte=start_date,
                 trade_date__lte=end_date,
                 symbol__in=batch,
             )
+            q_elapsed = (pd.Timestamp.now() - t_q).total_seconds()
             all_rows.extend(
                 {"trade_date": r.trade_date, "symbol": r.symbol, "close": r.close}
                 for r in records
+            )
+            logger.info(
+                "[returns] 查询批次 %d/%d: batch_symbols=%d rows=%d 耗时=%.2fs",
+                batch_idx, batch_count, len(batch), len(records), q_elapsed,
             )
 
         if not all_rows:
             return pd.DataFrame()
 
         df = pd.DataFrame(all_rows).sort_values(["symbol", "trade_date"])
-        for horizon in (1, 5, 10, 20):
+        # 统一 trade_date 为 Timestamp，与 factor_panel（pd.to_datetime 生成）保持一致，
+        # 避免 calc_all_ic_series 中 xs(date) 因类型不匹配（date vs Timestamp）返回空序列
+        df["trade_date"] = pd.to_datetime(df["trade_date"])
+        for horizon in horizons:
             df[f"fwd_ret_{horizon}d"] = (
                 df.groupby("symbol")["close"].shift(-horizon) / df["close"] - 1
             )
-        df = df.dropna(subset=["fwd_ret_1d"])
-        ret_cols = [f"fwd_ret_{h}d" for h in (1, 5, 10, 20)]
+        # dropna 使用首个 horizon（最短期），确保至少有最短期收益
+        df = df.dropna(subset=[f"fwd_ret_{horizons[0]}d"])
+        ret_cols = [f"fwd_ret_{h}d" for h in horizons]
         df = df.set_index(["trade_date", "symbol"])[ret_cols]
         return df
 

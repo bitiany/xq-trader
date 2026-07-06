@@ -1,0 +1,39 @@
+name: factor_evaluate_quarterly
+celery_task_name: factor.evaluate_quarterly
+version: "1.0.0"
+task_name: 季频因子评估
+task_name_en: Quarterly Factor Evaluate
+description: 按样本池评估季频财务因子的IC/ICIR/分层回测/等级，独立于日频评估，写入fac_financial_factor_stats
+description_en: Evaluate quarterly financial factors per sample pool with IC/ICIR/layered backtest/grade, persist to fac_financial_factor_stats
+category: compute
+task_type: on_demand
+queue: celery
+timeout: 86400  # 24h
+retry_config:
+  max_retries: 2
+  retry_backoff: true
+  retry_backoff_max: 600
+# schedule: "0 9 * * 6"  # 暂禁用定时调度，仅手动触发
+params_schema:
+  type: object
+  properties:
+    pool_ids:
+      type: array
+      items:
+        type: string
+      title: 样本池列表
+      description: 为空时评估默认样本池(all, idx_300)
+    factor_ids:
+      type: array
+      items:
+        type: string
+      title: 因子ID列表
+      description: 为空时评估所有活跃季频因子(update_freq=quarterly)
+    start_date:
+      type: string
+      format: date
+      title: 评估起始日期
+    end_date:
+      type: string
+      format: date
+      title: 评估结束日期

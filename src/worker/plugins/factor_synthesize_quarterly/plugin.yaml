@@ -1,0 +1,43 @@
+name: factor_synthesize_quarterly
+celery_task_name: factor.synthesize_quarterly
+version: "1.0.0"
+task_name: 季频Alpha合成
+task_name_en: Quarterly Alpha Synthesize
+description: 按样本池对季频财务因子(quarterly)截面标准化后合成Alpha因子(组内等权+跨组ICIR加权)，写入fac_financial_composite_value
+description_en: Synthesize quarterly Alpha factors per sample pool (within-group equal-weight + cross-group ICIR), persist to fac_financial_composite_value
+category: compute
+task_type: on_demand
+queue: celery
+timeout: 86400  # 24h
+retry_config:
+  max_retries: 2
+  retry_backoff: true
+  retry_backoff_max: 600
+params_schema:
+  type: object
+  properties:
+    pool_ids:
+      type: array
+      items:
+        type: string
+      title: 样本池列表
+      description: 为空时合成所有活跃样本池
+    factor_ids:
+      type: array
+      items:
+        type: string
+      title: 输入因子ID列表
+      description: 为空时从fac_financial_factor_stats读取A/B级季频因子
+    start_date:
+      type: string
+      format: date
+      title: 合成起始日期
+    end_date:
+      type: string
+      format: date
+      title: 合成结束日期
+    ann_window:
+      type: integer
+      title: 评估窗口(季度数)
+      default: 20
+      description: 从fac_financial_factor_stats读取ICIR的评估窗口(8/12/16/20)，默认20Q

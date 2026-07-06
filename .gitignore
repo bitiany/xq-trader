@@ -106,3 +106,4 @@ celerybeat*
 /storage/
 /notebooks/
 /reports/
+/report/

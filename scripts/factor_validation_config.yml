@@ -1,0 +1,151 @@
+# 因子验证统一配置 — 定义选股策略、时序策略、回测参数
+#
+# 用法:
+#   python scripts/factor_validation_runner.py --config scripts/factor_validation_config.yml
+#
+# 配置结构:
+#   - selection: 截面选股（股池 × 方法 → Top10）
+#   - strategies: 时序策略（按场景分组）
+#   - backtest: 回测参数与场景定义
+
+# ─── 选股配置 ────────────────────────────────────────────
+selection:
+  # 验证股池
+  pools:
+    - { id: style_value, name: 价值股 }
+    - { id: style_large_cap, name: 大盘股 }
+    - { id: style_growth, name: 成长股 }
+    - { id: idx_300, name: 沪深300 }
+
+  # 选股方法 — 基础组（V1：仅日频 A/B 因子，按因子子集过滤）
+  basic_methods:
+    - id: icir_all
+      name: 全因子ICIR加权
+      type: basic
+      factor_filter: all              # all=全部, fund_flow=资金面, technical=技术面
+    - id: fund_flow_focus
+      name: 资金面因子优先
+      type: basic
+      factor_filter: fund_flow
+    - id: technical_focus
+      name: 技术面因子优先
+      type: basic
+      factor_filter: technical
+
+  # 选股方法 — 扩展组（V2：引入季频/合成因子）
+  extended_methods:
+    - id: daily_only
+      name: 仅日频A/B因子(基准)
+      type: extended
+      include_daily: true
+      include_quarterly: false
+      include_composite: false
+      composite_weight: 0.0
+    - id: daily_plus_composite
+      name: 日频+合成因子
+      type: extended
+      include_daily: true
+      include_quarterly: false
+      include_composite: true
+      composite_weight: 0.3          # 每个合成因子权重
+    - id: daily_plus_quarterly
+      name: 日频+季频+合成因子
+      type: extended
+      include_daily: true
+      include_quarterly: true
+      include_composite: true
+      composite_weight: 0.3
+
+# ─── 时序策略配置 ────────────────────────────────────────
+strategies:
+  # 多策略对比组（V1：经典技术分析策略）
+  technical_group:
+    - { id: ts_macd_cross, name: MACD金叉死叉 }
+    - { id: ts_rsi_obos, name: RSI超买超卖 }
+    - { id: ts_donchian_turtle, name: 唐奇安通道突破 }
+
+  # 合成因子策略组（V2：基于合成因子的信号策略）
+  composite_group:
+    - { id: ts_composite_alpha_threshold, name: 日频合成因子阈值策略 }
+    - { id: ts_quarterly_composite_trend, name: 季频合成因子趋势策略 }
+    - { id: ts_factor_combo_ab_composite, name: "A/B因子+合成因子组合策略" }
+
+# ─── 回测参数 ────────────────────────────────────────────
+backtest:
+  top_n: 10
+  initial_cash: 1000000.0
+  commission: 0.0003
+
+  # 默认回测周期
+  default_trading_days: 252
+
+  # 多周期分析
+  periods:
+    - { id: short, name: 短期(3个月), days: 63 }
+    - { id: medium, name: 中期(6个月), days: 126 }
+    - { id: long, name: 长期(1年), days: 252 }
+
+  # 多周期分析使用的股池
+  period_pools:
+    - style_growth
+    - idx_300
+
+  # 多周期分析使用的策略
+  period_strategy: ts_macd_cross
+
+  # 方法对比场景（V2 Phase 7：同标的跨方法对比）
+  method_comparison:
+    pool: style_growth
+    strategy: ts_composite_alpha_threshold
+
+# ─── 回测场景定义 ────────────────────────────────────────
+# 每个场景对应一个回测阶段，可独立开关
+scenarios:
+  # 场景1: 多策略对比 — 4池 × 3技术策略 × 252天
+  # 选股方法: icir_all（V1 基础方法）
+  - id: multi_strategy_compare
+    name: 多策略对比
+    enabled: true
+    pools: [style_value, style_large_cap, style_growth, idx_300]
+    selection_method: icir_all
+    strategies: [ts_macd_cross, ts_rsi_obos, ts_donchian_turtle]
+    trading_days: 252
+
+  # 场景2: 多周期分析 — 2池 × 1策略 × 3周期
+  - id: multi_period_analysis
+    name: 多周期分析
+    enabled: true
+    pools: [style_growth, idx_300]
+    selection_method: icir_all
+    strategies: [ts_macd_cross]
+    periods: [short, medium, long]
+
+  # 场景3: 选股方法对比 — 4池 × 2方法 × 1策略 × 252天
+  # 对比 fund_flow_focus vs technical_focus
+  - id: selection_method_compare
+    name: 选股方法对比
+    enabled: true
+    pools: [style_value, style_large_cap, style_growth, idx_300]
+    selection_methods: [fund_flow_focus, technical_focus]
+    strategies: [ts_macd_cross]
+    trading_days: 252
+
+  # 场景4: 合成因子策略回测 — 4池 × 3合成因子策略 × 252天
+  # 选股方法: daily_plus_quarterly（V2 扩展方法）
+  - id: composite_strategy_compare
+    name: 合成因子策略对比
+    enabled: true
+    pools: [style_value, style_large_cap, style_growth, idx_300]
+    selection_method: daily_plus_quarterly
+    strategies: [ts_composite_alpha_threshold, ts_quarterly_composite_trend, ts_factor_combo_ab_composite]
+    trading_days: 252
+
+  # 场景5: 选股方法扩展对比 — 1池 × 3方法 × 1策略 × 252天
+  # 对比 daily_only vs daily_plus_composite vs daily_plus_quarterly
+  - id: extended_method_compare
+    name: 扩展选股方法对比
+    enabled: true
+    pools: [style_growth]
+    selection_methods: [daily_only, daily_plus_composite, daily_plus_quarterly]
+    strategies: [ts_composite_alpha_threshold]
+    trading_days: 252
