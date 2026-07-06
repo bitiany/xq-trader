@@ -100,3 +100,17 @@ groups:
     include:
       - operation_id: get_market_sentiment
       - operation_id: get_stock_sentiment
+
+  research_thesis:
+    title: 投研论点卡
+    description: 个股基本面慢变量结论（五步法产物）的读写与失效管理
+    include:
+      - operation_id: get_stock_thesis
+      - operation_id: save_stock_thesis
+      - operation_id: mark_thesis_stale
+
+  investor_profile:
+    title: 投资者画像
+    description: 全局投资偏好与自选股配置
+    include:
+      - operation_id: get_preference

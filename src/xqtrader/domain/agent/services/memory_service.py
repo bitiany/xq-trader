@@ -93,6 +93,7 @@ class MemoryService:
         query: str,
         top_k: int = 5,
         symbol: str | None = None,
+        memory_types: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """语义检索历史经验
 
@@ -100,21 +101,37 @@ class MemoryService:
             query: 查询文本
             top_k: 返回条数
             symbol: 可选标的过滤
+            memory_types: 可选记忆类型过滤（如 brief）；兼容无 type 字段的旧数据
 
         Returns:
             匹配结果列表，每条含 score / text / payload
         """
-        from qdrant_client.models import FieldCondition, Filter, MatchValue
+        from qdrant_client.models import (
+            FieldCondition,
+            Filter,
+            IsEmptyCondition,
+            MatchAny,
+            MatchValue,
+            PayloadField,
+        )
 
         client = self._ensure_client()
         embedding = EmbeddingService.get_instance()
         query_vector = embedding.encode_one(query)
 
-        query_filter: Filter | None = None
+        must: list[Filter | FieldCondition] = []
         if symbol:
-            query_filter = Filter(
-                must=[FieldCondition(key="symbol", match=MatchValue(value=symbol))]
+            must.append(FieldCondition(key="symbol", match=MatchValue(value=symbol)))
+        if memory_types:
+            must.append(
+                Filter(
+                    should=[
+                        FieldCondition(key="type", match=MatchAny(any=memory_types)),
+                        IsEmptyCondition(is_empty=PayloadField(key="type")),
+                    ],
+                ),
             )
+        query_filter = Filter(must=must) if must else None
 
         result = client.query_points(
             collection_name=settings.QDRANT.COLLECTION,

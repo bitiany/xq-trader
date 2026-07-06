@@ -55,12 +55,27 @@ class AgentSettings:
             g.strip()
             for g in os.getenv(
                 "MCP_GROUPS",
-                "stocks,factors,strategies,selection,positions,indices,research,sentiment",
+                "stocks,factors,strategies,selection,positions,indices,research,sentiment,"
+                "research_thesis,investor_profile",
             ).split(",")
             if g.strip()
         ]
         self.MCP_TOOL_TIMEOUT = int(os.getenv("MCP_TOOL_TIMEOUT", "30"))
-        self.MAX_TOOL_ITERATIONS = int(os.getenv("AGENT_MAX_TOOL_ITERATIONS", "45"))
+        self.MAX_TOOL_ITERATIONS = int(os.getenv("AGENT_MAX_TOOL_ITERATIONS", "25"))
+        self.MAX_SUBAGENT_ITERATIONS = int(
+            os.getenv("AGENT_MAX_SUBAGENT_ITERATIONS", "8")
+        )
+        self.MAX_CONCURRENT_SUBAGENTS = int(
+            os.getenv("AGENT_MAX_CONCURRENT_SUBAGENTS", "3")
+        )
+        # 短期时序记忆：近 N 个交易日（非自然日），对齐 A 股日频快变量衰减
+        self.SHORT_TERM_TRADING_DAYS = int(
+            os.getenv("AGENT_SHORT_TERM_TRADING_DAYS", "3")
+        )
+        # 半衰期（交易日）：T-1 权重≈0.63, T-2≈0.40, T-3≈0.25
+        self.SHORT_TERM_DECAY_HALF_LIFE = float(
+            os.getenv("AGENT_SHORT_TERM_DECAY_HALF_LIFE", "1.5")
+        )
         self.DISABLED_SKILLS = [
             s.strip()
             for s in os.getenv(

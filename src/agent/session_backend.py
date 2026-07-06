@@ -60,6 +60,10 @@ class PgSessionManager:
         """在后台 loop 上同步执行协程并返回结果。"""
         return asyncio.run_coroutine_threadsafe(coro, self._loop).result()
 
+    def run_coroutine(self, coro: Any) -> Any:
+        """对外暴露的协程桥接入口（短期记忆等跨模块 DB 查询复用）。"""
+        return self._submit(coro)
+
     @staticmethod
     async def _init_datasource() -> None:
         if not engines_manager.is_initialized():

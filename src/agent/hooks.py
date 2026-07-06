@@ -9,12 +9,29 @@ from typing import Any
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
 
+from agent.config import agent_settings
 from agent.protocol import EventType
 from agent.redis_bus import AgentRedisBus
+from agent.runtime import get_pg_session_manager
+from agent.short_term_memory import ShortTermMemoryService
 from framework.commons.logger import get_logger
 from xqtrader.domain.agent.services.memory_service import MemoryService
 
 logger = get_logger("AGENT_MEMORY_HOOK")
+
+
+def _inject_system_before_last_user(
+    context: AgentHookContext,
+    content: str,
+) -> None:
+    """在最后一条 user 消息之前插入临时 system 提示。"""
+    note = {"role": "system", "content": content}
+    insert_at = len(context.messages)
+    for i in range(len(context.messages) - 1, -1, -1):
+        if context.messages[i].get("role") == "user":
+            insert_at = i
+            break
+    context.messages.insert(insert_at, note)
 
 
 class ContextInjectHook(AgentHook):
@@ -47,13 +64,7 @@ class ContextInjectHook(AgentHook):
         note_text = self._build_note()
         if not note_text:
             return
-        note = {"role": "system", "content": note_text}
-        insert_at = len(context.messages)
-        for i in range(len(context.messages) - 1, -1, -1):
-            if context.messages[i].get("role") == "user":
-                insert_at = i
-                break
-        context.messages.insert(insert_at, note)
+        _inject_system_before_last_user(context, note_text)
 
 
 class MemoryRecallHook(AgentHook):
@@ -79,9 +90,14 @@ class MemoryRecallHook(AgentHook):
                 query=self._query,
                 top_k=3,
                 symbol=self._symbol,
+                memory_types=["brief"],
             )
         except Exception:
             logger.warning("语义召回失败，跳过注入", exc_info=True)
+            _inject_system_before_last_user(
+                context,
+                "[经验参考（不可用）]\n语义记忆检索失败，请勿依赖历史类比结论。",
+            )
             return
         if not results:
             return
@@ -90,17 +106,10 @@ class MemoryRecallHook(AgentHook):
         )
         if not recall:
             return
-        note = {
-            "role": "system",
-            "content": f"[经验参考（非权威事实，仅供类比）]\n{recall}",
-        }
-        # 注入到最后一条用户消息之前，保证当前问题仍是最新上下文。
-        insert_at = len(context.messages)
-        for i in range(len(context.messages) - 1, -1, -1):
-            if context.messages[i].get("role") == "user":
-                insert_at = i
-                break
-        context.messages.insert(insert_at, note)
+        _inject_system_before_last_user(
+            context,
+            f"[经验参考（非权威事实，仅供类比）]\n{recall}",
+        )
         logger.info("已注入 %d 条经验召回 (symbol=%s)", len(results), self._symbol)
 
     def finalize_content(self, context: AgentHookContext, content: str | None) -> str | None:
@@ -119,10 +128,72 @@ class MemoryRecallHook(AgentHook):
         try:
             MemoryService.get_instance().index_memory(
                 text=text,
-                payload={"symbol": self._symbol, "role": "assistant"},
+                payload={"symbol": self._symbol, "role": "assistant", "type": "brief"},
             )
         except Exception:
             logger.warning("对话结论 index 失败", exc_info=True)
+
+
+class ShortTermRecallHook(AgentHook):
+    """短期时序记忆 — 从会话历史提取近 N 个交易日的简报摘要，注入日际对比上下文。
+
+    非权威事实：今日快变量仍以 spawn 实时取数为准；论点卡仍以 research_thesis MCP 为准。
+    DB 查询经 PgSessionManager 后台 loop 桥接，避免跨事件循环使用连接池。
+    """
+
+    def __init__(self, session_key: str, symbol: str | None) -> None:
+        super().__init__()
+        self._session_key = session_key
+        self._symbol = symbol
+        self._injected = False
+        self._memory = ShortTermMemoryService(get_pg_session_manager())
+
+    async def before_iteration(self, context: AgentHookContext) -> None:
+        if self._injected:
+            return
+        self._injected = True
+        effective_key = ShortTermMemoryService.resolve_session_key(
+            self._session_key,
+            self._symbol,
+        )
+        if not effective_key:
+            return
+        trading_days = agent_settings.SHORT_TERM_TRADING_DAYS
+        half_life = agent_settings.SHORT_TERM_DECAY_HALF_LIFE
+        unavailable = False
+        snapshots = []
+        try:
+            snapshots = await asyncio.to_thread(
+                self._memory.load_recent_briefs,
+                effective_key,
+                trading_days=trading_days,
+                half_life=half_life,
+            )
+        except Exception:
+            logger.warning(
+                "短期时序记忆加载失败 session_key=%s",
+                effective_key,
+                exc_info=True,
+            )
+            unavailable = True
+        note_text = ShortTermMemoryService.format_note(
+            snapshots,
+            trading_days=trading_days,
+            half_life=half_life,
+            unavailable=unavailable,
+        )
+        if not note_text:
+            return
+        _inject_system_before_last_user(context, note_text)
+        if unavailable:
+            logger.warning("已注入短期时序记忆降级提示 session=%s", effective_key)
+        else:
+            logger.info(
+                "已注入短期时序记忆 %d 条 (session=%s symbol=%s)",
+                len(snapshots),
+                effective_key,
+                self._symbol,
+            )
 
 
 class RedisEventHook(AgentHook):

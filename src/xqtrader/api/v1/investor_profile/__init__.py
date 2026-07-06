@@ -1,4 +1,4 @@
-"""Agent 投研记忆 API 路由模块"""
+"""投资者画像 API 路由模块"""
 
 from .router import router
 

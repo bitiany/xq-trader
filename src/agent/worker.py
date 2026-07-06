@@ -7,10 +7,15 @@ import signal
 import sys
 
 from agent.config import agent_settings
-from agent.hooks import ContextInjectHook, MemoryRecallHook, RedisEventHook
+from agent.hooks import (
+    ContextInjectHook,
+    MemoryRecallHook,
+    RedisEventHook,
+    ShortTermRecallHook,
+)
 from agent.protocol import EventType, RunStatus
 from agent.redis_bus import AgentRedisBus
-from agent.runtime import build_bot
+from agent.runtime import build_bot, init_runtime
 from agent.schemas import RunTask
 from framework.commons.logger import get_logger
 
@@ -30,9 +35,7 @@ class AgentWorker:
     async def start(self) -> None:
         await self._bus.connect()
         if not self._initialized:
-            from agent.runtime import _patch_nanobot_list_arguments
-
-            _patch_nanobot_list_arguments()
+            init_runtime()
             self._initialized = True
         logger.info(
             "Agent worker started: id=%s max_concurrent=%s",
@@ -87,10 +90,11 @@ class AgentWorker:
             symbol = (task.context or {}).get("stock_symbol")
             context_hook = ContextInjectHook(task.context)
             recall_hook = MemoryRecallHook(symbol=symbol, query=task.message)
+            short_term_hook = ShortTermRecallHook(session_key=session_key, symbol=symbol)
             result = await bot.run(
                 task.message,
                 session_key=session_key,
-                hooks=[hook, context_hook, recall_hook],
+                hooks=[hook, context_hook, recall_hook, short_term_hook],
             )
             if await self._bus.is_cancelled(run_id):
                 status = RunStatus.CANCELLED

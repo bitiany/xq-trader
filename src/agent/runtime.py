@@ -77,6 +77,22 @@ def _patch_nanobot_list_arguments() -> None:
     _runner_mod.AgentRunner._run_tool = _safe_run_tool
     logger.info("Patched nanobot.agent.runner.AgentRunner._run_tool for list-argument normalization")
 
+    import nanobot.agent.loop as _loop_mod
+
+    def _sync_subagent_limits(self: _loop_mod.AgentLoop) -> None:
+        """Orchestrator 与 spawn Worker 使用独立迭代预算。"""
+        self.subagents.max_iterations = agent_settings.MAX_SUBAGENT_ITERATIONS
+        self.subagents.max_concurrent_subagents = (
+            agent_settings.MAX_CONCURRENT_SUBAGENTS
+        )
+
+    _loop_mod.AgentLoop._sync_subagent_runtime_limits = _sync_subagent_limits
+    logger.info(
+        "Patched AgentLoop subagent limits: iterations=%s concurrent=%s",
+        agent_settings.MAX_SUBAGENT_ITERATIONS,
+        agent_settings.MAX_CONCURRENT_SUBAGENTS,
+    )
+
 
 def _build_mcp_servers() -> dict[str, dict[str, Any]]:
     """根据 MCP_GROUPS 配置生成 mcpServers 节点（多端点路由静态分流）。"""
@@ -105,6 +121,7 @@ def _write_runtime_config() -> None:
                 "context_window_tokens": 65536,
                 "temperature": 0.1,
                 "max_tool_iterations": agent_settings.MAX_TOOL_ITERATIONS,
+                "max_concurrent_subagents": agent_settings.MAX_CONCURRENT_SUBAGENTS,
                 "max_tool_result_chars": 16000,
                 "timezone": "Asia/Shanghai",
                 "disabled_skills": agent_settings.DISABLED_SKILLS,
@@ -137,6 +154,26 @@ def _write_runtime_config() -> None:
 
 
 _bot: Nanobot | None = None
+_session_manager: PgSessionManager | None = None
+_runtime_initialized = False
+
+
+def init_runtime() -> None:
+    """Worker 启动时一次性初始化：patch nanobot + 同步 config.json。"""
+    global _runtime_initialized
+    if _runtime_initialized:
+        return
+    _patch_nanobot_list_arguments()
+    _write_runtime_config()
+    _runtime_initialized = True
+
+
+def get_pg_session_manager() -> PgSessionManager:
+    """返回全局 PgSessionManager（与 build_bot 共享同一实例与连接池）。"""
+    if _session_manager is None:
+        build_bot()
+    assert _session_manager is not None
+    return _session_manager
 
 
 def build_bot(*, model: str | None = None) -> Nanobot:
@@ -145,16 +182,18 @@ def build_bot(*, model: str | None = None) -> Nanobot:
     全局仅缓存一个 Nanobot（含 PgSessionManager / MCP 连接），切换模型时仅替换
     bot._loop.model，避免多实例跨 event loop 的 Future 绑定冲突。
     """
-    global _bot
+    global _bot, _session_manager
     effective_model = model or agent_settings.LLM_MODEL_NAME
 
     if _bot is None:
         _write_runtime_config()
         config: Config = resolve_config_env_vars(load_config(_CONFIG_PATH))
         config.agents.defaults.workspace = str(_WORKSPACE)
+        session_manager = PgSessionManager(_WORKSPACE)
+        _session_manager = session_manager
         loop = AgentLoop.from_config(
             config,
-            session_manager=PgSessionManager(_WORKSPACE),
+            session_manager=session_manager,
             image_generation_provider_configs=image_gen_provider_configs(config),
         )
         _bot = Nanobot(loop)

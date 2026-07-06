@@ -4,14 +4,15 @@ from fastapi import APIRouter
 
 from framework.config.settings import settings
 from xqtrader.api.v1.agent.agent import router as agent_router
-from xqtrader.api.v1.agent_memory import router as agent_memory_router
 from xqtrader.api.v1.backtest import router as backtest_router
 from xqtrader.api.v1.broker import router as broker_router
 from xqtrader.api.v1.data import router as data_router
 from xqtrader.api.v1.factors import router as factors_router
 from xqtrader.api.v1.health import router as health_router
 from xqtrader.api.v1.indices import router as indices_router
+from xqtrader.api.v1.investor_profile import router as investor_profile_router
 from xqtrader.api.v1.research import router as research_router
+from xqtrader.api.v1.research_thesis import router as research_thesis_router
 from xqtrader.api.v1.rules import router as rules_router
 from xqtrader.api.v1.scheduler import router as scheduler_router
 from xqtrader.api.v1.security import router as security_router
@@ -47,4 +48,5 @@ router.include_router(research_router)
 router.include_router(sentiment_router)
 # AI Agent
 router.include_router(agent_router, prefix="/agent", tags=["agent"])
-router.include_router(agent_memory_router)
+router.include_router(research_thesis_router)
+router.include_router(investor_profile_router)

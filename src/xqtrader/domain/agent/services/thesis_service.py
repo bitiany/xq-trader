@@ -1,15 +1,16 @@
 """投研论点卡服务 — CRUD + Qdrant 索引"""
 
-import logging
 from datetime import date
 from typing import Any, cast
 
+from framework.commons.logger import get_logger
 from framework.dal.transaction.transactional import transactional
 from xqtrader.domain.agent.models.thesis import ResearchThesis
+from xqtrader.domain.watermark.models.trade_calendar import TradeCalendar
 
 from .memory_service import MemoryService
 
-logger = logging.getLogger("AGENT.THESIS")
+logger = get_logger("AGENT.THESIS")
 
 
 class ThesisService:
@@ -22,7 +23,7 @@ class ThesisService:
             symbol: 股票代码
 
         Returns:
-            论点卡字典，无则 None
+            论点卡字典，无记录或已过期则 None
         """
         results = await ResearchThesis.filter(
             limit=1,
@@ -32,7 +33,19 @@ class ThesisService:
         )
         if not results:
             return None
-        return cast(dict[str, Any], results[0].to_dict())
+        thesis = cast(dict[str, Any], results[0].to_dict())
+        ref = await TradeCalendar.get_latest_trade_date()
+        valid_until = thesis.get("valid_until")
+        if ref and valid_until and valid_until < ref:
+            logger.info(
+                "论点卡已过期，标记 stale: symbol=%s valid_until=%s ref=%s",
+                symbol,
+                valid_until,
+                ref,
+            )
+            await self.mark_stale(symbol, reason=f"valid_until expired: {valid_until}")
+            return None
+        return thesis
 
     @transactional(bind_key="default")
     async def save_thesis(
@@ -51,7 +64,6 @@ class ThesisService:
         invalidation_rules: dict,
     ) -> dict[str, Any]:
         """保存论点卡（旧 active 记录标记 stale，新记录写入 + Qdrant 索引）"""
-        # 旧 active 记录标记 stale
         await ResearchThesis.update_by(
             {"status": "stale"},
             symbol=symbol,
@@ -74,7 +86,6 @@ class ThesisService:
             status="active",
         )
 
-        # Qdrant 向量索引
         summary = f"{symbol} {direction} {core_assumption}"
         try:
             MemoryService.get_instance().index_memory(
