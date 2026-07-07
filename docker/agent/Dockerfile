@@ -16,6 +16,7 @@ COPY pyproject.toml uv.lock ./
 COPY src/agent /app/src/agent
 COPY src/framework /app/src/framework
 COPY src/xqtrader/domain/agent /app/src/xqtrader/domain/agent
+COPY src/xqtrader/domain/watermark /app/src/xqtrader/domain/watermark
 COPY docker/agent/stubs/xqtrader/__init__.py /app/src/xqtrader/__init__.py
 
 RUN apt-get update \

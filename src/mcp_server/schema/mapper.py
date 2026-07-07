@@ -7,12 +7,15 @@ from typing import Any
 from mcp_server.openapi.operation import Operation, Parameter
 
 
-def build_input_schema(op: Operation) -> dict[str, Any]:
+def build_input_schema(op: Operation, *, hide_params: list[str] | None = None) -> dict[str, Any]:
     """将 operation 的所有入参合并为单个 JSON Schema (object)。"""
 
+    hidden = set(hide_params or ())
     properties: dict[str, Any] = {}
     required: list[str] = []
     for p in op.parameters:
+        if p.name in hidden:
+            continue
         properties[p.name] = _parameter_schema(p)
         if p.required:
             required.append(p.name)

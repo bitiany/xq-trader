@@ -12,6 +12,7 @@ dependencies = [
     "cryptography>=42.0,<45.0",
     "fastapi>=0.109,<1.0",
     "httpx>=0.27,<1.0",
+    "jmespath>=1.0,<2.0",
     "jsonpath-ng>=1.6,<2.0",
     "jsonschema>=4.20,<5.0",
     "langchain==1.3.2",
@@ -66,6 +67,9 @@ agent = [
     "mcp>=1.27,<2.0",
     "qdrant-client>=1.9,<2.0",
     "sentence-transformers>=2.7,<4.0",
+    "jsonpath-ng>=1.6,<2.0",
+    "sqlalchemy>=2.0,<3.0",
+    "asyncpg>=0.29,<1.0",
 ]
 mcp = [
     "mcp>=1.27,<2.0",
@@ -74,6 +78,7 @@ mcp = [
     "pyyaml>=6.0,<7.0",
     "uvicorn[standard]>=0.27,<1.0",
     "starlette>=0.36,<1.0",
+    "jmespath>=1.0,<2.0",
 ]
 
 [project.scripts]
@@ -110,7 +115,7 @@ disallow_untyped_defs = true
 packages = ["framework", "xqtrader", "agent", "mcp_server", "skills"]
 
 [[tool.mypy.overrides]]
-module = ["psycopg2", "psycopg.*", "xtquant.*", "langgraph.checkpoint.postgres", "nanobot.*", "mcp.*", "backtrader", "quantstats", "quantstats.*", "akshare", "akshare.*", "qdrant_client", "qdrant_client.*", "sentence_transformers", "sentence_transformers.*", "pdfplumber", "pdfplumber.*", "framework.dal.transactional", "framework.dal.session"]
+module = ["psycopg2", "psycopg.*", "xtquant.*", "langgraph.checkpoint.postgres", "nanobot.*", "mcp.*", "jmespath", "jmespath.*", "backtrader", "quantstats", "quantstats.*", "akshare", "akshare.*", "qdrant_client", "qdrant_client.*", "sentence_transformers", "sentence_transformers.*", "pdfplumber", "pdfplumber.*", "framework.dal.transactional", "framework.dal.session"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

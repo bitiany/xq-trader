@@ -1,18 +1,16 @@
 # xqtrader Agent Worker（Nanobot）容器部署
 #
-# 单独启动：
+# 单独启动（需 MCP 容器 xqtrader-mcp 已在 xqtrader-net 网络）：
+#   docker compose -f docker/mcp/docker-compose.yml up -d --build
 #   docker compose -f docker/agent/docker-compose.yml up -d --build
 #
 # 与 MCP 组网联合启动（推荐）：
 #   docker compose -f docker/docker-compose.yml up -d --build
-#
-# 挂载说明：
-#   - workspace：Agent 技能、AGENTS.md 等 Nanobot 工作区文件
-#   - .env：Redis、LLM 等环境变量配置
 
 networks:
   xqtrader:
     name: xqtrader-net
+    external: true
 
 services:
   agent:
@@ -24,17 +22,23 @@ services:
       - xqtrader
     environment:
       ENV: /config/.env
+      APP_DB_CONFIG_PATH: /config/datasource.yml
       AGENT_WORKSPACE: /workspace
-      AGENT_REDIS_HOST: host.docker.internal
-      AGENT_LLM_BASE_URL: http://192.168.10.22:8000/v1
-      AGENT_LLM_MODEL_NAME: deepseek-ai/DeepSeek-V4-Pro
       AGENT_MCP_BASE_URL: http://xqtrader-mcp:8097
       AGENT_SERVICE_BASE_URL: http://host.docker.internal:8096
+      AGENT_LLM_BASE_URL: http://host.docker.internal:8000/v1
+      AGENT_LLM_MODEL_NAME: "Qwen/Qwen3-235B-A22B-Instruct-2507"
       AGENT_WORKER_ID: worker-1
       AGENT_MAX_CONCURRENT_RUNS: "8"
+      AGENT_REDIS_HOST: host.docker.internal
+      DATABASES_DEFAULT_HOST: host.docker.internal
+      DATABASES_STOCK_HOST: host.docker.internal
+      DATABASES_RESEARCH_HOST: host.docker.internal
+      DATABASES_TRADING_HOST: host.docker.internal
     volumes:
       - ../../src/agent/workspace:/workspace
       - ../../.env:/config/.env:ro
+      - ../../datasource.yml:/config/datasource.yml:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped

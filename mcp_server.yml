@@ -42,6 +42,38 @@ groups:
       - operation_id: get_stock_fund_flow
       - operation_id: get_stock_news
       - operation_id: get_stock_announcements
+    tools:
+      get_stock_fund_flow:
+        description: |
+          查询个股最近 5 个交易日资金流（Agent 视图）。
+          字段约定：「主力净流入占比_百分比」正=净流入、负=净流出；禁止将大单/超大单占比当作主力。
+          仅含 Tushare 原始占比字段，不含 EMA 资金博弈字段（huge_net_inflow_pct 等）。
+        invoke:
+          defaults:
+            limit: 5
+          hide_params:
+            - limit
+        response:
+          jmespath: >-
+            {
+              "标的代码": symbol,
+              "最新一日": items[-1].{
+                "交易日期": trade_date,
+                "收盘价": close,
+                "主力净流入额_万元": main_net_amt,
+                "主力净流入占比_百分比": main_net_pct,
+                "超大单净流入额_万元": huge_net_amt,
+                "超大单净流入占比_百分比": huge_net_pct,
+                "大单净流入额_万元": big_net_amt,
+                "大单净流入占比_百分比": big_net_pct
+              },
+              "近5日主力占比趋势": items[-5:].{
+                "交易日期": trade_date,
+                "主力净流入占比_百分比": main_net_pct,
+                "超大单净流入占比_百分比": huge_net_pct,
+                "大单净流入占比_百分比": big_net_pct
+              }
+            }
 
   factors:
     title: 因子研究

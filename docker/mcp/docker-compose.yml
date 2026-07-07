@@ -5,9 +5,6 @@
 #
 # 与 Agent 组网联合启动（推荐）：
 #   docker compose -f docker/docker-compose.yml up -d --build
-#
-# 挂载说明：
-#   - mcp_server.yml：MCP 分组、OpenAPI 源、工具过滤等配置
 
 networks:
   xqtrader:
@@ -32,4 +29,16 @@ services:
       - ../../mcp_server.yml:/config/mcp_server.yml:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import socket; s=socket.create_connection(('127.0.0.1',8097),3); s.close()",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     restart: unless-stopped

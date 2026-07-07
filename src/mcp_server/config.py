@@ -50,6 +50,33 @@ class InvokerSection(BaseModel):
     unwrap_response_data: bool = True
 
 
+class InvokeOverride(BaseModel):
+    """单工具调用前参数覆盖。"""
+
+    defaults: dict[str, Any] = Field(default_factory=dict)
+    hide_params: list[str] = Field(default_factory=list)
+
+
+class ResponseTransform(BaseModel):
+    """单工具响应 DSL — JMESPath 表达式。"""
+
+    jmespath: str
+
+    @model_validator(mode="after")
+    def _non_empty(self) -> ResponseTransform:
+        if not self.jmespath.strip():
+            raise ValueError("response.jmespath 不能为空")
+        return self
+
+
+class ToolOverride(BaseModel):
+    """单 operation 的 MCP 视图配置（入参默认 + 响应转换 + 工具说明）。"""
+
+    description: str = ""
+    invoke: InvokeOverride = Field(default_factory=InvokeOverride)
+    response: ResponseTransform | None = None
+
+
 class RuleEntry(BaseModel):
     """通用匹配规则条目（同一条目可写多个字段，AND 关系）。"""
 
@@ -72,6 +99,7 @@ class GroupSection(BaseModel):
     description: str = ""
     include: list[RuleEntry] = Field(default_factory=list)
     exclude: list[RuleEntry] = Field(default_factory=list)
+    tools: dict[str, ToolOverride] = Field(default_factory=dict)
 
 
 class McpServerConfig(BaseModel):

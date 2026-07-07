@@ -23,9 +23,14 @@ keywords: 资金面, 资金流向, 主力资金, 超大单, 大单, 净流入, �
 
 | 工具 | 职责 |
 |------|------|
-| `mcp_xq_stocks_xq_get_stock_fund_flow` | 近 N 日主力/超大单/大单净流入 |
+| `mcp_xq_stocks_xq_get_stock_fund_flow` | 近 5 日主力/超大单/大单净流入（MCP 视图，中文字段） |
 
-参数：`{"symbol": "603993.SH"}`，禁止传 `limit`。
+参数：`{"symbol": "603993.SH"}`，**禁止**传 `limit`（由 MCP 固定为 5）。
+
+**字段约定（MCP 返回）**：
+- `最新一日.主力净流入占比_百分比`：正=净流入，负=净流出（对应 DB `main_net_pct`）
+- `最新一日.超大单净流入占比_百分比` / `大单净流入占比_百分比`：同上，不得与主力混淆
+- 禁止使用 EMA 字段（`huge_net_inflow_pct` 等，MCP 已剔除）
 
 ### 分析要点
 
@@ -38,12 +43,19 @@ keywords: 资金面, 资金流向, 主力资金, 超大单, 大单, 净流入, �
 ```json
 {
   "as_of": "2026-07-06",
-  "main_flow": {"direction": "持续流入/持续流出/震荡", "net_amount": 1234567.89},
-  "super_large_order": {"net_amount": 987654.32, "trend": "流入/流出"},
+  "main_flow": {
+    "direction": "持续流入/持续流出/震荡",
+    "net_amount_wan": -10174.92,
+    "net_pct": -1.8
+  },
+  "super_large_order": {"net_amount_wan": -20059.2, "net_pct": -3.56, "trend": "流入/流出"},
+  "large_order": {"net_amount_wan": 9884.28, "net_pct": 1.75, "trend": "流入/流出"},
   "divergence": {"type": "顶背离/底背离/无", "description": "..."},
   "conclusion": "偏多/偏空/中性 + 简述"
 }
 ```
+
+**取值规则**：`as_of` = MCP `最新一日.交易日期`；`main_flow.net_pct` = `最新一日.主力净流入占比_百分比`（不得取大单/超大单或 EMA 字段）。
 
 **迭代预算**：≤ 2 轮。
 

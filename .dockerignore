@@ -24,3 +24,4 @@ src/worker
 src/xqtrader/**
 !src/xqtrader/__init__.py
 !src/xqtrader/domain/agent/**
+!src/xqtrader/domain/watermark/**
