@@ -554,7 +554,7 @@ class StockDiagnosisService(SecurityMixin):
 
     async def _thesis_snapshot(self, symbol: str) -> dict[str, Any] | None:
         thesis = await self._thesis.get_thesis(symbol)
-        if not thesis:
+        if not thesis or thesis.get("status") != "active":
             return None
         as_of = thesis.get("as_of")
         valid_until = thesis.get("valid_until")

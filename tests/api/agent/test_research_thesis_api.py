@@ -57,6 +57,7 @@ class TestResearchThesisAPI:
         fetched = get_resp.json()
         assert fetched["code"] == 0
         assert fetched["data"]["symbol"] == symbol
+        assert fetched["data"]["status"] == "active"
 
         stale_resp = await api_client.post(
             f"{API_PREFIX}/{symbol}/stale",
@@ -72,7 +73,7 @@ class TestResearchThesisAPI:
         assert after_stale.json()["data"] == {}
 
     @pytest.mark.asyncio(loop_scope="session")
-    async def test_get_expired_thesis_returns_empty(self, api_client) -> None:
+    async def test_get_expired_thesis_returns_status(self, api_client) -> None:
         symbol = f"X{uuid.uuid4().hex[:6].upper()}.SZ"
         expired_until = date.today() - timedelta(days=30)
         save_resp = await api_client.post(
@@ -83,4 +84,6 @@ class TestResearchThesisAPI:
 
         get_resp = await api_client.get(f"{API_PREFIX}/{symbol}")
         assert get_resp.status_code == 200
-        assert get_resp.json()["data"] == {}
+        data = get_resp.json()["data"]
+        assert data["status"] == "expired"
+        assert data["symbol"] == symbol

@@ -132,6 +132,7 @@ def test_build_input_schema_hides_params() -> None:
     schema = build_input_schema(op, hide_params=["limit"])
     assert "symbol" in schema["properties"]
     assert "limit" not in schema["properties"]
+    assert schema.get("additionalProperties") is False
 
 
 def test_group_section_tools_config_loads() -> None:

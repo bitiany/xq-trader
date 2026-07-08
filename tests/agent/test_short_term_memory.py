@@ -55,14 +55,3 @@ def test_resolve_session_key_prefers_stock_symbol() -> None:
         ShortTermMemoryService.resolve_session_key("stock:603993.SH", "603993.SH")
         == "stock:603993.SH"
     )
-
-
-def test_format_unavailable_note() -> None:
-    note = ShortTermMemoryService.format_note(
-        [],
-        trading_days=3,
-        half_life=1.5,
-        unavailable=True,
-    )
-    assert note is not None
-    assert "不可用" in note

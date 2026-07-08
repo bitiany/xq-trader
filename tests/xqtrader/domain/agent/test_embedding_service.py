@@ -7,16 +7,17 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
+from xqtrader.domain.agent.services.embedding_backends import (
+    EmbeddingBackendRegistry,
+    TeiEmbeddingBackend,
+)
 from xqtrader.domain.agent.services.embedding_service import EmbeddingService
 
 
 @pytest.fixture(autouse=True)
 def _reset_embedding_singleton() -> None:
     EmbeddingService._instance = None
-    EmbeddingService._local_model = None
-    if EmbeddingService._tei_client is not None:
-        EmbeddingService._tei_client.close()
-    EmbeddingService._tei_client = None
+    EmbeddingService._backend = None
 
 
 def test_encode_tei_single_vector() -> None:
@@ -31,7 +32,7 @@ def test_encode_tei_single_vector() -> None:
     with (
         patch("xqtrader.domain.agent.services.embedding_service.settings") as mock_settings,
         patch(
-            "xqtrader.domain.agent.services.embedding_service.httpx.Client",
+            "xqtrader.domain.agent.services.embedding_backends.httpx.Client",
             return_value=mock_client,
         ),
     ):
@@ -58,7 +59,7 @@ def test_encode_tei_rejects_dim_mismatch() -> None:
     with (
         patch("xqtrader.domain.agent.services.embedding_service.settings") as mock_settings,
         patch(
-            "xqtrader.domain.agent.services.embedding_service.httpx.Client",
+            "xqtrader.domain.agent.services.embedding_backends.httpx.Client",
             return_value=mock_client,
         ),
     ):
@@ -69,3 +70,21 @@ def test_encode_tei_rejects_dim_mismatch() -> None:
 
         with pytest.raises(ValueError, match="向量维度"):
             EmbeddingService.get_instance().encode_one("测试")
+
+
+def test_validate_backend_rejects_local_without_dependency() -> None:
+    with patch(
+        "xqtrader.domain.agent.services.embedding_backends.importlib.util.find_spec",
+        return_value=None,
+    ):
+        with pytest.raises(RuntimeError, match="sentence-transformers"):
+            EmbeddingBackendRegistry.validate_available("local")
+
+
+def test_tei_backend_close() -> None:
+    backend = TeiEmbeddingBackend(MagicMock())
+    mock_client = MagicMock(spec=httpx.Client)
+    backend._client = mock_client
+    backend.close()
+    mock_client.close.assert_called_once()
+    assert backend._client is None

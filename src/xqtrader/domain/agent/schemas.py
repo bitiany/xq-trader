@@ -26,6 +26,7 @@ class SessionResponse(BaseModel):
 class SubmitMessageRequest(BaseModel):
     content: str = Field(min_length=1)
     model: str | None = None
+    flow_id: str | None = None
     context: dict[str, Any] | None = None
 
 

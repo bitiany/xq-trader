@@ -1,0 +1,70 @@
+name: ml_train
+celery_task_name: ml.train_monthly
+version: "1.0.0"
+task_name: 月频ML因子组合训练
+task_name_en: Monthly ML Factor Combiner Train
+description: Walk-Forward LightGBM 截面因子组合模型训练，月频重训
+description_en: Walk-Forward LightGBM cross-sectional factor combiner training, monthly refit
+category: compute
+task_type: on_demand
+queue: ml
+timeout: 7200  # 2h
+retry_config:
+  max_retries: 2
+  retry_backoff: true
+  retry_backoff_max: 600
+# schedule: "0 22 1 * *"  # 每月1日 22:00（暂禁用，仅手动触发）
+params_schema:
+  type: object
+  properties:
+    pool_ids:
+      type: array
+      items:
+        type: string
+      title: 样本池列表
+      description: 为空时使用默认样本池(idx_300)
+    train_window:
+      type: integer
+      title: 训练窗(交易日)
+      default: 252
+      description: Walk-Forward 训练窗口，默认 252(1年)
+    val_window:
+      type: integer
+      title: 验证窗(交易日)
+      default: 42
+      description: Walk-Forward 验证窗口，默认 42(2月)
+    test_window:
+      type: integer
+      title: 测试窗(交易日)
+      default: 42
+      description: Walk-Forward 测试窗口，默认 42(2月)
+    gap:
+      type: integer
+      title: Gap(交易日)
+      default: 5
+      description: 与标签 horizon 对齐的 Gap，防泄漏
+    step:
+      type: integer
+      title: 滚动步长(交易日)
+      default: 21
+      description: Walk-Forward 滚动步长，默认 21(月频)
+    horizon:
+      type: integer
+      title: 标签horizon(天)
+      default: 5
+      description: 前向收益 horizon，与 gap 对齐
+    factor_id:
+      type: string
+      title: ML因子ID
+      default: "ml_alpha_v1"
+      description: 训练产出的 ML 因子 ID
+    start_date:
+      type: string
+      format: date
+      title: 起始日期
+      description: 训练数据起始日期(为空时自动计算)
+    end_date:
+      type: string
+      format: date
+      title: 结束日期
+      description: 训练数据结束日期(为空时使用最新交易日)

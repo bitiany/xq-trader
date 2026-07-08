@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator
 from fastapi import HTTPException, Request
 
 from framework.config.settings import settings
+from xqtrader.domain.agent.intent_router import IntentRouter, WorkflowRoute
 from xqtrader.domain.agent.models.session import AgentMessage
 from xqtrader.domain.agent.protocol import MetaField, RunStatus, sse_event_name
 from xqtrader.domain.agent.redis_bus import AgentRedisBus
@@ -23,6 +24,11 @@ from xqtrader.domain.agent.schemas import (
     ToolCall,
 )
 from xqtrader.domain.agent.utils import new_id
+from xqtrader.domain.workflow.dispatch import (
+    WorkflowExecutionError,
+    WorkflowNotFoundError,
+    execute_workflow,
+)
 
 
 class AgentService:
@@ -81,6 +87,44 @@ class AgentService:
     ) -> SubmitMessageResponse:
         session = await self.get_session(session_id)
         user_id, tenant_id = self._user_context(request)
+        try:
+            route = IntentRouter.resolve(
+                body.content,
+                flow_id=body.flow_id,
+                context=body.context,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        if isinstance(route, WorkflowRoute):
+            workspace_id = str((body.context or {}).get("workspace_id") or "")
+            try:
+                record = await execute_workflow(
+                    route.flow_id,
+                    route.inputs,
+                    workspace_id=workspace_id,
+                )
+            except WorkflowNotFoundError as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+            except WorkflowExecutionError as exc:
+                raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+            wf_status = str(record.get("status") or "")
+            if wf_status == "succeeded":
+                status = RunStatus.COMPLETED
+            elif wf_status == "paused":
+                status = RunStatus.RUNNING
+            elif wf_status == "failed":
+                status = RunStatus.FAILED
+            else:
+                status = RunStatus.COMPLETED
+
+            return SubmitMessageResponse(
+                run_id=str(record.get("run_id") or new_id("run")),
+                session_id=session_id,
+                status=status,
+            )
+
         run_id = new_id("run")
         model = body.model or session.model or settings.AGENT.AGENT_DEFAULT_MODEL or None
         trace_id = request.headers.get("X-Trace-Id")

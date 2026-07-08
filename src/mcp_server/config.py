@@ -73,6 +73,7 @@ class ToolOverride(BaseModel):
     """单 operation 的 MCP 视图配置（入参默认 + 响应转换 + 工具说明）。"""
 
     description: str = ""
+    risk_level: Literal["L0", "L1", "L2", "L3"] | None = None
     invoke: InvokeOverride = Field(default_factory=InvokeOverride)
     response: ResponseTransform | None = None
 

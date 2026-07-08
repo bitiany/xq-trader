@@ -60,8 +60,8 @@ keywords: 个股分析, 深度分析, 每日盯盘, 五步法, 基本面, 交易
 ### 阶段 A：论点卡判断（第 1 轮）
 
 调用 `get_stock_thesis(symbol)`：
-- `active` 且 `valid_until ≥ 今日` → **慢时钟模式**（跳过阶段 B 取数）
-- 空 / `stale` / 过期 / 用户要求重算 → **全量模式**
+- `status=active` 且 `valid_until ≥ 今日` → **慢时钟模式**（跳过阶段 B 取数）
+- 空 / `status=expired` / `status=stale` / 用户要求重算 → **全量模式**
 
 权威判据是论点卡，不是会话历史或语义召回。
 
@@ -115,7 +115,7 @@ keywords: 个股分析, 深度分析, 每日盯盘, 五步法, 基本面, 交易
 [spawn-worker:fund-flow] 标的 {symbol}。模式：spawn。
 只读本地库。仅调用 get_stock_fund_flow（资金面唯一取数点）。
 仅输出以下 JSON，禁止 Markdown 长报告：
-{"as_of":"","main_flow":{"direction":"","net_amount":0},"super_large_order":{"net_amount":0,"trend":""},"divergence":{"type":"","description":""},"conclusion":""}
+{"as_of":"","main_flow":{"direction":"","net_amount_wan":0,"net_pct":0},"super_large_order":{"net_amount_wan":0,"net_pct":0,"trend":""},"large_order":{"net_amount_wan":0,"net_pct":0,"trend":""},"divergence":{"type":"","description":""},"conclusion":""}
 ```
 
 ### 阶段 E：合并输出（第 6~8 轮）

@@ -3,7 +3,7 @@
 > **版本**: v1.0
 > **更新**: 2026-06-26
 > **定位**: 界定 AI（LLM / ML / Agent）在**个人**量化平台中的应用边界，重点是**决策流中的 LLM 旁路设计**
-> **关联**: [trading-system-design.md](./trading-system-design.md)（决策流/执行流）、[factor-architecture.md](./factor-architecture.md)（因子管线）、[AI-Agent产品与架构设计.md](./AI-Agent产品与架构设计.md)（Agent 运行时与产品形态）
+> **关联**: [trading-system-design.md](./trading-system-design.md)（决策流/执行流）、[factor-system-design.md](./factor-system-design.md)（因子系统）、[AI-Agent产品与架构设计.md](./AI-Agent产品与架构设计.md)（Agent 运行时与产品形态）
 
 ---
 

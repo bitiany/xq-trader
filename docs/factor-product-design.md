@@ -2,7 +2,7 @@
 
 > **版本**: v1.0
 > **创建**: 2026-06-26
-> **关联**: [factor-architecture.md](./factor-architecture.md)（因子管线）、[factor-catalog.md](./factor-catalog.md)（因子规格）、[factor-system-improvement-plan.md](./factor-system-improvement-plan.md)（评估改进）、[trading-product-design.md](./trading-product-design.md)（前端范式）
+> **关联**: [factor-system-design.md](./factor-system-design.md)（因子系统）、[factor-catalog.md](./factor-catalog.md)（因子规格）、[trading-product-design.md](./trading-product-design.md)（前端范式）
 > **定位**: 个人量化平台**因子研究终端**前端权威口径。解决「用户看不到因子价值、不知哪些因子有效/可用/可合成、评估结果如何」的问题
 > **范式**: 沿用交易工作台「**单页工作台 + 内嵌 Tab + 抽屉详情，不跳页**」模式
 
@@ -179,9 +179,9 @@ flowchart LR
 ## 6. Tab 3：相关性与去冗余（CorrelationTab）
 
 - **同组相关性热力图**：选定类别，展示成员因子截面值 Spearman 相关矩阵。
-- **冗余组识别**：相关 >0.9 的因子聚为冗余组，标注每组**保留的 ICIR 最高者**（呼应 factor-architecture §4.3）。
+- **冗余组识别**：相关 >0.9 的因子聚为冗余组，标注每组**保留的 ICIR 最高者**（见 factor-system-design §11.2）。
 
-> 🔧 需后端：新增 `GET /factors/correlation?pool_id=&category=`（或 `factor_ids=`）。该能力对应 [improvement-plan T9](./factor-system-improvement-plan.md) 的「相关矩阵去冗余」，**前后端联动落地**。本 Tab 在 T9 完成前显示「待评估」占位。
+> 🔧 需后端：新增 `GET /factors/correlation?pool_id=&category=`（或 `factor_ids=`），展示组内 Spearman 相关矩阵与冗余组识别（见 factor-system-design §11.2）。
 
 ---
 
@@ -303,7 +303,7 @@ web/src/
 | F2 | `FactorDashboard` + `FactorLibraryTab`（表格/筛选/排序/快捷视图） | 能筛出 A/B 可用因子并排序 |
 | F3 | `FactorDetailDrawer`（元数据 + 快照 + IC 趋势 + 截面分布） | 点击行打开详情，不跳页 |
 
-> 阶段一即可回答「我有哪些因子、哪些有效可用、单因子表现如何」——覆盖用户最核心诉求。**注意**：因子库指标依赖 [improvement-plan 阶段一](./factor-system-improvement-plan.md)（修复评级单位 Bug、补财务/估值加载），否则表格里等级/基本面因子不可信。**建议先做评估侧 P0 修复，再上前端**。
+> 阶段一即可回答「我有哪些因子、哪些有效可用、单因子表现如何」——覆盖用户最核心诉求。
 
 ### 阶段二：合成与多池
 
@@ -338,4 +338,4 @@ web/src/
 
 ---
 
-*本文档为个人版因子研究前端权威设计。因子管线见 factor-architecture.md；评估改进见 factor-system-improvement-plan.md。落地后据实更新本文件实现状态。*
+*本文档为个人版因子研究前端权威设计。因子系统见 [factor-system-design.md](./factor-system-design.md)。*

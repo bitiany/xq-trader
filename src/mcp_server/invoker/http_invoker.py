@@ -37,6 +37,7 @@ class HttpInvoker:
 
         path_params, query_params, header_params, body = self._partition(op, arguments or {})
         url = op.path.format(**path_params)
+        logger.info("MCP invoke op=%s %s %s", op.operation_id, op.method, url)
         try:
             resp = await self._client.request(
                 op.method,
@@ -64,6 +65,14 @@ class HttpInvoker:
         path_params: dict[str, Any] = {}
         query_params: dict[str, Any] = {}
         header_params: dict[str, Any] = {}
+        known = {p.name for p in op.parameters}
+        if op.body_schema is not None:
+            known.add("body")
+        unknown = set(arguments) - known
+        if unknown:
+            raise ToolInvocationError(
+                f"不支持的参数: {', '.join(sorted(unknown))}",
+            )
         for p in op.parameters:
             if p.name not in arguments:
                 if p.required and p.location == "path":

@@ -1,7 +1,7 @@
 # xq-trader 因子→规则→策略 架构设计
 
 > **更新**: 2026-06-23
-> **前置**: [factor-architecture.md](./factor-architecture.md)（因子系统）、[trading-system-design.md](./trading-system-design.md)（交易系统）
+> **前置**: [factor-system-design.md](./factor-system-design.md)（因子系统）、[trading-system-design.md](./trading-system-design.md)（交易系统）
 > **参考**: Qlib Pipeline / WorldQuant BRAIN / Zipline Pipeline API / Quantopian Factor-Classifier-Filter
 
 ---

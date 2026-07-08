@@ -38,14 +38,65 @@ class ThesisService:
         valid_until = thesis.get("valid_until")
         if ref and valid_until and valid_until < ref:
             logger.info(
-                "论点卡已过期，标记 stale: symbol=%s valid_until=%s ref=%s",
+                "论点卡已过期: symbol=%s valid_until=%s ref=%s",
                 symbol,
                 valid_until,
                 ref,
             )
-            await self.mark_stale(symbol, reason=f"valid_until expired: {valid_until}")
-            return None
+            return {
+                "status": "expired",
+                "symbol": symbol,
+                "valid_until": (
+                    valid_until.isoformat()
+                    if isinstance(valid_until, date)
+                    else valid_until
+                ),
+                "reason": f"valid_until expired: {valid_until}",
+            }
+        thesis["status"] = "active"
         return thesis
+
+    async def reconcile_expired(self, symbol: str) -> int:
+        """将已过期的 active 论点卡标记为 stale（显式治理，非读路径副作用）。"""
+        results = await ResearchThesis.filter(
+            limit=1,
+            order_by=ResearchThesis.created_at.desc(),
+            symbol=symbol,
+            status="active",
+        )
+        if not results:
+            return 0
+        thesis = cast(dict[str, Any], results[0].to_dict())
+        ref = await TradeCalendar.get_latest_trade_date()
+        valid_until = thesis.get("valid_until")
+        if not ref or not valid_until or valid_until >= ref:
+            return 0
+        return int(await self.mark_stale(
+            symbol,
+            reason=f"valid_until expired: {valid_until}",
+        ))
+
+    async def reconcile_all_expired(self) -> int:
+        """批量将已过期的 active 论点卡标记为 stale（Worker 定时治理）。"""
+        ref = await TradeCalendar.get_latest_trade_date()
+        if ref is None:
+            return 0
+        rows = await ResearchThesis.filter(
+            status="active",
+            valid_until__lt=ref,
+        )
+        symbols = sorted({row.symbol for row in rows})
+        total = 0
+        for symbol in symbols:
+            total += await self.reconcile_expired(symbol)
+        if total:
+            logger.info(
+                "论点卡批量过期治理完成: symbols=%d affected=%d ref=%s",
+                len(symbols),
+                total,
+                ref,
+            )
+        return total
 
     @transactional(bind_key="default")
     async def save_thesis(
@@ -87,18 +138,15 @@ class ThesisService:
         )
 
         summary = f"{symbol} {direction} {core_assumption}"
-        try:
-            MemoryService.get_instance().index_memory(
-                text=summary,
-                payload={
-                    "symbol": symbol,
-                    "as_of": str(as_of),
-                    "direction": direction,
-                    "type": "thesis",
-                },
-            )
-        except Exception:
-            logger.error("论点卡 Qdrant 索引失败: symbol=%s", symbol, exc_info=True)
+        MemoryService.get_instance().index_memory(
+            text=summary,
+            payload={
+                "symbol": symbol,
+                "as_of": str(as_of),
+                "direction": direction,
+                "type": "thesis",
+            },
+        )
 
         logger.info("论点卡已保存: symbol=%s, direction=%s", symbol, direction)
         return cast(dict[str, Any], thesis.to_dict())

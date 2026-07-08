@@ -6,18 +6,26 @@ import asyncio
 import signal
 import sys
 
+from agent.brief_content import is_indexable_brief
 from agent.config import agent_settings
+from agent.governance_hooks import OrchestratorToolPolicyHook, SpawnContractHook
 from agent.hooks import (
     ContextInjectHook,
     MemoryRecallHook,
     RedisEventHook,
+    RunCancelHook,
     ShortTermRecallHook,
 )
 from agent.protocol import EventType, RunStatus
 from agent.redis_bus import AgentRedisBus
-from agent.runtime import build_bot, init_runtime
+from agent.runtime import build_bot, get_nanobot_lock, init_runtime
 from agent.schemas import RunTask
+from agent.thesis_reconcile import start_thesis_reconcile_task, stop_thesis_reconcile_task
+from agent.trace_context import RunTraceContext, clear_run_trace, set_run_trace, trace_fields
 from framework.commons.logger import get_logger
+from xqtrader.domain.agent.errors import RunCancelledError
+from xqtrader.domain.agent.services.memory_service import MemoryService
+from xqtrader.domain.agent.services.thesis_service import ThesisService
 
 logger = get_logger("AGENT_WORKER")
 
@@ -36,6 +44,13 @@ class AgentWorker:
         await self._bus.connect()
         if not self._initialized:
             init_runtime()
+            try:
+                reconciled = await ThesisService().reconcile_all_expired()
+                if reconciled:
+                    logger.info("启动时论点卡过期治理: affected=%d", reconciled)
+            except Exception:
+                logger.exception("启动时论点卡过期治理失败")
+            start_thesis_reconcile_task()
             self._initialized = True
         logger.info(
             "Agent worker started: id=%s max_concurrent=%s",
@@ -54,6 +69,7 @@ class AgentWorker:
 
     async def stop(self) -> None:
         self._shutdown = True
+        await stop_thesis_reconcile_task()
         if self._running_tasks:
             await asyncio.gather(*self._running_tasks, return_exceptions=True)
         await self._bus.close()
@@ -83,29 +99,69 @@ class AgentWorker:
             payload={"message": task.message[:200]},
         )
 
-        hook = RedisEventHook(self._bus, run_id, session_id)
+        hook = RedisEventHook(
+            self._bus,
+            run_id,
+            session_id,
+            trace_id=task.trace_id,
+        )
+        set_run_trace(RunTraceContext(run_id=run_id, trace_id=task.trace_id))
+        trace_suffix = f" trace_id={task.trace_id}" if task.trace_id else ""
         try:
-            bot = build_bot(model=task.model)
-            session_key = self._build_session_key(task)
-            symbol = (task.context or {}).get("stock_symbol")
-            context_hook = ContextInjectHook(task.context)
-            recall_hook = MemoryRecallHook(symbol=symbol, query=task.message)
-            short_term_hook = ShortTermRecallHook(session_key=session_key, symbol=symbol)
-            result = await bot.run(
-                task.message,
-                session_key=session_key,
-                hooks=[hook, context_hook, recall_hook, short_term_hook],
-            )
-            if await self._bus.is_cancelled(run_id):
-                status = RunStatus.CANCELLED
-            else:
-                status = RunStatus.COMPLETED
-                await self._bus.publish_event(
-                    EventType.MESSAGE,
-                    run_id,
-                    session_id=session_id,
-                    payload={"content": result.content},
+            async with get_nanobot_lock():
+                bot = build_bot(model=task.model)
+                session_key = self._build_session_key(task)
+                symbol = (task.context or {}).get("stock_symbol")
+                context_hook = ContextInjectHook(task.context)
+                recall_hook = MemoryRecallHook(symbol=symbol, query=task.message)
+                short_term_hook = ShortTermRecallHook(session_key=session_key, symbol=symbol)
+                cancel_hook = RunCancelHook(self._bus, run_id)
+                policy_hook = OrchestratorToolPolicyHook(task.context)
+                spawn_hook = SpawnContractHook(task.context)
+                result = await bot.run(
+                    task.message,
+                    session_key=session_key,
+                    hooks=[
+                        hook,
+                        context_hook,
+                        recall_hook,
+                        short_term_hook,
+                        cancel_hook,
+                        policy_hook,
+                        spawn_hook,
+                    ],
                 )
+                if await self._bus.is_cancelled(run_id):
+                    status = RunStatus.CANCELLED
+                else:
+                    status = RunStatus.COMPLETED
+                    content = (result.content or "").strip()
+                    await self._bus.publish_event(
+                        EventType.MESSAGE,
+                        run_id,
+                        session_id=session_id,
+                        payload={"content": result.content},
+                    )
+                    if content and is_indexable_brief(content):
+                        try:
+                            await asyncio.to_thread(
+                                MemoryService.get_instance().index_memory,
+                                content,
+                                {"symbol": symbol, "role": "assistant", "type": "brief"},
+                            )
+                        except Exception:
+                            logger.error(
+                                "对话结论 Qdrant 索引失败 run_id=%s%s",
+                                run_id,
+                                trace_suffix,
+                                exc_info=True,
+                            )
+                    elif content:
+                        logger.info(
+                            "跳过 Qdrant 索引：内容未达简报门槛 run_id=%s chars=%d",
+                            run_id,
+                            len(content),
+                        )
             await self._bus.set_run_status(run_id, status)
             await self._bus.publish_event(
                 EventType.DONE,
@@ -113,9 +169,23 @@ class AgentWorker:
                 session_id=session_id,
                 payload={"status": status.value},
             )
-            logger.info("Run completed: run_id=%s status=%s", run_id, status.value)
+            logger.info("Run completed: run_id=%s status=%s%s", run_id, status.value, trace_suffix)
+        except RunCancelledError:
+            await self._bus.set_run_status(run_id, RunStatus.CANCELLED)
+            await self._bus.publish_event(
+                EventType.DONE,
+                run_id,
+                session_id=session_id,
+                payload={"status": RunStatus.CANCELLED.value},
+            )
+            logger.info("Run cancelled: run_id=%s%s", run_id, trace_suffix)
         except Exception as exc:
-            logger.exception("Run failed: run_id=%s", run_id)
+            logger.exception(
+                "Run failed: run_id=%s%s",
+                run_id,
+                trace_suffix,
+                extra=trace_fields(),
+            )
             try:
                 await self._bus.set_run_status(
                     run_id,
@@ -140,6 +210,8 @@ class AgentWorker:
                     run_id,
                     exc_info=True,
                 )
+        finally:
+            clear_run_trace()
 
     @staticmethod
     def _build_session_key(task: RunTask) -> str:

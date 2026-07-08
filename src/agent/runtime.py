@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -14,84 +15,16 @@ from nanobot.nanobot import Nanobot
 from nanobot.providers.image_generation import image_gen_provider_configs
 
 from agent.config import agent_settings
+from agent.nanobot_patches import NanobotRuntimePatches
 from agent.session_backend import PgSessionManager
 from framework.commons.logger import get_logger
+from xqtrader.domain.agent.services.embedding_service import EmbeddingService
+from xqtrader.domain.agent.services.memory_service import MemoryService
 
 logger = get_logger("AGENT_RUNTIME")
 
 _WORKSPACE = Path(agent_settings.WORKSPACE)
 _CONFIG_PATH = _WORKSPACE / "config.json"
-
-
-def _patch_nanobot_list_arguments() -> None:
-    """Monkey-patch Nanobot 函数，处理 Qwen3 等模型返回 list 类型工具参数的问题。"""
-    import nanobot.utils.runtime as _runtime_mod
-
-    _orig_ext_sig = _runtime_mod.external_lookup_signature
-    _orig_ws_sig = _runtime_mod.workspace_violation_signature
-
-    def _safe_external_lookup_signature(
-        tool_name: str, arguments: dict[str, Any],
-    ) -> str | None:
-        if isinstance(arguments, list):
-            return None
-        return _orig_ext_sig(tool_name, arguments)  # type: ignore[no-any-return]
-
-    def _safe_workspace_violation_signature(
-        tool_name: str, arguments: dict[str, Any],
-    ) -> str | None:
-        if isinstance(arguments, list):
-            return None
-        return _orig_ws_sig(tool_name, arguments)  # type: ignore[no-any-return]
-
-    _runtime_mod.external_lookup_signature = _safe_external_lookup_signature
-    _runtime_mod.workspace_violation_signature = _safe_workspace_violation_signature
-    logger.info("Patched nanobot.utils.runtime for list-argument safety")
-
-    import nanobot.agent.runner as _runner_mod
-
-    _orig_run_tool = _runner_mod.AgentRunner._run_tool
-
-    async def _safe_run_tool(
-        self: _runner_mod.AgentRunner,
-        spec: Any,
-        tool_call: Any,
-        ext_counts: dict[str, int],
-        ws_counts: dict[str, int],
-    ) -> Any:
-        if isinstance(tool_call.arguments, list):
-            merged: dict[str, Any] = {}
-            for item in tool_call.arguments:
-                if isinstance(item, dict):
-                    for k, v in item.items():
-                        if k not in merged:
-                            merged[k] = v
-            tool_call.arguments = merged
-            logger.warning(
-                "Normalized list arguments for tool %s -> %s",
-                tool_call.name,
-                list(merged.keys()),
-            )
-        return await _orig_run_tool(self, spec, tool_call, ext_counts, ws_counts)
-
-    _runner_mod.AgentRunner._run_tool = _safe_run_tool
-    logger.info("Patched nanobot.agent.runner.AgentRunner._run_tool for list-argument normalization")
-
-    import nanobot.agent.loop as _loop_mod
-
-    def _sync_subagent_limits(self: _loop_mod.AgentLoop) -> None:
-        """Orchestrator 与 spawn Worker 使用独立迭代预算。"""
-        self.subagents.max_iterations = agent_settings.MAX_SUBAGENT_ITERATIONS
-        self.subagents.max_concurrent_subagents = (
-            agent_settings.MAX_CONCURRENT_SUBAGENTS
-        )
-
-    _loop_mod.AgentLoop._sync_subagent_runtime_limits = _sync_subagent_limits
-    logger.info(
-        "Patched AgentLoop subagent limits: iterations=%s concurrent=%s",
-        agent_settings.MAX_SUBAGENT_ITERATIONS,
-        agent_settings.MAX_CONCURRENT_SUBAGENTS,
-    )
 
 
 def _build_mcp_servers() -> dict[str, dict[str, Any]]:
@@ -156,15 +89,26 @@ def _write_runtime_config() -> None:
 _bot: Nanobot | None = None
 _session_manager: PgSessionManager | None = None
 _runtime_initialized = False
+_nanobot_lock: asyncio.Lock | None = None
+
+
+def get_nanobot_lock() -> asyncio.Lock:
+    """Nanobot 全局单例的互斥锁 — 禁止并发 run 共享 AgentLoop 状态。"""
+    global _nanobot_lock
+    if _nanobot_lock is None:
+        _nanobot_lock = asyncio.Lock()
+    return _nanobot_lock
 
 
 def init_runtime() -> None:
-    """Worker 启动时一次性初始化：patch nanobot + 同步 config.json。"""
+    """Worker 启动时一次性初始化：patch nanobot + 同步 config.json + 记忆依赖校验。"""
     global _runtime_initialized
     if _runtime_initialized:
         return
-    _patch_nanobot_list_arguments()
+    EmbeddingService.validate_backend()
+    NanobotRuntimePatches.apply()
     _write_runtime_config()
+    MemoryService.get_instance().ensure_payload_types()
     _runtime_initialized = True
 
 

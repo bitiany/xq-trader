@@ -15,6 +15,7 @@ from agent.redis_bus import AgentRedisBus
 from agent.runtime import get_pg_session_manager
 from agent.short_term_memory import ShortTermMemoryService
 from framework.commons.logger import get_logger
+from xqtrader.domain.agent.errors import RunCancelledError
 from xqtrader.domain.agent.services.memory_service import MemoryService
 
 logger = get_logger("AGENT_MEMORY_HOOK")
@@ -68,10 +69,9 @@ class ContextInjectHook(AgentHook):
 
 
 class MemoryRecallHook(AgentHook):
-    """语义经验召回 — 首轮迭代前自动检索 Qdrant 并注入上下文；对话结束自动 index。
+    """语义经验召回 — 首轮迭代前自动检索 Qdrant 并注入上下文。
 
-    按 run 构造（携带本 run 的 symbol / user_message），因 AgentHookContext
-    不含 session_key/symbol，故不能用进程级单例。
+    对话结论索引由 Worker 在 run 成功且内容达简报门槛后执行；索引失败仅记错误日志，不影响 run 状态。
     """
 
     def __init__(self, symbol: str | None, query: str) -> None:
@@ -84,21 +84,13 @@ class MemoryRecallHook(AgentHook):
         if self._injected:
             return
         self._injected = True
-        try:
-            results = await asyncio.to_thread(
-                MemoryService.get_instance().search_memory,
-                query=self._query,
-                top_k=3,
-                symbol=self._symbol,
-                memory_types=["brief"],
-            )
-        except Exception:
-            logger.warning("语义召回失败，跳过注入", exc_info=True)
-            _inject_system_before_last_user(
-                context,
-                "[经验参考（不可用）]\n语义记忆检索失败，请勿依赖历史类比结论。",
-            )
-            return
+        results = await asyncio.to_thread(
+            MemoryService.get_instance().search_memory,
+            query=self._query,
+            top_k=3,
+            symbol=self._symbol,
+            memory_types=["brief"],
+        )
         if not results:
             return
         recall = "\n".join(
@@ -111,27 +103,6 @@ class MemoryRecallHook(AgentHook):
             f"[经验参考（非权威事实，仅供类比）]\n{recall}",
         )
         logger.info("已注入 %d 条经验召回 (symbol=%s)", len(results), self._symbol)
-
-    def finalize_content(self, context: AgentHookContext, content: str | None) -> str | None:
-        if content and content.strip():
-            text = content.strip()
-            try:
-                loop = asyncio.get_running_loop()
-                loop.run_in_executor(None, self._index_safely, text)
-            except RuntimeError:
-                self._index_safely(text)
-            except Exception:
-                logger.warning("对话结论 index 调度失败", exc_info=True)
-        return content
-
-    def _index_safely(self, text: str) -> None:
-        try:
-            MemoryService.get_instance().index_memory(
-                text=text,
-                payload={"symbol": self._symbol, "role": "assistant", "type": "brief"},
-            )
-        except Exception:
-            logger.warning("对话结论 index 失败", exc_info=True)
 
 
 class ShortTermRecallHook(AgentHook):
@@ -160,40 +131,39 @@ class ShortTermRecallHook(AgentHook):
             return
         trading_days = agent_settings.SHORT_TERM_TRADING_DAYS
         half_life = agent_settings.SHORT_TERM_DECAY_HALF_LIFE
-        unavailable = False
-        snapshots = []
-        try:
-            snapshots = await asyncio.to_thread(
-                self._memory.load_recent_briefs,
-                effective_key,
-                trading_days=trading_days,
-                half_life=half_life,
-            )
-        except Exception:
-            logger.warning(
-                "短期时序记忆加载失败 session_key=%s",
-                effective_key,
-                exc_info=True,
-            )
-            unavailable = True
+        snapshots = await asyncio.to_thread(
+            self._memory.load_recent_briefs,
+            effective_key,
+            trading_days=trading_days,
+            half_life=half_life,
+        )
         note_text = ShortTermMemoryService.format_note(
             snapshots,
             trading_days=trading_days,
             half_life=half_life,
-            unavailable=unavailable,
         )
         if not note_text:
             return
         _inject_system_before_last_user(context, note_text)
-        if unavailable:
-            logger.warning("已注入短期时序记忆降级提示 session=%s", effective_key)
-        else:
-            logger.info(
-                "已注入短期时序记忆 %d 条 (session=%s symbol=%s)",
-                len(snapshots),
-                effective_key,
-                self._symbol,
-            )
+        logger.info(
+            "已注入短期时序记忆 %d 条 (session=%s symbol=%s)",
+            len(snapshots),
+            effective_key,
+            self._symbol,
+        )
+
+
+class RunCancelHook(AgentHook):
+    """每轮迭代前检测取消标记，命中则中断 run。"""
+
+    def __init__(self, bus: AgentRedisBus, run_id: str) -> None:
+        super().__init__()
+        self._bus = bus
+        self._run_id = run_id
+
+    async def before_iteration(self, context: AgentHookContext) -> None:
+        if await self._bus.is_cancelled(self._run_id):
+            raise RunCancelledError(f"run cancelled: {self._run_id}")
 
 
 class RedisEventHook(AgentHook):
@@ -204,11 +174,21 @@ class RedisEventHook(AgentHook):
         bus: AgentRedisBus,
         run_id: str,
         session_id: str,
+        *,
+        trace_id: str | None = None,
     ) -> None:
         super().__init__()
         self._bus = bus
         self._run_id = run_id
         self._session_id = session_id
+        self._trace_id = trace_id
+
+    def _event_payload(self, payload: dict[str, Any] | None) -> dict[str, Any]:
+        merged = dict(payload or {})
+        if self._trace_id:
+            merged.setdefault("trace_id", self._trace_id)
+        merged.setdefault("run_id", self._run_id)
+        return merged
 
     def wants_streaming(self) -> bool:
         return True
@@ -220,7 +200,7 @@ class RedisEventHook(AgentHook):
             EventType.TOKEN,
             self._run_id,
             session_id=self._session_id,
-            payload={"delta": delta},
+            payload=self._event_payload({"delta": delta}),
         )
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
@@ -230,23 +210,23 @@ class RedisEventHook(AgentHook):
                     EventType.SUBAGENT_START,
                     self._run_id,
                     session_id=self._session_id,
-                    payload={
+                    payload=self._event_payload({
                         "task_id": str(getattr(tc, "id", "") or ""),
                         "label": _spawn_label(tc.arguments),
                         "task": _spawn_task(tc.arguments),
-                    },
+                    }),
                 )
                 continue
             await self._bus.publish_event(
                 EventType.TOOL_START,
                 self._run_id,
                 session_id=self._session_id,
-                payload={
+                payload=self._event_payload({
                     "call_id": str(getattr(tc, "id", "") or ""),
                     "name": tc.name,
                     "arguments": _safe_args(tc.arguments),
                     "summary": _tool_start_summary(tc.name, tc.arguments),
-                },
+                }),
             )
 
     async def after_iteration(self, context: AgentHookContext) -> None:
@@ -262,7 +242,7 @@ class RedisEventHook(AgentHook):
                     EventType.SUBAGENT_END,
                     self._run_id,
                     session_id=self._session_id,
-                    payload={
+                    payload=self._event_payload({
                         "task_id": call_id,
                         "label": _spawn_label(
                             context.tool_calls[idx].arguments
@@ -271,20 +251,20 @@ class RedisEventHook(AgentHook):
                         ),
                         "status": status,
                         "result_summary": str(detail)[:500] if detail else "",
-                    },
+                    }),
                 )
                 continue
             await self._bus.publish_event(
                 EventType.TOOL_END,
                 self._run_id,
                 session_id=self._session_id,
-                payload={
+                payload=self._event_payload({
                     "call_id": call_id,
                     "name": name,
                     "status": status,
                     "detail": str(detail)[:1000] if detail else "",
                     "summary": _tool_end_summary(name, detail, status),
-                },
+                }),
             )
 
 

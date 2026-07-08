@@ -1,0 +1,22 @@
+name: monthly_ml_train
+description: "月频ML因子组合训练：Walk-Forward LightGBM 重训，月频滚动"
+mode: canvas
+queue: celery
+enabled: true
+# 当前为手动触发模式（不配置 cron）：
+#   - 训练 42 折耗时约 2h，无人值守自动调度需确保 ml 队列 worker 在线
+#   - 通过 scheduler API 手动触发，或取消下方 cron 注释启用自动调度
+# cron: "0 22 1 * *"  # 每月1日 22:00
+
+steps:
+  - name: ml_train
+    task: ml.train_monthly
+    args:
+      pool_ids: ["idx_300"]
+      train_window: 252
+      val_window: 42
+      test_window: 42
+      gap: 5
+      step: 21
+      horizon: 5
+      factor_id: "ml_alpha_v1"

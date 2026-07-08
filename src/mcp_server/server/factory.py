@@ -111,6 +111,8 @@ class GroupServerFactory:
         override: ToolOverride | None,
     ) -> mcp_types.Tool:
         description_parts: list[str] = []
+        if override and override.risk_level:
+            description_parts.append(f"风险等级: {override.risk_level}")
         if override and override.description.strip():
             description_parts.append(override.description.strip())
         elif op.summary:

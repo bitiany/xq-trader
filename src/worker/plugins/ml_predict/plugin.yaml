@@ -1,0 +1,35 @@
+name: ml_predict
+celery_task_name: ml.predict_daily
+version: "1.0.0"
+task_name: 日频ML因子推理
+task_name_en: Daily ML Factor Prediction
+description: 加载 latest LightGBM 模型，预测截面因子值并落表 fac_factor_value
+description_en: Load latest LightGBM model, predict cross-sectional factor values and persist
+category: compute
+task_type: on_demand
+queue: ml
+timeout: 600  # 10min
+retry_config:
+  max_retries: 3
+  retry_backoff: true
+  retry_backoff_max: 300
+# schedule: "10 18 * * 1-5"  # 工作日 18:10（暂禁用，仅手动触发）
+params_schema:
+  type: object
+  properties:
+    pool_ids:
+      type: array
+      items:
+        type: string
+      title: 样本池列表
+      description: 为空时使用默认样本池(idx_300)
+    trade_date:
+      type: string
+      format: date
+      title: 预测日期
+      description: 为空时使用最新交易日
+    factor_id:
+      type: string
+      title: ML因子ID
+      default: "ml_alpha_v1"
+      description: 推理结果落表的 factor_id

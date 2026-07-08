@@ -39,7 +39,7 @@ class AgentSettings:
             os.getenv("LLM_MODEL_NAME", "Qwen/Qwen3-235B-A22B-Instruct-2507"),
         )
         self.WORKSPACE = os.getenv("AGENT_WORKSPACE", str(_AGENT_ROOT / "workspace"))
-        self.MAX_CONCURRENT_RUNS = int(os.getenv("AGENT_MAX_CONCURRENT_RUNS", "8"))
+        self.MAX_CONCURRENT_RUNS = int(os.getenv("AGENT_MAX_CONCURRENT_RUNS", "1"))
         self.QUEUE_BLOCK_SECONDS = int(os.getenv("AGENT_QUEUE_BLOCK_SECONDS", "5"))
         self.SSE_BLOCK_MS = int(os.getenv("AGENT_SSE_BLOCK_MS", "5000"))
         self.WORKER_ID = os.getenv("AGENT_WORKER_ID", "worker-1")
@@ -75,6 +75,9 @@ class AgentSettings:
         # 半衰期（交易日）：T-1 权重≈0.63, T-2≈0.40, T-3≈0.25
         self.SHORT_TERM_DECAY_HALF_LIFE = float(
             os.getenv("AGENT_SHORT_TERM_DECAY_HALF_LIFE", "1.5")
+        )
+        self.THESIS_RECONCILE_INTERVAL_S = int(
+            os.getenv("AGENT_THESIS_RECONCILE_INTERVAL_S", "3600")
         )
         self.DISABLED_SKILLS = [
             s.strip()

@@ -58,6 +58,7 @@ async def get_run(run_id: str) -> JSONResponse:
 
 @router.get("/runs/{run_id}/stream")
 async def stream_run(run_id: str) -> StreamingResponse:
+    await _service.get_run_status(run_id)
     return StreamingResponse(
         _service.stream_run_events(run_id),
         media_type="text/event-stream",

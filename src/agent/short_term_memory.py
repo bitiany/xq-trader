@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
+from agent.brief_content import MIN_BRIEF_CHARS, is_indexable_brief
 from agent.session_backend import PgSessionManager
 from xqtrader.domain.agent.models.session import AgentMessage
 from xqtrader.domain.watermark.models.trade_calendar import (
@@ -28,7 +29,7 @@ _DIRECTION_RE = re.compile(
     r"(?:^|\n)\s*[-*]?\s*方向\s*[:：]\s*([^\n]+)",
     re.MULTILINE,
 )
-_MIN_BRIEF_CHARS = 300
+_MIN_BRIEF_CHARS = MIN_BRIEF_CHARS
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,7 +106,7 @@ class ShortTermMemoryService:
             return []
 
         trading_day_list = self._sessions.run_coroutine(
-            _recent_trading_days(trading_days + 1),
+            self._recent_trading_days(trading_days + 1),
         )
         if len(trading_day_list) < 2:
             return []
@@ -119,15 +120,13 @@ class ShortTermMemoryService:
             timezone.utc,
         )
         rows = self._sessions.run_coroutine(
-            _load_assistant_payloads_since(session_key, cutoff),
+            self._load_assistant_payloads_since(session_key, cutoff),
         )
 
         day_to_content: dict[date, str] = {}
         for payload in rows:
             content = (payload.get("content") or "").strip()
-            if len(content) < _MIN_BRIEF_CHARS:
-                continue
-            if "投研简报" not in content and "## 交易策略" not in content:
+            if not is_indexable_brief(content):
                 continue
             report_date = self.extract_report_date(content)
             if report_date is None:
@@ -164,14 +163,7 @@ class ShortTermMemoryService:
         *,
         trading_days: int,
         half_life: float,
-        unavailable: bool = False,
     ) -> str | None:
-        if unavailable:
-            return (
-                "[短期时序记忆（不可用）]\n"
-                "历史简报加载失败，今日分析须完全依赖实时 spawn 与论点卡；"
-                "日际变化节标注「历史记忆不可用」。"
-            )
         if not snapshots:
             return None
         lines = [
@@ -193,37 +185,37 @@ class ShortTermMemoryService:
         lines.append("须在报告中输出「日际变化」节，说明建议/技术信号相对上述记忆的演变及原因。")
         return "\n".join(lines)
 
+    async def _recent_trading_days(
+        self,
+        count: int,
+        *,
+        exchange: str = DEFAULT_TRADE_EXCHANGE,
+    ) -> list[date]:
+        ref = await TradeCalendar.get_latest_trade_date(exchange=exchange)
+        if ref is None:
+            return []
+        rows = await TradeCalendar.filter(
+            exchange=exchange,
+            is_open=True,
+            cal_date__lte=ref,
+            order_by=TradeCalendar.cal_date.desc(),
+            limit=count,
+        )
+        return [row.cal_date for row in rows]
 
-async def _recent_trading_days(
-    count: int,
-    *,
-    exchange: str = DEFAULT_TRADE_EXCHANGE,
-) -> list[date]:
-    ref = await TradeCalendar.get_latest_trade_date(exchange=exchange)
-    if ref is None:
-        return []
-    rows = await TradeCalendar.filter(
-        exchange=exchange,
-        is_open=True,
-        cal_date__lte=ref,
-        order_by=TradeCalendar.cal_date.desc(),
-        limit=count,
-    )
-    return [row.cal_date for row in rows]
-
-
-async def _load_assistant_payloads_since(
-    session_key: str,
-    cutoff: datetime,
-) -> list[dict]:
-    rows = await AgentMessage.filter(
-        session_key=session_key,
-        created_at__gte=cutoff,
-        order_by=AgentMessage.seq,
-    )
-    return [
-        row.payload
-        for row in rows
-        if (row.payload or {}).get("role") == "assistant"
-    ]
+    @staticmethod
+    async def _load_assistant_payloads_since(
+        session_key: str,
+        cutoff: datetime,
+    ) -> list[dict]:
+        rows = await AgentMessage.filter(
+            session_key=session_key,
+            created_at__gte=cutoff,
+            order_by=AgentMessage.seq,
+        )
+        return [
+            row.payload
+            for row in rows
+            if (row.payload or {}).get("role") == "assistant"
+        ]
 

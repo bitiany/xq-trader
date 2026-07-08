@@ -27,6 +27,7 @@ from xqtrader.domain.factor.services.factor_data_loader import (
 from xqtrader.domain.market.models.candlestick import CandlestickDaily
 
 from ..backtest.core import StrategyConfig
+from ..backtest.plugins.chanlun_signal import compute_chanlun_signals
 from ..backtest.runner import run_backtest
 from ..enums import BacktestRunStatus
 from ..loaders import StrategyConfigLoader
@@ -283,12 +284,12 @@ class BacktestService:
                     how="left",
                 )
 
-        # 缺失因子列填 0（避免 backtrader 数据源报错）
+        # 缺失因子列填充 NaN — backtrader PandasData 支持 NaN，_read_factor_values
+        # 会将 NaN 转为 None，ExpressionPlugin 检测到 None 后返回 neutral（"因子数据缺失"）。
+        # 不使用 fillna(0.0) — 0.0 是合法因子值，可能错误触发 >= 0 / <= 0 类信号。
         for fid in factor_ids:
             if fid not in df.columns:
-                df[fid] = 0.0
-            else:
-                df[fid] = df[fid].fillna(0.0)
+                df[fid] = float("nan")
 
         # 内置技术因子在 DB 因子之后计算，确保覆盖缺失或为 0 的值
         BacktestService._add_builtin_technical_factors(df, factor_ids)
@@ -297,6 +298,9 @@ class BacktestService:
         start_ts = pd.Timestamp(start_date)
         end_ts = pd.Timestamp(end_date)
         df = df[(df["trade_date"] >= start_ts) & (df["trade_date"] <= end_ts)].reset_index(drop=True)
+
+        # 因子数据覆盖率诊断 — 覆盖率过低的因子会导致信号稀疏
+        BacktestService._log_factor_coverage(df, factor_ids, builtin_factor_ids, symbol)
 
         return df
 
@@ -313,16 +317,68 @@ class BacktestService:
             builtin.add("bias")
         if "mon_5d" in factor_ids:
             builtin.add("mon_5d")
+        # 缠论信号 — 基于 OHLCV 实时计算，不依赖 DB 因子库
+        chan_related = {"chan_buy_point", "chan_sell_point", "chan_bi_direction"}
+        if set(factor_ids).intersection(chan_related):
+            builtin.update(chan_related)
+        # KDJ 指标
+        kdj_related = {"kdj_k", "kdj_d", "kdj_j"}
+        if set(factor_ids).intersection(kdj_related):
+            builtin.update(kdj_related)
+        # 布林带
+        boll_related = {"boll_upper", "boll_middle", "boll_lower", "boll_width"}
+        if set(factor_ids).intersection(boll_related):
+            builtin.update(boll_related)
+        # 均线
+        ma_related = {"ma_short", "ma_long"}
+        if set(factor_ids).intersection(ma_related):
+            builtin.update(ma_related)
+        # 量价因子
+        vol_related = {"vol_ma_20", "vol_ratio"}
+        if set(factor_ids).intersection(vol_related):
+            builtin.update(vol_related)
+        # ADX 趋势强度（含 +DI / -DI 用于方向判断）
+        adx_related = {"adx", "adx_plus_di", "adx_minus_di"}
+        if set(factor_ids).intersection(adx_related):
+            builtin.update(adx_related)
+        # ATR 波动率
+        if "atr" in factor_ids:
+            builtin.add("atr")
+        # 动量因子（已有 mon_5d，新增 mon_10d/mon_20d）
+        mon_related = {"mon_5d", "mon_10d", "mon_20d"}
+        if set(factor_ids).intersection(mon_related):
+            builtin.update(mon_related)
+        # 神奇九转 TD Sequential
+        td_related = {"td_seq_buy", "td_seq_sell", "td_seq_count"}
+        if set(factor_ids).intersection(td_related):
+            builtin.update(td_related)
+        # close 也作为内置因子（从 OHLCV 直接获取）
+        if "close" in factor_ids:
+            builtin.add("close")
         return builtin
 
     @staticmethod
     def _add_builtin_technical_factors(df: pd.DataFrame, factor_ids: list[str]) -> None:
-        """按需计算轻量回测内置技术因子。"""
+        """按需计算轻量回测内置技术因子。
+
+        因子库数据 + 按需实时计算结合：
+          - MACD/RSI/BIAS/KDJ/布林带/均线等技术指标由 talib/pandas 实时计算
+          - 缠论信号由 chanpy 实时计算笔/中枢/背驰
+          - 资金流/动量等因子从 DB 加载
+        """
         required = set(factor_ids)
         close = df["close"].astype(float)
         close_values = cast(
             np.ndarray[tuple[Any, ...], np.dtype[np.float64]],
             close.to_numpy(dtype=np.float64),
+        )
+        high_values = cast(
+            np.ndarray[tuple[Any, ...], np.dtype[np.float64]],
+            df["high"].astype(float).to_numpy(dtype=np.float64),
+        )
+        low_values = cast(
+            np.ndarray[tuple[Any, ...], np.dtype[np.float64]],
+            df["low"].astype(float).to_numpy(dtype=np.float64),
         )
 
         if required.intersection({"macd", "signal", "hist", "hist_slope", "hist_area"}):
@@ -346,8 +402,219 @@ class BacktestService:
         if "mon_5d" in required:
             df["mon_5d"] = close / close.shift(5) - 1
 
+        # 10日/20日动量
+        if "mon_10d" in required:
+            df["mon_10d"] = close / close.shift(10) - 1
+        if "mon_20d" in required:
+            df["mon_20d"] = close / close.shift(20) - 1
+
+        # KDJ 指标 — 国内主流实现：RSV -> K -> D -> J
+        kdj_related = {"kdj_k", "kdj_d", "kdj_j"}
+        if required.intersection(kdj_related):
+            kdj_k, kdj_d = BacktestService._calc_kdj(high_values, low_values, close_values)
+            df["kdj_k"] = kdj_k
+            df["kdj_d"] = kdj_d
+            df["kdj_j"] = 3 * kdj_k - 2 * kdj_d
+
+        # 布林带 — middle=SMA20, upper/lower=middle±2*std
+        boll_related = {"boll_upper", "boll_middle", "boll_lower", "boll_width"}
+        if required.intersection(boll_related):
+            boll_middle = close.rolling(20).mean()
+            boll_std = close.rolling(20).std()
+            df["boll_middle"] = boll_middle
+            df["boll_upper"] = boll_middle + 2 * boll_std
+            df["boll_lower"] = boll_middle - 2 * boll_std
+            # 布林带宽度（归一化）
+            df["boll_width"] = (df["boll_upper"] - df["boll_lower"]) / boll_middle
+
+        # 均线 — ma_short=MA5, ma_long=MA20
+        ma_related = {"ma_short", "ma_long"}
+        if required.intersection(ma_related):
+            df["ma_short"] = close.rolling(5).mean()
+            df["ma_long"] = close.rolling(20).mean()
+
+        # 成交量均线 — 用于量价突破判断
+        if "vol_ma_20" in required:
+            df["vol_ma_20"] = df["volume"].astype(float).rolling(20).mean()
+
+        # 量比 — 当日成交量 / 5日平均成交量（衡量成交活跃度）
+        if "vol_ratio" in required:
+            vol_ma5 = df["volume"].astype(float).rolling(5).mean()
+            df["vol_ratio"] = df["volume"].astype(float) / vol_ma5.replace(0, np.nan)
+
+        # ADX 趋势强度（DI+/DI-/ADX） — 衡量趋势强度，不区分方向
+        adx_related = {"adx", "adx_plus_di", "adx_minus_di"}
+        if required.intersection(adx_related):
+            adx_vals = ta.ADX(high_values, low_values, close_values, timeperiod=14)
+            plus_di = ta.PLUS_DI(high_values, low_values, close_values, timeperiod=14)
+            minus_di = ta.MINUS_DI(high_values, low_values, close_values, timeperiod=14)
+            df["adx"] = adx_vals
+            df["adx_plus_di"] = plus_di
+            df["adx_minus_di"] = minus_di
+
+        # ATR 波动率 — 用于止损止盈与突破强度判断
+        if "atr" in required:
+            df["atr"] = ta.ATR(high_values, low_values, close_values, timeperiod=14)
+
+        # 神奇九转 TD Sequential — 经典反转信号
+        # Setup: 连续9个 close < close.shift(4) → 买入信号
+        #        连续9个 close > close.shift(4) → 卖出信号
+        td_related = {"td_seq_buy", "td_seq_sell", "td_seq_count"}
+        if required.intersection(td_related):
+            BacktestService._calc_td_sequential(df)
+
+        # 缠论买卖点信号 — 基于 OHLCV 实时计算笔/中枢/背驰
+        # 缠论不作为截面因子入库，回测时直接由 chanpy 实时计算
+        chan_factor_ids = {"chan_buy_point", "chan_sell_point", "chan_bi_direction"}
+        if required.intersection(chan_factor_ids):
+            chan_signals = compute_chanlun_signals(df)
+            for col in chan_signals.columns:
+                df[col] = chan_signals[col].values
+
+    @staticmethod
+    def _calc_td_sequential(df: pd.DataFrame) -> None:
+        """计算神奇九转 TD Sequential 指标
+
+        TD Setup 经典规则:
+          买入信号: 连续 9 个交易日收盘价 < 4 日前收盘价（下跌动能衰竭）
+          卖出信号: 连续 9 个交易日收盘价 > 4 日前收盘价（上涨动能衰竭）
+
+        计数中断条件:
+          - 连续计数中断后归零，重新开始
+          - 第 9 根 K 线确认后产生信号
+
+        输出列:
+          td_seq_buy: 1.0=买入信号触发, 0.0=否
+          td_seq_sell: 1.0=卖出信号触发, 0.0=否
+          td_seq_count: 正数=上涨计数(卖出预警), 负数=下跌计数(买入预警)
+        """
+        n = len(df)
+        close = df["close"].astype(float)
+        buy_signal = np.zeros(n)
+        sell_signal = np.zeros(n)
+        td_count = np.zeros(n)
+
+        if n < 9:
+            df["td_seq_buy"] = buy_signal
+            df["td_seq_sell"] = sell_signal
+            df["td_seq_count"] = td_count
+            return
+
+        # close.shift(4) — 4 日前收盘价
+        close_prev4 = close.shift(4)
+
+        up_count = 0   # 连续 close > close.shift(4) 的天数（卖出预警）
+        down_count = 0  # 连续 close < close.shift(4) 的天数（买入预警）
+
+        for i in range(4, n):
+            curr = close.iloc[i]
+            prev4 = close_prev4.iloc[i]
+            if pd.isna(curr) or pd.isna(prev4):
+                td_count[i] = up_count if up_count > 0 else -down_count
+                continue
+
+            if curr > prev4:
+                up_count += 1
+                down_count = 0
+            elif curr < prev4:
+                down_count += 1
+                up_count = 0
+            else:
+                # 相等不计数，重置
+                up_count = 0
+                down_count = 0
+
+            # 第 9 根确认信号
+            if up_count == 9:
+                sell_signal[i] = 1.0
+                # 信号触发后重置计数（避免重复触发）
+                up_count = 0
+            if down_count == 9:
+                buy_signal[i] = 1.0
+                down_count = 0
+
+            td_count[i] = up_count if up_count > 0 else -down_count
+
+        df["td_seq_buy"] = buy_signal
+        df["td_seq_sell"] = sell_signal
+        df["td_seq_count"] = td_count
+
+    @staticmethod
+    def _calc_kdj(
+        high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int = 9,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """计算 KDJ 指标的 K 和 D 值
+
+        国内主流实现:
+          RSV = (close - lowest_low_n) / (highest_high_n - lowest_low_n) * 100
+          K = 前K * 2/3 + RSV * 1/3
+          D = 前D * 2/3 + K * 1/3
+
+        Args:
+            high: 最高价数组
+            low: 最低价数组
+            close: 收盘价数组
+            period: RSV 计算周期（默认9日）
+
+        Returns:
+            (K, D) 数组
+        """
+        n = len(close)
+        k = np.full(n, np.nan)
+        d = np.full(n, np.nan)
+        if n < period:
+            return k, d
+
+        # 滚动计算最高价和最低价
+        for i in range(period - 1, n):
+            highest = np.max(high[i - period + 1:i + 1])
+            lowest = np.min(low[i - period + 1:i + 1])
+            if highest == lowest:
+                rsv = 50.0
+            else:
+                rsv = (close[i] - lowest) / (highest - lowest) * 100
+
+            if i == period - 1:
+                k[i] = 50 * 2 / 3 + rsv * 1 / 3
+                d[i] = 50 * 2 / 3 + k[i] * 1 / 3
+            else:
+                k[i] = k[i - 1] * 2 / 3 + rsv * 1 / 3
+                d[i] = d[i - 1] * 2 / 3 + k[i] * 1 / 3
+
+        return k, d
+
     @staticmethod
     def _calc_hist_area(window: pd.Series) -> float:
         pos = window[window > 0].sum()
         neg = window[window < 0].sum()
         return float(pos if window.iloc[-1] > 0 else neg)
+
+    @staticmethod
+    def _log_factor_coverage(
+        df: pd.DataFrame,
+        factor_ids: list[str],
+        builtin_factor_ids: set[str],
+        symbol: str,
+    ) -> None:
+        """诊断因子数据覆盖率 — 覆盖率过低的因子会导致信号稀疏。
+
+        内置技术因子（MACD/RSI 等）由 _add_builtin_technical_factors 计算，
+        覆盖率取决于 K 线数据，不需要诊断。仅诊断 DB 加载的因子。
+        """
+        total_rows = len(df)
+        if total_rows == 0:
+            return
+        db_factor_ids = [fid for fid in factor_ids if fid not in builtin_factor_ids]
+        low_coverage: list[str] = []
+        for fid in db_factor_ids:
+            if fid not in df.columns:
+                continue
+            valid_count = int(df[fid].notna().sum())
+            coverage = valid_count / total_rows
+            if coverage < 0.5:
+                low_coverage.append(f"{fid}={coverage:.1%}({valid_count}/{total_rows})")
+        if low_coverage:
+            logger.warning(
+                "标的 %s 因子数据覆盖率过低，可能导致信号稀疏: %s",
+                symbol, ", ".join(low_coverage),
+            )

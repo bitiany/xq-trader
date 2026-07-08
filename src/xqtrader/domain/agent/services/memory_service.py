@@ -7,9 +7,19 @@
   - collection 启动时自动创建（if not exists）
 """
 
+from __future__ import annotations
+
 import logging
 import uuid
 from typing import Any
+
+from qdrant_client.models import (
+    FieldCondition,
+    Filter,
+    MatchAny,
+    MatchValue,
+    PointStruct,
+)
 
 from framework.config.settings import settings
 
@@ -21,17 +31,18 @@ logger = logging.getLogger("AGENT.MEMORY")
 class MemoryService:
     """Qdrant 向量记忆服务单例"""
 
-    _instance: "MemoryService | None" = None
+    _instance: MemoryService | None = None
     _client: Any = None
     _initialized: bool = False
+    _types_backfilled: bool = False
 
-    def __new__(cls) -> "MemoryService":
+    def __new__(cls) -> MemoryService:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
 
     @classmethod
-    def get_instance(cls) -> "MemoryService":
+    def get_instance(cls) -> MemoryService:
         return cls()
 
     def _ensure_client(self) -> Any:
@@ -61,6 +72,38 @@ class MemoryService:
             logger.info("Qdrant 客户端已连接 %s:%d", cfg.HOST, cfg.GRPC_PORT)
         return self._client
 
+    def ensure_payload_types(self) -> None:
+        """为缺少 type 字段的历史向量补全类型，完成后方可按 type 精确过滤。"""
+        if self._types_backfilled:
+            return
+        client = self._ensure_client()
+        collection = settings.QDRANT.COLLECTION
+        offset: Any = None
+        updated = 0
+        while True:
+            records, offset = client.scroll(
+                collection_name=collection,
+                limit=100,
+                offset=offset,
+                with_payload=True,
+            )
+            for point in records:
+                payload = point.payload or {}
+                if payload.get("type"):
+                    continue
+                inferred = "thesis" if payload.get("direction") else "brief"
+                client.set_payload(
+                    collection_name=collection,
+                    payload={"type": inferred},
+                    points=[point.id],
+                )
+                updated += 1
+            if offset is None:
+                break
+        self._types_backfilled = True
+        if updated:
+            logger.info("Qdrant 向量 type 回填完成: updated=%d", updated)
+
     def index_memory(
         self,
         text: str,
@@ -70,13 +113,11 @@ class MemoryService:
 
         Args:
             text: 待索引的文本（论点卡摘要/简报结论）
-            payload: 元数据（symbol / as_of / direction / 场景标签等）
+            payload: 元数据（symbol / as_of / direction / type 等）
 
         Returns:
             写入的 point ID
         """
-        from qdrant_client.models import PointStruct
-
         client = self._ensure_client()
         embedding = EmbeddingService.get_instance()
         vector = embedding.encode_one(text)
@@ -101,35 +142,21 @@ class MemoryService:
             query: 查询文本
             top_k: 返回条数
             symbol: 可选标的过滤
-            memory_types: 可选记忆类型过滤（如 brief）；兼容无 type 字段的旧数据
+            memory_types: 可选记忆类型过滤（如 brief / thesis）
 
         Returns:
             匹配结果列表，每条含 score / text / payload
         """
-        from qdrant_client.models import (
-            FieldCondition,
-            Filter,
-            IsEmptyCondition,
-            MatchAny,
-            MatchValue,
-            PayloadField,
-        )
-
         client = self._ensure_client()
         embedding = EmbeddingService.get_instance()
         query_vector = embedding.encode_one(query)
 
-        must: list[Filter | FieldCondition] = []
+        must: list[Any] = []
         if symbol:
             must.append(FieldCondition(key="symbol", match=MatchValue(value=symbol)))
         if memory_types:
             must.append(
-                Filter(
-                    should=[
-                        FieldCondition(key="type", match=MatchAny(any=memory_types)),
-                        IsEmptyCondition(is_empty=PayloadField(key="type")),
-                    ],
-                ),
+                FieldCondition(key="type", match=MatchAny(any=memory_types)),
             )
         query_filter = Filter(must=must) if must else None
 

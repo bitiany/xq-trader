@@ -28,9 +28,16 @@ def create_factor_datafeed(
 
     自动将 DataFrame 中的因子列声明为 backtrader lines，
     无需为每个策略硬编码 PandasData 子类。
+
+    注意: open/high/low/close/volume 是 PandasData 内置 lines，
+    不需要重复声明，但插件仍可通过 getattr(self.data, 'close') 访问。
     """
-    lines_decl = tuple(factor_ids)
-    params_decl = tuple((fid, fid) for fid in factor_ids)
+    # 排除 backtrader PandasData 内置字段，避免重复声明 lines
+    builtin_ohlcv = {"open", "high", "low", "close", "volume", "openinterest", "datetime"}
+    extra_factor_ids = [fid for fid in factor_ids if fid not in builtin_ohlcv]
+
+    lines_decl = tuple(extra_factor_ids)
+    params_decl = tuple((fid, fid) for fid in extra_factor_ids)
 
     factor_pandas_data_cls = type(
         "FactorPandasData",

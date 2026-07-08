@@ -28,9 +28,7 @@ def build_input_schema(op: Operation, *, hide_params: list[str] | None = None) -
     schema: dict[str, Any] = {
         "type": "object",
         "properties": properties,
-        # 与 HttpInvoker._partition 的容忍契约保持一致：未声明的入参由调用器静默丢弃，
-        # 不在 schema 层硬拒绝，避免单个幻觉字段（如 limit）导致整次调用失败而丢失真实数据。
-        "additionalProperties": True,
+        "additionalProperties": False,
     }
     if required:
         schema["required"] = required

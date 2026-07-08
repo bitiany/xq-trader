@@ -1,7 +1,7 @@
 # xqtrader 智能体架构设计
 
-> 版本：v3.0
-> 日期：2026-07-06
+> 版本：v3.1
+> 日期：2026-07-08
 > 定位：个人单机量化平台的 AI Agent 子系统最终架构
 > 关联：[ai-in-trading-design.md](./ai-in-trading-design.md)
 
@@ -70,7 +70,7 @@ xqtrader 智能体子系统是量化平台的**编排层、解释层、交互层
 | 层级 | 职责 | 不属于 |
 |------|------|--------|
 | **Nanobot 框架** | LLM 多轮循环、Skills 加载、spawn 子 Agent、Tool 注册与执行、上下文压缩 | 业务数据存储、平台 API、审批流 |
-| **Agent Harness** | 会话后端注入、语义召回 Hook、页面上下文注入、Redis 事件流、并发控制、Intent Router | 五步法逻辑、因子计算 |
+| **Agent Harness** | 会话后端注入、语义召回/索引、页面上下文注入、Redis 事件流、并发控制、Intent Router、验证治理 | 五步法逻辑、因子计算 |
 | **FlowEngine** | 预定义 DAG 执行、Checkpoint 恢复、人工审批节点 | 自然语言理解、开放探索 |
 | **业务 Skill + MCP** | 投研方法论、工具调用顺序、论点卡读写、结构化产出契约 | 会话管理、LLM 调度 |
 
@@ -84,10 +84,10 @@ xqtrader 智能体子系统是量化平台的**编排层、解释层、交互层
 |------|------|------|
 | **R** | 推理基底 | Nanobot `AgentLoop` + 可配置 LLM Provider |
 | **M** | 记忆存储 | PostgreSQL 会话表 + Qdrant 语义向量 |
-| **C** | 上下文构造 | `ContextBuilder` + `ContextInjectHook` + `MemoryRecallHook` |
-| **S** | 技能路由 | Skills 渐进加载 + `spawn` 子 Agent + MCP Tool 分组 |
+| **C** | 上下文构造 | `ContextBuilder` + `ContextInjectHook` + `MemoryRecallHook` + `ShortTermRecallHook` |
+| **S** | 技能路由 | Skills 渐进加载 + `spawn` 子 Agent + MCP 多端点分组 |
 | **O** | 编排循环 | Redis 队列 Worker + Intent Router + FlowEngine 触发 |
-| **G** | 验证治理 | MCP `risk_level` 标注 + FlowEngine 审批节点 + Worker JSON 契约 |
+| **G** | 验证治理 | MCP `risk_level` + Orchestrator 工具策略 + spawn JSON 契约 + FlowEngine 审批节点 |
 
 ---
 
@@ -96,7 +96,7 @@ xqtrader 智能体子系统是量化平台的**编排层、解释层、交互层
 | 进程 | 职责 |
 |------|------|
 | **xqtrader-api** | 认证、路由、参数校验、轻量只读查询、Agent Run 入队、SSE 事件转发 |
-| **Agent Worker** | 消费 Redis 队列，执行 Nanobot Loop，发布 Tool/Token 事件 |
+| **Agent Worker** | 消费 Redis 队列，执行 Nanobot Loop，发布 Tool/Token 事件，语义索引，论点卡过期治理 |
 | **MCP Server** | 将平台 OpenAPI 能力转换为 MCP Tool，独立进程承载工具执行面 |
 | **Celery Worker** | 因子计算、回测、FlowEngine 长任务 |
 | **PostgreSQL / Redis / Qdrant** | 业务数据、会话、队列、语义向量 |
@@ -107,6 +107,7 @@ xqtrader 智能体子系统是量化平台的**编排层、解释层、交互层
 2. Agent Loop 不阻塞 API；长任务走 Celery 或 FlowEngine
 3. Agent 禁止直连数据库，一切业务动作经 MCP
 4. 交易类 MCP 工具仅生成 `pre_order`，经 FlowEngine 审批 Gate 后执行
+5. Nanobot 全局单例 + 进程内互斥锁，禁止并发 run 共享 `AgentLoop` 状态
 
 ---
 
@@ -133,27 +134,84 @@ xqtrader 智能体子系统是量化平台的**编排层、解释层、交互层
 
 ## 6. Agent Harness 扩展（平台包裹层）
 
+### 6.1 组件清单
+
 | 组件 | 文件 | 职责 |
 |------|------|------|
-| Runtime 工厂 | `agent/runtime.py` | 构建 `AgentLoop`、注入 `PgSessionManager`、配置 MCP 端点 |
-| Worker | `agent/worker.py` | Redis 消费、并发信号量、取消检测、Hook 装配 |
+| Runtime 工厂 | `agent/runtime.py` | 构建 Nanobot 单例、注入 `PgSessionManager`、生成 MCP 端点配置、嵌入后端校验、`ensure_payload_types` |
+| Nanobot 互斥锁 | `agent/runtime.py` | `get_nanobot_lock()` 保证同一进程内 run 串行执行 |
+| Worker | `agent/worker.py` | Redis 消费、并发信号量、Hook 装配、run 后语义索引、论点卡过期治理 |
 | `ContextInjectHook` | `agent/hooks.py` | 首轮注入页面上下文（`stock_symbol`、`page_source`） |
-| `MemoryRecallHook` | `agent/hooks.py` | 首轮 Qdrant 语义召回；对话结束自动 index |
+| `MemoryRecallHook` | `agent/hooks.py` | 首轮 Qdrant 语义召回（`type=brief`）；召回失败上抛，run 标记 FAILED |
 | `ShortTermRecallHook` | `agent/hooks.py` | 近 N 交易日会话简报摘要注入（日际快变量对比） |
-| `RedisEventHook` | `agent/hooks.py` | Token/Tool/Subagent 事件 → Redis Stream → SSE |
+| `RunCancelHook` | `agent/hooks.py` | 每轮迭代前检测取消标记，命中则中断 run |
+| `RedisEventHook` | `agent/hooks.py` | Token/Tool/Subagent 事件 → Redis Stream → SSE，payload 附带 `trace_id`/`run_id` |
+| `OrchestratorToolPolicyHook` | `agent/governance_hooks.py` | stock-research Orchestrator 禁止直接调用快变量 MCP 工具 |
+| `SpawnContractHook` | `agent/governance_hooks.py` | spawn Worker 输出 JSON 契约运行时校验 |
 | `PgSessionManager` | `agent/session_backend.py` | 鸭子兼容 nanobot `SessionManager`，PostgreSQL 持久化 |
-| Intent Router | API / Worker 入口 | 请求分类：FlowEngine / Agent Loop |
+| 简报门槛 | `agent/brief_content.py` | `is_indexable_brief()`：索引与短期记忆提取共用标准 |
+| spawn 契约 | `agent/spawn_contracts.py` | technical/sentiment/fund-flow JSON Schema 校验 |
+| 追踪上下文 | `agent/trace_context.py` | `ContextVar` 贯穿 Worker 日志与 Redis 事件 |
+| 论点卡治理 | `agent/thesis_reconcile.py` | Worker 进程内定时 `reconcile_all_expired` |
+| Intent Router | `xqtrader/domain/agent/intent_router.py` | `submit_message` 入口分流 Agent / FlowEngine |
 
-### 6.1 记忆三分法
+### 6.2 记忆三分法
 
 | 记忆类型 | 归属 | 载体 | Agent 调用方式 |
 |---------|------|------|---------------|
 | 会话历史 | 框架能力 | PostgreSQL `ag_session` / `ag_message` | 自动注入，禁止工具调用 |
-| 短期时序记忆 | Harness 能力 | 会话历史 + 交易日历 | `ShortTermRecallHook` 自动注入（近 3 交易日） |
-| 语义经验 | Harness 能力 | Qdrant `research_memory` | Hook 自动召回/index，禁止工具调用 |
+| 短期时序记忆 | Harness 能力 | 会话历史 + 交易日历 | `ShortTermRecallHook` 自动注入（近 3 交易日，半衰期 1.5 交易日） |
+| 语义经验 | Harness 能力 | Qdrant `research_memory` | Hook 自动召回；Worker run 成功后按门槛索引，禁止工具调用 |
 | 投研论点卡 | 业务能力 | PostgreSQL `ag_research_thesis` | `research_thesis` MCP 显式读写 |
 
 语义经验定位为**模糊类比补充**，论点卡定位为**结构化权威结论**，二者不可互替。
+
+**召回**：`MemoryRecallHook` 在首轮 `before_iteration` 检索 Qdrant（`top_k=3`，`memory_types=["brief"]`），注入 `[经验参考（非权威事实，仅供类比）]` 系统提示。召回链路异常上抛，run 标记 FAILED。
+
+**索引**：Worker 在 run `COMPLETED` 后调用 `is_indexable_brief()` 判定（≥300 字且含「投研简报」或「## 交易策略」），达标则写入 Qdrant（`type=brief`）。索引失败仅记错误日志，run 状态保持 `COMPLETED`。
+
+**嵌入**：`EmbeddingService` 按 `QDRANT_EMBEDDING_BACKEND` 策略化选择后端（如 TEI）；Worker 启动时 `validate_backend()` 校验配置可用性。
+
+### 6.3 Run 生命周期
+
+```
+submit_message
+  ├─ IntentRouter → WorkflowRoute → FlowEngine 同步执行 → 202 + run_id
+  └─ IntentRouter → AgentRoute → Redis 入队 → 202 + run_id
+
+Worker dequeue
+  ├─ 取消标记已存在 → CANCELLED + done
+  ├─ async with nanobot_lock + semaphore
+  │    ├─ RunCancelHook 每轮检测取消
+  │    ├─ OrchestratorToolPolicyHook / SpawnContractHook 治理
+  │    └─ bot.run(hooks=[...])
+  ├─ COMPLETED → message 事件 → 简报索引（门槛判定）
+  ├─ RunCancelledError → CANCELLED
+  └─ 其它异常 → FAILED + error 事件
+
+SSE /runs/{id}/stream
+  ├─ 预检 run meta（不存在 → 404）
+  └─ Redis Stream 事件转发（含 trace_id）
+```
+
+| 控制项 | 配置 | 默认值 |
+|--------|------|--------|
+| Worker 并发 | `AGENT_MAX_CONCURRENT_RUNS` | 1 |
+| Nanobot 串行锁 | 进程内 `asyncio.Lock` | 与并发配置叠加生效 |
+| 取消 | `POST /runs/{id}/cancel` + `RunCancelHook` | 每轮迭代前轮询 |
+| 追踪 | 请求头 `X-Trace-Id` → RunTask → Redis 事件 / Worker 日志 | 可选 |
+| 论点卡过期治理 | `AGENT_THESIS_RECONCILE_INTERVAL_S` | 3600s，Worker 启动时执行一次 |
+
+### 6.4 验证治理
+
+| 治理项 | 触发点 | 行为 |
+|--------|--------|------|
+| Orchestrator 工具策略 | `before_execute_tools` | stock-research 场景禁止 Orchestrator 直接调用 `get_stock_fund_flow` / `get_stock_technical` / `get_stock_chanlun` / `get_stock_sentiment`；须通过 `spawn` 委托 Worker |
+| spawn JSON 契约 | `after_iteration` | 识别 `[spawn-worker:xxx]` 标记，对 technical / sentiment / fund-flow 输出执行 JSON Schema 校验；不合规上抛，run 标记 FAILED |
+| MCP risk_level | MCP Tool 描述 | L0 只读 / L1 写内部 / L2 交易 / L3 管理 |
+| FlowEngine 审批 | `human_input` 节点 | 写库、交易等关键操作人工 Gate |
+
+stock-research 策略启用条件：`context.skill` 或 `context.orchestrator` 为 `stock-research`，或 `page_source` 为 `stock-research` / `stock_detail` / `stock`。
 
 ---
 
@@ -187,17 +245,20 @@ Intent Router 将匹配已注册 `flow_id` 的请求直接派发到 FlowEngine�
 
 ## 8. Intent Router
 
-用户请求进入系统后，Router 按以下决策树分流：
+`IntentRouter.resolve()` 在 API `submit_message` 层执行，按以下优先级分流：
 
 ```
-用户请求
-  ├─ 匹配已注册 FlowEngine flow_id → FlowEngine 执行
-  ├─ 涉及写库/交易/发布 → Agent 生成计划 → FlowEngine 审批流
-  ├─ 只读查询/解释 → Agent Loop + 只读 MCP
-  └─ 开放研究/探索 → Agent Loop（stock-research 等 Orchestrator Skill）
+用户请求 + context
+  ├─ body.flow_id 或 context.flow_id 非空
+  │    └─ flow/{id}.json 存在 → WorkflowRoute → FlowEngine 同步执行
+  ├─ 消息匹配 /workflow {flow_id} 或 #flow:{flow_id}
+  │    └─ flow 存在 → WorkflowRoute
+  └─ 其它 → AgentRoute → Redis 入队
 ```
 
-Router 在 API `submit_message` 层实现规则匹配，必要时辅以轻量 LLM 分类。
+WorkflowRoute 输入构造：优先取 `context.workflow_inputs`（dict 或 JSON 字符串），否则以 `message` + `symbol`/`stock_symbol`/`workspace_id` 组装。
+
+flow 不存在时返回 400；FlowEngine 执行失败返回 500。
 
 ---
 
@@ -215,13 +276,15 @@ MCP Server 将 OpenAPI `operation_id` 按业务域分组暴露，命名规则：
 | `indices` | 指数行情 | list_indices, get_index_kline |
 | `research` | 券商研报 | list_stock_research_reports |
 | `sentiment` | 舆情快照 | get_market_sentiment, get_stock_sentiment |
-| **`research_thesis`** | **投研论点卡** | get_stock_thesis, save_stock_thesis, mark_thesis_stale |
+| **`research_thesis`** | **投研论点卡** | get_stock_thesis (L0), save_stock_thesis (L1), mark_thesis_stale (L1) |
 | **`investor_profile`** | **投资者画像** | get_preference |
 | `workflow` | 工作流触发 | run_workflow, get_workflow_status |
 
 全局 deny：`/api/v1/agent/**`（Agent 运行时 API 不暴露为 MCP）。
 
-每个 Tool 标注 `risk_level`：L0 只读 / L1 写内部 / L2 交易 / L3 管理。
+Agent Worker 通过 `MCP_GROUPS` 环境变量挂载分组端点，默认包含 stocks/factors/…/research_thesis/investor_profile，**不含** workflow 分组。
+
+每个 Tool 标注 `risk_level`：L0 只读 / L1 写内部 / L2 交易 / L3 管理。MCP 入参 schema 设置 `additionalProperties: false`，未知参数由 `HttpInvoker` 拒绝。
 
 ---
 
@@ -257,6 +320,13 @@ SKILL.md 定义方法论与工具调用顺序，不含可执行 shell；工具�
 - 无依赖 Worker 并行 spawn
 - Worker 必须在输出末尾附结构化 JSON 结论
 - Orchestrator 交叉验证后方可纳入最终报告
+- Harness `SpawnContractHook` 在运行时校验 Worker JSON 契约（与 SKILL.md 内联 schema 对齐）
+
+| Worker | 必填字段 |
+|--------|---------|
+| technical | `as_of`, `conclusion` |
+| sentiment | `as_of`, `sentiment_index`, `conclusion` |
+| fund-flow | `as_of`, `main_flow.direction`, `conclusion`（`main_flow.net_amount_wan` 为数值型） |
 
 ---
 
@@ -274,11 +344,19 @@ SKILL.md 定义方法论与工具调用顺序，不含可执行 shell；工具�
 ### 11.2 论点卡生命周期
 
 ```
-get_stock_thesis
-  ├─ active 且未过期 → 慢时钟引用
-  ├─ 缺失 / stale / 过期 → 全量五步法 → save_stock_thesis
-  └─ 快变量命中证伪条件 → mark_thesis_stale → 下次重算
+get_stock_thesis（只读，无副作用）
+  ├─ active 且 valid_until ≥ 最新交易日 → { status: "active", ... }
+  ├─ active 但 valid_until < 最新交易日 → { status: "expired", symbol, valid_until, reason }
+  └─ 无 active 记录 → null
+
+save_stock_thesis → 旧 active 标记 stale，新记录写入 + Qdrant 索引（type=thesis）
+mark_thesis_stale → 证伪命中或重大事件触发
+
+Worker 定时治理（thesis_reconcile）
+  └─ reconcile_all_expired() → 批量将过期 active 标记 stale
 ```
+
+读路径不执行写操作；过期状态由 `ThesisService.get_thesis` 返回语义化 `status: expired`，数据库 stale 标记由 Worker 定时任务或显式 `mark_thesis_stale` 完成。
 
 ### 11.3 论点卡数据模型
 
@@ -293,7 +371,10 @@ get_stock_thesis
 | 数据库访问 | 只读查询走 MCP；Agent 禁止直连 |
 | 交易 | MCP 生成 pre_order → FlowEngine HumanInput 审批 → 执行流 |
 | 幻觉防护 | 行情/财务数字以 MCP 返回为准；论点卡引用标注 as-of |
-| 成本控制 | `max_tool_iterations` 上限；Worker 并发限制 |
+| 成本控制 | `max_tool_iterations` 上限；Worker 并发限制 + Nanobot 串行锁 |
+| Orchestrator 越权 | `OrchestratorToolPolicyHook` 阻断直接快变量取数 |
+| 结构化产出 | `SpawnContractHook` JSON Schema 校验 |
+| Run 可中断 | `POST /runs/{id}/cancel` + `RunCancelHook` |
 | Secrets | 环境变量注入，不进 Prompt、不写 workspace |
 
 Human-in-the-loop 强制场景：写库、发布因子、实盘下单、批量导出、修改风控参数。
@@ -305,16 +386,28 @@ Human-in-the-loop 强制场景：写库、发布因子、实盘下单、批量�
 | 链路 | 协议 |
 |------|------|
 | 前端 → API | HTTPS + SSE |
-| API → Worker | Redis 队列（`RunTask`） |
+| API → Worker | Redis 队列（`RunTask`，含 `session_key`/`trace_id`/`context`） |
 | Worker → 前端 | Redis Stream 事件 → SSE |
-| Agent → 业务 | MCP SSE |
-| Agent → 工作流 | MCP `run_workflow` 或 API 直接触发 |
+| Agent → 业务 | MCP SSE（按 `MCP_GROUPS` 多端点） |
+| Agent → 工作流 | MCP `run_workflow` 或 Intent Router 直接触发 |
 | 论点卡 API | `GET/POST /api/v1/research-thesis/*` |
 | 投资者画像 API | `GET /api/v1/investor-profile` |
 
-### 13.1 Run 事件类型
+### 13.1 Agent API
+
+| 端点 | 行为 |
+|------|------|
+| `POST /sessions` | 创建会话，`session_key` 由业务侧显式传入 |
+| `POST /sessions/{id}/messages` | Intent Router 分流；Agent 路径 202 入队 |
+| `GET /runs/{id}` | Run 状态查询 |
+| `GET /runs/{id}/stream` | SSE 事件流；run 不存在时 404（响应开始前预检） |
+| `POST /runs/{id}/cancel` | 请求取消，Worker 下轮迭代生效 |
+
+### 13.2 Run 事件类型
 
 `run_start` · `token` · `tool_start` · `tool_end` · `subagent_start` · `subagent_end` · `message` · `done` · `error`
+
+事件 payload 附带 `trace_id`（来自请求头 `X-Trace-Id`）与 `run_id`。
 
 ---
 
@@ -323,10 +416,10 @@ Human-in-the-loop 强制场景：写库、发布因子、实盘下单、批量�
 | 数据 | 存储 | 访问路径 |
 |------|------|---------|
 | 会话元数据/消息 | PostgreSQL | Harness `PgSessionManager` |
-| 投研论点卡 | PostgreSQL | MCP `research_thesis` |
+| 投研论点卡 | PostgreSQL | MCP `research_thesis` + `ThesisService` |
 | 投资者偏好 | PostgreSQL | MCP `investor_profile` |
-| 语义经验向量 | Qdrant | Harness `MemoryRecallHook` |
-| Run 事件 | Redis Stream | `AgentRedisBus` |
+| 语义经验向量 | Qdrant | Harness 召回 Hook + Worker 索引 |
+| Run 事件/元数据 | Redis Stream + Hash | `AgentRedisBus` |
 | 工作流 Checkpoint | PostgreSQL | FlowEngine `PostgresSaver` |
 
 ---
@@ -338,10 +431,21 @@ xqtrader-api          # FastAPI，含 Agent 薄 API + 业务 REST
 agent-worker          # python -m agent
 mcp-server            # MCP 转换器（8097）
 celery-worker         # 因子/回测/FlowEngine
-postgresql + redis + qdrant
+postgresql + redis + qdrant + tei（嵌入）
 ```
 
+推荐 Docker 联合部署：`docker/docker-compose.yml` 启动 `mcp` + `agent`，Agent `depends_on: mcp: healthy`，经 Docker 内网访问 MCP，经 `host.docker.internal` 访问宿主机 API/LLM/TEI/Qdrant。
+
 Agent Worker 与 MCP Server 可独立重启；Skills 与 AGENTS.md 支持热加载。
+
+关键环境变量：
+
+| 变量 | 用途 |
+|------|------|
+| `AGENT_MAX_CONCURRENT_RUNS` | Worker 并发上限（默认 1） |
+| `MCP_GROUPS` | Agent 挂载的 MCP 分组列表 |
+| `QDRANT_EMBEDDING_BACKEND` | 嵌入后端（如 `tei`） |
+| `AGENT_THESIS_RECONCILE_INTERVAL_S` | 论点卡过期治理间隔 |
 
 ---
 
@@ -360,12 +464,14 @@ Agent Worker 与 MCP Server 可独立重启；Skills 与 AGENTS.md 支持热加�
 
 | 路径 | 说明 |
 |------|------|
-| `src/agent/` | Harness + Worker + Hooks + workspace |
+| `src/agent/` | Harness + Worker + Hooks + governance + workspace |
+| `src/xqtrader/domain/agent/intent_router.py` | Intent Router |
 | `src/framework/workflow/` | FlowEngine + FlowCompiler |
-| `mcp_server.yml` | MCP 分组白名单 |
+| `mcp_server.yml` | MCP 分组白名单与 risk_level |
 | `flow/*.json` | 工作流定义 |
 | `src/xqtrader/api/v1/research_thesis/` | 论点卡 REST API |
 | `src/xqtrader/api/v1/investor_profile/` | 投资者画像 REST API |
+| `docker/docker-compose.yml` | MCP + Agent 联合部署 |
 
 ---
 
