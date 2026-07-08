@@ -35,10 +35,14 @@ services:
       DATABASES_STOCK_HOST: host.docker.internal
       DATABASES_RESEARCH_HOST: host.docker.internal
       DATABASES_TRADING_HOST: host.docker.internal
+      QDRANT_HOST: host.docker.internal
+      QDRANT_EMBEDDING_BACKEND: tei
+      QDRANT_EMBEDDING_TEI_BASE_URL: http://host.docker.internal:6380
     volumes:
       - ../../src/agent/workspace:/workspace
       - ../../.env:/config/.env:ro
       - ../../datasource.yml:/config/datasource.yml:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
+      - "fin-qat.vuca.com:host-gateway"
     restart: unless-stopped

@@ -3,6 +3,8 @@
 # 前置条件（宿主机）：
 #   - xqtrader API 已监听 8096（供 MCP 拉 OpenAPI、Agent 入队）
 #   - LLM 已监听宿主机 8000（容器经 host.docker.internal 访问）
+#   - TEI 嵌入服务已监听宿主机 6380（bge-large-zh-v1.5）
+#   - Qdrant 已监听宿主机 56333/56334
 #   - Redis / PostgreSQL 隧道在宿主机监听时，容器须经 host.docker.internal 访问
 #
 # 用法（在项目根目录）：
@@ -74,10 +76,14 @@ services:
       DATABASES_STOCK_HOST: host.docker.internal
       DATABASES_RESEARCH_HOST: host.docker.internal
       DATABASES_TRADING_HOST: host.docker.internal
+      QDRANT_HOST: host.docker.internal
+      QDRANT_EMBEDDING_BACKEND: tei
+      QDRANT_EMBEDDING_TEI_BASE_URL: http://host.docker.internal:6380
     volumes:
       - ../src/agent/workspace:/workspace
       - ../.env:/config/.env:ro
       - ../datasource.yml:/config/datasource.yml:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
+      - "fin-qat.vuca.com:host-gateway"
     restart: unless-stopped

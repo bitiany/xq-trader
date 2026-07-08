@@ -1,4 +1,5 @@
 import os
+from typing import Literal
 
 from dotenv import load_dotenv
 from pydantic import model_validator
@@ -167,6 +168,9 @@ class QdrantSettings(BaseSettings):
     COLLECTION: str = "research_memory"
     EMBEDDING_MODEL_PATH: str = r"D:\app\models\BAAI\bge-large-zh-v1.5"
     EMBEDDING_DIM: int = 1024
+    EMBEDDING_BACKEND: Literal["local", "tei"] = "local"
+    EMBEDDING_TEI_BASE_URL: str = "http://127.0.0.1:6380"
+    EMBEDDING_TEI_TIMEOUT_S: float = 30.0
 
 
 class CollectSettings(BaseSettings):
