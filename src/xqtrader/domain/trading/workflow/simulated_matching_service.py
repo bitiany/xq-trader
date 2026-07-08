@@ -15,7 +15,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from framework.commons.exceptions import BusinessException, WorkflowConfigError
-from framework.commons.time_util import now_shanghai
+from framework.commons.time_util import market_open_shanghai, now_shanghai
 from framework.dal.transaction.transactional import transactional
 from xqtrader.domain.market.models.candlestick import CandlestickDaily
 from xqtrader.domain.trading.enums import (
@@ -130,7 +130,7 @@ class SimulatedMatchingService:
         fill_context: dict[str, Any],
         operator: str,
     ) -> Trade:
-        trade_time = now_shanghai()
+        trade_time = self._resolve_simulated_trade_time(order)
         filled_price = fill_context["filled_price"]
         filled_amount = fill_context["filled_amount"]
         commission = fill_context["commission"]
@@ -177,6 +177,12 @@ class SimulatedMatchingService:
         )
         return trade
 
+    @staticmethod
+    def _resolve_simulated_trade_time(order: Order) -> datetime:
+        if order.execution_date is not None:
+            return market_open_shanghai(order.execution_date)
+        return now_shanghai()
+
     async def _resolve_simulated_base_price(self, order: Order) -> Decimal:
         if order.order_type == OrderType.LIMIT:
             if order.order_price is None:
@@ -189,8 +195,10 @@ class SimulatedMatchingService:
                 return OrderTypeConverter.quantize_price(Decimal(str(position.market_price)))
             if position.cost_price is not None and Decimal(str(position.cost_price)) > 0:
                 return OrderTypeConverter.quantize_price(Decimal(str(position.cost_price)))
+        ref_date = order.execution_date or now_shanghai().date()
         bars = await CandlestickDaily.filter(
             symbol=order.symbol,
+            trade_date__lte=ref_date,
             limit=1,
             order_by=CandlestickDaily.trade_date.desc(),
         )

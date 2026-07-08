@@ -1,6 +1,6 @@
 import { Button, Empty, Spin, Tag } from 'antd'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useCallback } from 'react'
 
 import { useTranslation } from 'react-i18next'
 
@@ -198,13 +198,14 @@ export function StockDiagnosisPanel({
 
 
 
-  const scrollToModule = (key: string) => {
-
+  const scrollToModule = useCallback((key: string) => {
     setModuleKey(key)
-
     document.getElementById(`diagnosis-module-${key}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [])
 
-  }
+  const openModuleDrawer = useCallback((key: string) => {
+    setModuleKey(key)
+  }, [])
 
 
 
@@ -254,7 +255,7 @@ export function StockDiagnosisPanel({
 
             modules={data.module_scores}
 
-            onModuleClick={(key) => setModuleKey(key)}
+            onModuleClick={openModuleDrawer}
 
           />
 

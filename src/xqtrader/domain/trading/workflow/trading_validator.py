@@ -11,6 +11,7 @@ from decimal import Decimal
 from typing import Any
 
 from framework.commons.exceptions import BusinessException
+from framework.commons.time_util import today_shanghai
 from xqtrader.domain.trading.enums import (
     AccountType,
     ApprovalStatus,
@@ -48,6 +49,10 @@ class TradingValidator:
             raise BusinessException(message=f"限价预订单缺少价格: {pre_order.id}")
         if account.reduce_only and pre_order.side in {PreOrderSide.OPEN, PreOrderSide.ADD}:
             raise BusinessException(message=f"账户处于仅减仓状态，禁止开仓/加仓: {account.id}")
+        if pre_order.execution_date is not None and pre_order.execution_date > today_shanghai():
+            raise BusinessException(
+                message=f"未到执行日 {pre_order.execution_date.isoformat()}，不可提交订单",
+            )
 
     @staticmethod
     def is_kill_switch_pre_order(pre_order: PreOrder | None) -> bool:

@@ -14,6 +14,7 @@ from uuid import uuid4
 
 from framework.commons.exceptions import BusinessException, WorkflowConfigError
 from framework.commons.logger import get_logger
+from framework.commons.time_util import market_open_shanghai
 from framework.dal.transaction.transactional import transactional
 from xqtrader.broker.services.qmt_trader import QmtTrader
 from xqtrader.domain.trading.enums import (
@@ -98,25 +99,30 @@ class PreOrderExecutionWorkflowService:
         )
         if active_orders:
             raise BusinessException(message=f"预订单已生成有效订单: {pre_order_id}")
-        order = await Order.create(
-            account_id=int(context["account_id"]),
-            platform_order_id=uuid4(),
-            instance_id=int(context["instance_id"]),
-            pre_order_id=pre_order.id,
-            symbol=pre_order.symbol,
-            side=OrderTypeConverter.to_order_side(pre_order.side),
-            order_type=pre_order.order_type,
-            order_price=pre_order.limit_price if pre_order.order_type == OrderType.LIMIT else None,
-            order_qty=int(pre_order.target_qty or 0),
-            filled_price=None,
-            filled_qty=0,
-            status=OrderStatus.CREATED,
-            broker_order_id=None,
-            reject_reason=None,
-            signal_date=pre_order.signal_date,
-            execution_date=pre_order.execution_date,
-            workflow_run_id=workflow_run_id,
-        )
+        order_fields: dict[str, Any] = {
+            "account_id": int(context["account_id"]),
+            "platform_order_id": uuid4(),
+            "instance_id": int(context["instance_id"]),
+            "pre_order_id": pre_order.id,
+            "symbol": pre_order.symbol,
+            "side": OrderTypeConverter.to_order_side(pre_order.side),
+            "order_type": pre_order.order_type,
+            "order_price": pre_order.limit_price if pre_order.order_type == OrderType.LIMIT else None,
+            "order_qty": int(pre_order.target_qty or 0),
+            "filled_price": None,
+            "filled_qty": 0,
+            "status": OrderStatus.CREATED,
+            "broker_order_id": None,
+            "reject_reason": None,
+            "signal_date": pre_order.signal_date,
+            "execution_date": pre_order.execution_date,
+            "workflow_run_id": workflow_run_id,
+        }
+        if pre_order.execution_date is not None:
+            execution_time = market_open_shanghai(pre_order.execution_date)
+            order_fields["created_at"] = execution_time
+            order_fields["updated_at"] = execution_time
+        order = await Order.create(**order_fields)
         await self.append_event(
             order.id,
             OrderEventType.CREATED,

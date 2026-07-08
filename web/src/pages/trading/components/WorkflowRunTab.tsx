@@ -1,30 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Card, message, Space, Steps, Table, Tag } from 'antd';
+import { Button, Card, message, Space, Spin, Steps, Table, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { GitBranch, Zap } from 'lucide-react';
 import { ApiError } from '@/api/types';
 import { batchSubmitPreOrders, fetchPreOrders, submitPreOrder, type PreOrder } from '@/api/trading';
-import { SIGNAL_SIDE_COLOR, SIGNAL_SIDE_LABEL } from '../utils/trading';
+import { SIGNAL_SIDE_COLOR, SIGNAL_SIDE_LABEL, DEFAULT_OPERATOR } from '../utils/trading';
+import { StockSymbolCell } from './StockQuoteCell';
 
 interface WorkflowRunTabProps {
   accountId: number | null;
   onOpenApproval?: () => void;
-}
-
-const OPERATOR_STORAGE_KEY = 'xqtrader:approval_operator';
-
-function loadStoredOperator(): string {
-  try {
-    return localStorage.getItem(OPERATOR_STORAGE_KEY) ?? '';
-  } catch {
-    return '';
-  }
-}
-
-function resolveOperator(): string {
-  const stored = loadStoredOperator().trim();
-  if (stored) return stored;
-  throw new Error('请先在审批区填写操作人后再下单');
 }
 
 interface WorkflowRunSummary {
@@ -96,6 +81,7 @@ function formatWeight(value: number | null) {
 
 export function WorkflowRunTab({ accountId, onOpenApproval }: WorkflowRunTabProps) {
   const [preOrders, setPreOrders] = useState<PreOrder[]>([]);
+  const [loading, setLoading] = useState(false);
   const [submittingIds, setSubmittingIds] = useState<number[]>([]);
   const [batchSubmitting, setBatchSubmitting] = useState(false);
 
@@ -122,12 +108,16 @@ export function WorkflowRunTab({ accountId, onOpenApproval }: WorkflowRunTabProp
     Promise.resolve().then(() => {
       if (accountId === null) {
         setPreOrders([]);
+        setLoading(false);
         return undefined;
       }
+      setLoading(true);
       return fetchPreOrders({ account_id: accountId, page_size: 200 }).then((res) => {
         if (!cancelled) setPreOrders(res.items);
       }).catch(() => {
         if (!cancelled) message.error('工作流运行记录加载失败');
+      }).finally(() => {
+        if (!cancelled) setLoading(false);
       });
     });
     return () => { cancelled = true; };
@@ -136,7 +126,7 @@ export function WorkflowRunTab({ accountId, onOpenApproval }: WorkflowRunTabProp
   const handleSubmitOne = useCallback(async (preOrderId: number) => {
     setSubmittingIds((ids) => [...ids, preOrderId]);
     try {
-      const operator = resolveOperator();
+      const operator = DEFAULT_OPERATOR;
       const result = await submitPreOrder(preOrderId, { operator });
       message.success(`已提交订单 ${result.order.id}${result.submitter === 'qmt' ? '（QMT）' : '（模拟）'}`);
       await loadPreOrders();
@@ -151,7 +141,7 @@ export function WorkflowRunTab({ accountId, onOpenApproval }: WorkflowRunTabProp
     if (executablePreOrders.length === 0) return;
     setBatchSubmitting(true);
     try {
-      const operator = resolveOperator();
+      const operator = DEFAULT_OPERATOR;
       const result = await batchSubmitPreOrders({
         pre_order_ids: executablePreOrders.map((item) => item.id),
         operator,
@@ -170,7 +160,12 @@ export function WorkflowRunTab({ accountId, onOpenApproval }: WorkflowRunTabProp
   }, [executablePreOrders, loadPreOrders]);
 
   const orderColumns: ColumnsType<PreOrder> = [
-    { title: '标的', dataIndex: 'symbol', width: 100 },
+    {
+      title: '标的',
+      key: 'symbol',
+      width: 130,
+      render: (_: unknown, item: PreOrder) => <StockSymbolCell symbol={item.symbol} name={item.name} />,
+    },
     {
       title: '方向',
       dataIndex: 'side',
@@ -211,7 +206,8 @@ export function WorkflowRunTab({ accountId, onOpenApproval }: WorkflowRunTabProp
   const executionStep = executablePreOrders.length > 0 ? 1 : latestRun?.pending ? 0 : -1;
 
   return (
-    <div className="workflow-run-tab" data-component="Workflow Run Tab">
+    <Spin spinning={loading}>
+      <div className="workflow-run-tab" data-component="Workflow Run Tab">
       <Card size="small" className="workflow-run-tab__flow">
         <div className="workflow-run-tab__flow-header">
           <div>
@@ -291,6 +287,7 @@ export function WorkflowRunTab({ accountId, onOpenApproval }: WorkflowRunTabProp
           )}
         </div>
       </Card>
-    </div>
+      </div>
+    </Spin>
   );
 }

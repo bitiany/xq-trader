@@ -21,3 +21,8 @@ def now_shanghai() -> datetime:
 def today_shanghai() -> date:
     """返回 Asia/Shanghai 时区的当前日期。"""
     return now_shanghai().date()
+
+
+def market_open_shanghai(trade_date: date) -> datetime:
+    """返回指定交易日的 A 股开盘时刻（09:30 Asia/Shanghai）。"""
+    return datetime(trade_date.year, trade_date.month, trade_date.day, 9, 30, tzinfo=SHANGHAI_TZ)

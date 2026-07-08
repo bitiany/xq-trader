@@ -27,6 +27,12 @@ export function DiagnosisRadarChart({ modules, onModuleClick }: DiagnosisRadarCh
   const containerRef = useRef<HTMLDivElement | null>(null)
   const chartRef = useRef<echarts.ECharts | null>(null)
   const { t } = useTranslation()
+  const modulesKey = useMemo(() => JSON.stringify(modules.map((item) => ({
+    key: item.key,
+    score: item.score,
+    prev_score: item.prev_score,
+    label: item.label,
+  }))), [modules])
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -133,7 +139,7 @@ export function DiagnosisRadarChart({ modules, onModuleClick }: DiagnosisRadarCh
       window.removeEventListener('resize', onResize)
       chart.off('click', handleClick)
     }
-  }, [modules, onModuleClick, t])
+  }, [modules, modulesKey, onModuleClick, t])
 
   useEffect(() => {
     return () => {

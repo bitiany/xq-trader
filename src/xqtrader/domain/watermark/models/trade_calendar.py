@@ -50,6 +50,25 @@ class TradeCalendar(Base):
         return rows[0].cal_date
 
     @classmethod
+    async def get_next_trade_date(
+        cls,
+        after: date,
+        *,
+        exchange: str = DEFAULT_TRADE_EXCHANGE,
+    ) -> date | None:
+        """返回 after 之后最近的一个交易日。"""
+        rows = await cls.filter(
+            exchange=exchange,
+            is_open=True,
+            cal_date__gt=after,
+            order_by=cls.cal_date.asc(),
+            limit=1,
+        )
+        if not rows:
+            return None
+        return rows[0].cal_date
+
+    @classmethod
     async def count_trading_days_after(
         cls,
         after: date,

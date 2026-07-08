@@ -20,7 +20,10 @@ export function CapitalFlowModuleCard({ module, onDetail }: CapitalFlowModuleCar
   const { t } = useTranslation()
   const chartRef = useRef<HTMLDivElement | null>(null)
   const detail = module.detail ?? {}
-  const flowSeries = (detail.flow_series as FlowSeriesItem[] | undefined) ?? []
+  const flowSeries = useMemo(
+    () => (detail.flow_series as FlowSeriesItem[] | undefined) ?? [],
+    [detail.flow_series],
+  )
 
   const chartItems = useMemo(
     () =>
@@ -30,6 +33,7 @@ export function CapitalFlowModuleCard({ module, onDetail }: CapitalFlowModuleCar
       })),
     [flowSeries],
   )
+  const chartItemsKey = useMemo(() => JSON.stringify(chartItems), [chartItems])
 
   useEffect(() => {
     if (!chartRef.current || !chartItems.length) return
@@ -63,7 +67,7 @@ export function CapitalFlowModuleCard({ module, onDetail }: CapitalFlowModuleCar
       window.removeEventListener('resize', onResize)
       chart.dispose()
     }
-  }, [chartItems])
+  }, [chartItems, chartItemsKey])
 
   return (
     <DiagnosisModuleCard module={module} onDetail={onDetail}>

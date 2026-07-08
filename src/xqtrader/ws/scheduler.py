@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import concurrent.futures
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[import-untyped]
@@ -168,14 +169,19 @@ class WsTopicScheduler:
     async def _execute_exact_spi(cls, spi_cls: type[TopicSpi], topic: str) -> None:
         """执行精确匹配 SPI"""
         spi = spi_cls()
-        if cls._executor is None:
-            logger.error("Executor not initialized")
-            return
-        future = cls._executor.submit(spi.execute)
         try:
-            result: dict = future.result(timeout=10)  # type: ignore[assignment]
+            if hasattr(spi, "execute_async"):
+                result = await asyncio.wait_for(spi.execute_async(), timeout=10)  # type: ignore[attr-defined]
+            else:
+                if cls._executor is None:
+                    logger.error("Executor not initialized")
+                    return
+                future = cls._executor.submit(spi.execute)
+                result = future.result(timeout=10)
+        except asyncio.TimeoutError:
+            logger.warning("SPI execution timeout (10s): topic=%s", topic)
+            return
         except concurrent.futures.TimeoutError:
-            future.cancel()
             logger.warning("SPI execution timeout (10s), cancelled: topic=%s", topic)
             return
         ws_publisher.publish_update(topic, result)
@@ -183,23 +189,26 @@ class WsTopicScheduler:
     @classmethod
     async def _execute_prefix_spi(cls, spi_cls: type[PrefixTopicSpi], prefix: str) -> None:
         """执行前缀匹配 SPI（单例 job，批量处理所有被订阅的 topic）"""
-        # 筛选当前前缀下所有被订阅的 topic
         topics = [t for t in cls._active_topics if t.startswith(prefix)]
         if not topics:
             return
 
         spi = spi_cls()
-        if cls._executor is None:
-            logger.error("Executor not initialized")
-            return
-        future = cls._executor.submit(spi.execute_for_topics, topics)
         try:
-            results: dict[str, dict] = future.result(timeout=10)  # type: ignore[assignment]
+            if hasattr(spi, "execute_for_topics_async"):
+                results = await asyncio.wait_for(spi.execute_for_topics_async(topics), timeout=10)  # type: ignore[attr-defined]
+            else:
+                if cls._executor is None:
+                    logger.error("Executor not initialized")
+                    return
+                future = cls._executor.submit(spi.execute_for_topics, topics)
+                results = future.result(timeout=10)
+        except asyncio.TimeoutError:
+            logger.warning("SPI execution timeout (10s): prefix=%s", prefix)
+            return
         except concurrent.futures.TimeoutError:
-            future.cancel()
             logger.warning("SPI execution timeout (10s), cancelled: prefix=%s", prefix)
             return
-        # 按 topic 分别 publish 到对应 channel
         for topic, data in results.items():
             ws_publisher.publish_update(topic, data)
 

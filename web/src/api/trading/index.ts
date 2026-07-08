@@ -41,6 +41,7 @@ export interface PositionSnapshot {
   account_id: number
   instance_id: number | null
   symbol: string
+  name?: string
   snapshot_date: string
   qty: number
   available_qty: number
@@ -56,12 +57,26 @@ export interface PositionSnapshot {
   extra: Record<string, unknown> | null
 }
 
+export interface SignalDetail {
+  direction: string
+  confidence: number | null
+  strength: number | null
+  score: number | null
+  reason: string | null
+  strategy_id: string | null
+  fused_score: number | null
+  factor_values: Record<string, unknown> | null
+  market_data: Record<string, unknown> | null
+  entry_price_detail: Record<string, unknown> | null
+}
+
 export interface TradingOrder {
   id: number
   account_id: number | null
   instance_id: number
   pre_order_id: number | null
   symbol: string
+  name?: string
   side: 'buy' | 'sell'
   order_type: 'limit' | 'market'
   order_price: string | number | null
@@ -74,6 +89,8 @@ export interface TradingOrder {
   signal_date: string | null
   execution_date: string | null
   workflow_run_id: string | null
+  signal_detail: SignalDetail | null
+  trade_time: string | null
   created_at: string
   updated_at: string
 }
@@ -434,19 +451,6 @@ export async function resolveRiskEvent(eventId: number, data: { resolved_by?: st
 
 // ---- 预订单 ----
 
-export interface SignalDetail {
-  direction: string
-  confidence: number | null
-  strength: number | null
-  score: number | null
-  reason: string | null
-  strategy_id: string | null
-  fused_score: number | null
-  factor_values: Record<string, unknown> | null
-  market_data: Record<string, unknown> | null
-  entry_price_detail: Record<string, unknown> | null
-}
-
 export interface PreOrder {
   id: number
   instance_id: number
@@ -454,6 +458,7 @@ export interface PreOrder {
   signal_date: string
   execution_date: string
   symbol: string
+  name?: string
   side: 'open' | 'add' | 'reduce' | 'close'
   target_weight: number | null
   current_weight: number | null

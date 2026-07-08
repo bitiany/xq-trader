@@ -20,14 +20,19 @@ import { WatchlistStrategyTab } from './components/WatchlistStrategyTab';
 import { PositionPnLTab } from './components/PositionPnLTab';
 import { OrderFlowTab } from './components/OrderFlowTab';
 import { WorkflowRunTab } from './components/WorkflowRunTab';
+import { StockSymbolCell } from './components/StockQuoteCell';
 import '@/styles/trading.css';
 
 const historyColumns = [
   { title: '信号日', dataIndex: 'signal_date', width: 90 },
-  { title: '标的', dataIndex: 'symbol', width: 110, render: (v: string) => <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{v}</span> },
+  {
+    title: '标的',
+    key: 'symbol',
+    width: 130,
+    render: (_: unknown, row: PreOrder) => <StockSymbolCell symbol={row.symbol} name={row.name} />,
+  },
   { title: '方向', dataIndex: 'side', width: 60, render: (v: PreOrder['side']) => <Tag color={SIGNAL_SIDE_COLOR[v]} style={{ fontSize: 10, margin: 0 }}>{SIGNAL_SIDE_LABEL[v]}</Tag> },
   { title: '状态', dataIndex: 'approval_status', width: 70, render: (v: PreOrder['approval_status']) => <Tag color={v === 'approved' ? 'success' : v === 'rejected' ? 'error' : 'default'} style={{ fontSize: 10 }}>{v}</Tag> },
-  { title: '审批人', dataIndex: 'approved_by', width: 70, render: (v: string | null) => v || '—' },
   { title: '目标权重', dataIndex: 'target_weight', width: 80, render: (v: number | null) => v === null ? '—' : `${(Number(v) * 100).toFixed(2)}%` },
   { title: '审批时间', dataIndex: 'approved_at', width: 150, render: (v: string | null) => v ? new Date(v).toLocaleString('zh-CN', { hour12: false }) : '—' },
 ];
@@ -72,8 +77,8 @@ export function LiveCockpitPage() {
   }, []);
 
   useEffect(() => {
+    setActiveDecisionInstanceId(null);
     if (selectedAccountId === null) {
-      setActiveDecisionInstanceId(null);
       return;
     }
     let cancelled = false;

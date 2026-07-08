@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import * as echarts from 'echarts'
 import { useTranslation } from 'react-i18next'
 
@@ -15,8 +15,15 @@ interface FundamentalModuleCardProps {
 export function FundamentalModuleCard({ module, onDetail }: FundamentalModuleCardProps) {
   const { t } = useTranslation()
   const chartRef = useRef<HTMLDivElement | null>(null)
-  const rings = (module.detail?.rings as Record<string, number | null> | undefined) ?? {}
-  const highlights = (module.detail?.highlights as Record<string, number | null> | undefined) ?? {}
+  const rings = useMemo(
+    () => (module.detail?.rings as Record<string, number | null> | undefined) ?? {},
+    [module.detail?.rings],
+  )
+  const highlights = useMemo(
+    () => (module.detail?.highlights as Record<string, number | null> | undefined) ?? {},
+    [module.detail?.highlights],
+  )
+  const ringsKey = useMemo(() => JSON.stringify(rings), [rings])
 
   useEffect(() => {
     if (!chartRef.current) return
@@ -53,7 +60,7 @@ export function FundamentalModuleCard({ module, onDetail }: FundamentalModuleCar
       window.removeEventListener('resize', onResize)
       chart.dispose()
     }
-  }, [rings, t])
+  }, [rings, ringsKey, t])
 
   return (
     <DiagnosisModuleCard module={module} onDetail={onDetail}>

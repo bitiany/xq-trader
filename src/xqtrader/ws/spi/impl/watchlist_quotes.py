@@ -8,7 +8,7 @@ from typing import Any, cast
 from framework.commons.logger import get_logger
 from framework.commons.redis_client import redis_client
 from framework.ws.exceptions import WsSpiError
-from xqtrader.broker.services.qmt_data_collector import QmtDataCollector
+from xqtrader.domain.market.services.local_market_quote_service import LocalMarketQuoteService
 from xqtrader.ws.constants import WsTopic
 
 from .. import TopicSpi, register_spi
@@ -22,36 +22,34 @@ WATCHLIST_SYMBOLS_PREFIX = "trading:watchlist"
 
 @register_spi
 class WatchlistQuotesSpi(TopicSpi):
-    """自选股实时行情 SPI — 从 QMT 全推 Tick 获取最新价格
-
-    按账户维度推送：遍历 Redis 中所有 trading:watchlist:{account_id}:quote_symbols，
-    为每个有自选股的账户独立推送行情数据，携带 account_id 字段。
-    """
+    """自选股行情 SPI — 从本地 CandlestickDaily 读取最新日线行情。"""
 
     @property
     def topic_name(self) -> str:
         return WsTopic.MARKET_WATCHLIST_QUOTES
 
     def execute(self) -> dict:
+        raise WsSpiError("WatchlistQuotesSpi 仅支持 execute_async")
+
+    async def execute_async(self) -> dict:
         try:
-            # 收集所有账户的 symbols
             account_symbols = self._load_all_account_symbols()
             if not account_symbols:
                 return {"items": [], "timestamp": time.time(), "reason": "empty_watchlist"}
 
-            # 去重合并所有 symbols，一次性查询 QMT Tick
             all_symbols: set[str] = set()
             for symbols in account_symbols.values():
                 all_symbols.update(symbols)
 
-            # get_full_tick 使用 Tushare 格式（如 600522.SH），无需转换
-            ticks = QmtDataCollector.sync_get_full_tick(list(all_symbols))
+            latest_rows = await LocalMarketQuoteService.fetch_latest_daily_rows(list(all_symbols))
 
-            # 按账户维度构建推送数据
             items = []
             for account_id, symbols in account_symbols.items():
                 for symbol in symbols:
-                    item = self._normalize_tick(symbol, ticks.get(symbol))
+                    item = LocalMarketQuoteService.build_watchlist_quote(
+                        symbol,
+                        latest_rows.get(symbol),
+                    )
                     item["account_id"] = account_id
                     items.append(item)
 
@@ -68,7 +66,6 @@ class WatchlistQuotesSpi(TopicSpi):
     def _load_all_account_symbols() -> dict[int, list[str]]:
         """从 Redis 加载所有账户的自选股 symbols，返回 {account_id: [symbol, ...]}"""
         result: dict[int, list[str]] = {}
-        # 扫描 trading:watchlist:*:quote_symbols
         pattern = f"{WATCHLIST_SYMBOLS_PREFIX}:*:quote_symbols"
         cursor: int = 0
         while True:
@@ -76,7 +73,6 @@ class WatchlistQuotesSpi(TopicSpi):
             for key in keys:
                 if isinstance(key, bytes):
                     key = key.decode()
-                # 从 key 中提取 account_id: trading:watchlist:{account_id}:quote_symbols
                 parts = key.split(":")
                 if len(parts) >= 3:
                     try:
@@ -95,38 +91,3 @@ class WatchlistQuotesSpi(TopicSpi):
             if cursor == 0:
                 break
         return result
-
-    @staticmethod
-    def _normalize_tick(symbol: str, raw: Any) -> dict:
-        if not isinstance(raw, dict):
-            return {"symbol": symbol, "last_price": None, "change_pct": None, "timestamp": time.time()}
-
-        raw_last = raw.get("lastPrice")
-        if raw_last is None:
-            raw_last = raw.get("last_price")
-        if raw_last is None:
-            raw_last = raw.get("price")
-        last = WatchlistQuotesSpi._to_float(raw_last)
-
-        raw_pre_close = raw.get("lastClose")
-        if raw_pre_close is None:
-            raw_pre_close = raw.get("preClose")
-        if raw_pre_close is None:
-            raw_pre_close = raw.get("pre_close")
-        pre_close = WatchlistQuotesSpi._to_float(raw_pre_close)
-        change_pct = None
-        if last is not None and pre_close is not None and pre_close != 0:
-            change_pct = (last - pre_close) / pre_close * 100
-
-        return {
-            "symbol": symbol,
-            "last_price": round(last, 4) if last is not None else None,
-            "change_pct": round(change_pct, 4) if change_pct is not None else None,
-            "timestamp": time.time(),
-        }
-
-    @staticmethod
-    def _to_float(value: Any) -> float | None:
-        if value is None:
-            return None
-        return float(value)

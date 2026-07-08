@@ -17,11 +17,35 @@ class WebSocketManager {
   private ws: WebSocket | null = null
   private requestId = 1
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private reconnectAttempt = 0
   private _connecting = false
   private _connectId = 0
   private _abortController: AbortController | null = null
   private readonly topicHandlers = new Map<string, Set<TopicHandler>>()
   private readonly topicRefCount = new Map<string, number>()
+
+  private scheduleReconnect(delayMs: number): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+    }
+    if (this.getActiveTopics().length === 0) {
+      return
+    }
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null
+      this.ensureConnected()
+    }, delayMs)
+  }
+
+  private nextReconnectDelayMs(): number {
+    this.reconnectAttempt += 1
+    const cappedAttempt = Math.min(this.reconnectAttempt, 6)
+    return Math.min(1500 * (2 ** (cappedAttempt - 1)), 30000)
+  }
+
+  private resetReconnectAttempt(): void {
+    this.reconnectAttempt = 0
+  }
 
   acquireTopic(topic: string, handler: TopicHandler): void {
     const handlers = this.topicHandlers.get(topic) ?? new Set<TopicHandler>()
@@ -134,6 +158,7 @@ class WebSocketManager {
             return
           }
           this._connecting = false
+          this.resetReconnectAttempt()
           this.setStatus('open')
           const topics = this.getActiveTopics()
           if (topics.length > 0) {
@@ -209,10 +234,7 @@ class WebSocketManager {
 
           if (this.getActiveTopics().length > 0) {
             this.setStatus('connecting')
-            this.reconnectTimer = setTimeout(() => {
-              this.reconnectTimer = null
-              this.ensureConnected()
-            }, 1500)
+            this.scheduleReconnect(this.nextReconnectDelayMs())
             return
           }
 
@@ -227,10 +249,7 @@ class WebSocketManager {
         this._abortController = null
         this.setStatus('error')
         if (this.getActiveTopics().length > 0) {
-          this.reconnectTimer = setTimeout(() => {
-            this.reconnectTimer = null
-            this.ensureConnected()
-          }, 3000)
+          this.scheduleReconnect(this.nextReconnectDelayMs())
         }
       })
   }

@@ -56,6 +56,65 @@ class TestWatchlistDecisionWorkflowService:
 
         assert qty == 800
 
+    def test_add_pre_order_uses_incremental_qty(self) -> None:
+        item = {"target_qty": 3700, "current_qty": 1700}
+
+        qty = WatchlistDecisionWorkflowService._build_pre_order_target_qty(item, PreOrderSide.ADD)
+
+        assert qty == 2000
+
+    def test_add_pre_order_skips_when_already_at_target(self) -> None:
+        item = {"target_qty": 1700, "current_qty": 1700}
+
+        qty = WatchlistDecisionWorkflowService._build_pre_order_target_qty(item, PreOrderSide.ADD)
+
+        assert qty is None
+
+    def test_should_skip_rebalance_when_weight_within_threshold(self) -> None:
+        item = {
+            "target_weight": 0.10,
+            "current_weight": 0.092653,
+            "target_qty": 100,
+        }
+
+        assert WatchlistDecisionWorkflowService._should_create_pre_order(item, PreOrderSide.ADD) is False
+
+    def test_should_keep_close_signal_even_when_weight_near_zero(self) -> None:
+        item = {
+            "target_weight": 0.0,
+            "current_weight": 0.057832,
+            "target_qty": 600,
+        }
+
+        assert WatchlistDecisionWorkflowService._should_create_pre_order(item, PreOrderSide.CLOSE) is True
+
+    def test_should_create_add_when_weight_deviation_exceeds_threshold(self) -> None:
+        item = {
+            "target_weight": 0.20,
+            "current_weight": 0.09,
+            "target_qty": 2000,
+        }
+
+        assert WatchlistDecisionWorkflowService._should_create_pre_order(item, PreOrderSide.ADD) is True
+
+    def test_should_skip_reduce_when_weight_within_threshold(self) -> None:
+        item = {
+            "target_weight": 0.10,
+            "current_weight": 0.092653,
+            "target_qty": 200,
+        }
+
+        assert WatchlistDecisionWorkflowService._should_create_pre_order(item, PreOrderSide.REDUCE) is False
+
+    def test_should_create_reduce_when_weight_deviation_exceeds_threshold(self) -> None:
+        item = {
+            "target_weight": 0.10,
+            "current_weight": 0.20,
+            "target_qty": 1000,
+        }
+
+        assert WatchlistDecisionWorkflowService._should_create_pre_order(item, PreOrderSide.REDUCE) is True
+
     def test_calculate_atr_uses_true_range(self) -> None:
         bars = [
             Bar(high=10.0, low=9.0, close=9.5),

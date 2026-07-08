@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import * as echarts from 'echarts'
 
 import type { DiagnosisModuleScore } from '@/api/stock'
@@ -12,7 +12,11 @@ interface InstitutionalModuleCardProps {
 export function InstitutionalModuleCard({ module, onDetail }: InstitutionalModuleCardProps) {
   const chartRef = useRef<HTMLDivElement | null>(null)
   const detail = module.detail ?? {}
-  const ratingDist = (detail.rating_dist as Record<string, number> | undefined) ?? {}
+  const ratingDist = useMemo(
+    () => (detail.rating_dist as Record<string, number> | undefined) ?? {},
+    [detail.rating_dist],
+  )
+  const ratingDistKey = useMemo(() => JSON.stringify(ratingDist), [ratingDist])
 
   useEffect(() => {
     if (!chartRef.current) return
@@ -37,7 +41,7 @@ export function InstitutionalModuleCard({ module, onDetail }: InstitutionalModul
       window.removeEventListener('resize', onResize)
       chart.dispose()
     }
-  }, [ratingDist])
+  }, [ratingDist, ratingDistKey])
 
   return (
     <DiagnosisModuleCard module={module} onDetail={onDetail}>

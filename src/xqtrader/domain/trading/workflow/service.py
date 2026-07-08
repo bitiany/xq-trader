@@ -36,6 +36,7 @@ from xqtrader.domain.trading.models.watchlist import Watchlist, WatchlistItem
 
 logger = get_logger(__name__)
 POSITION_WEIGHT_EPSILON = 1e-9
+REBALANCE_WEIGHT_THRESHOLD = 0.03
 
 
 @dataclass(frozen=True)
@@ -68,23 +69,54 @@ class WatchlistDecisionWorkflowService:
             account_id=account.id,
             snapshot_date=dates.signal_date,
         )
+        latest_position_row = await PositionSnapshot.filter(
+            account_id=account.id,
+            instance_id=instance_id,
+            limit=1,
+            order_by=PositionSnapshot.snapshot_date.desc(),
+        )
+        effective_snapshot_date = dates.signal_date
+        if latest_position_row and latest_position_row[0].snapshot_date > dates.signal_date:
+            effective_snapshot_date = latest_position_row[0].snapshot_date
+            aligned_snapshot = await AccountSnapshot.get_one_or_none(
+                account_id=account.id,
+                snapshot_date=effective_snapshot_date,
+            )
+            if aligned_snapshot is None:
+                logger.warning(
+                    "决策流账户快照与持仓快照日期不一致 | account_id=%s signal_date=%s "
+                    "effective_snapshot_date=%s 缺少 AccountSnapshot，回退 signal_date 快照",
+                    account.id,
+                    dates.signal_date,
+                    effective_snapshot_date,
+                )
+            else:
+                snapshot = aligned_snapshot
         positions = await PositionSnapshot.filter(
             account_id=account.id,
             instance_id=instance_id,
-            snapshot_date=dates.signal_date,
+            snapshot_date=effective_snapshot_date,
             limit=None,
         )
+        if not positions:
+            positions = await self._load_latest_positions_on_or_before(
+                account_id=account.id,
+                instance_id=instance_id,
+                snapshot_date=effective_snapshot_date,
+            )
 
+        active_positions = [position for position in positions if int(position.qty or 0) > 0]
         logger.info(
             "决策流加载交易上下文 | instance_id=%s account_id=%s signal_date=%s "
-            "execution_date=%s total_assets=%s available_cash=%s positions=%s",
+            "execution_date=%s effective_snapshot_date=%s total_assets=%s available_cash=%s positions=%s",
             instance_id,
             account.id,
             dates.signal_date,
             dates.execution_date,
+            effective_snapshot_date,
             self._serialize_snapshot(snapshot, account).get("total_assets"),
             self._serialize_snapshot(snapshot, account).get("available_cash"),
-            len(positions),
+            len(active_positions),
         )
         return {
             "instance_id": instance_id,
@@ -106,7 +138,10 @@ class WatchlistDecisionWorkflowService:
                 "is_enabled": bool(account.is_enabled),
             },
             "account_snapshot": self._serialize_snapshot(snapshot, account),
-            "positions": {position.symbol: self._serialize_position(position) for position in positions},
+            "positions": {
+                position.symbol: self._serialize_position(position)
+                for position in active_positions
+            },
         }
 
     async def load_watchlist_targets(self, context: dict[str, Any]) -> dict[str, Any]:
@@ -652,6 +687,26 @@ class WatchlistDecisionWorkflowService:
                 )
                 continue
             item["target_qty"] = self._build_pre_order_target_qty(item, side)
+            if not self._should_create_pre_order(item, side):
+                skipped.append({
+                    "symbol": item.get("symbol"),
+                    "reason": "rebalance_not_needed",
+                    "direction": item.get("direction"),
+                    "current_weight": item.get("current_weight"),
+                    "target_weight": item.get("target_weight"),
+                    "target_qty": item.get("target_qty"),
+                })
+                logger.info(
+                    "决策流跳过预订单 | instance_id=%s symbol=%s side=%s reason=rebalance_not_needed "
+                    "target_weight=%s current_weight=%s target_qty=%s",
+                    instance_id,
+                    item.get("symbol"),
+                    side,
+                    item.get("target_weight"),
+                    item.get("current_weight"),
+                    item.get("target_qty"),
+                )
+                continue
             limit_price = await self._build_entry_limit_price(item, signal_date)
             logger.info(
                 "决策流生成预订单逐标的 | instance_id=%s symbol=%s side=%s "
@@ -898,6 +953,43 @@ class WatchlistDecisionWorkflowService:
         return weight
 
     @staticmethod
+    async def _load_latest_positions_on_or_before(
+        account_id: int,
+        instance_id: int,
+        snapshot_date: date,
+    ) -> list[PositionSnapshot]:
+        from sqlalchemy import and_, func, select
+
+        subq = (
+            select(
+                PositionSnapshot.symbol,
+                func.max(PositionSnapshot.snapshot_date).label("max_snapshot_date"),
+            )
+            .where(
+                PositionSnapshot.account_id == account_id,
+                PositionSnapshot.instance_id == instance_id,
+                PositionSnapshot.snapshot_date <= snapshot_date,
+            )
+            .group_by(PositionSnapshot.symbol)
+            .subquery()
+        )
+        stmt = select(PositionSnapshot).join(
+            subq,
+            and_(
+                PositionSnapshot.symbol == subq.c.symbol,
+                PositionSnapshot.snapshot_date == subq.c.max_snapshot_date,
+                PositionSnapshot.account_id == account_id,
+                PositionSnapshot.instance_id == instance_id,
+            ),
+        )
+
+        async with PositionSnapshot._get_engines_manager().get_transaction_session(
+            PositionSnapshot._get_bind_key(),
+        ) as db:
+            result = await db.execute(stmt)
+            return list(result.scalars().all())
+
+    @staticmethod
     def _serialize_snapshot(snapshot: AccountSnapshot | None, account: TradingAccount) -> dict[str, Any]:
         if snapshot is None:
             return {
@@ -1086,6 +1178,17 @@ class WatchlistDecisionWorkflowService:
         return max(0.0, target_value - current_value)
 
     @staticmethod
+    def _should_create_pre_order(item: dict[str, Any], side: str) -> bool:
+        target_qty = item.get("target_qty")
+        if target_qty is None or int(target_qty) <= 0:
+            return False
+        if side == PreOrderSide.CLOSE:
+            return True
+        target_weight = float(item.get("target_weight") or 0.0)
+        current_weight = float(item.get("current_weight") or 0.0)
+        return abs(target_weight - current_weight) > REBALANCE_WEIGHT_THRESHOLD
+
+    @staticmethod
     def _build_pre_order_side(item: dict[str, Any]) -> str | None:
         target_weight = float(item.get("target_weight") or 0.0)
         current_weight = float(item.get("current_weight") or 0.0)
@@ -1107,6 +1210,12 @@ class WatchlistDecisionWorkflowService:
             target_qty = int(item.get("target_qty") or 0)
             reduce_qty = current_qty - target_qty
             return reduce_qty if reduce_qty > 0 else None
+        if side == PreOrderSide.ADD:
+            current_qty = int(item.get("current_qty") or 0)
+            absolute_target = int(item.get("target_qty") or 0)
+            add_qty = absolute_target - current_qty
+            add_qty = (add_qty // 100) * 100
+            return add_qty if add_qty > 0 else None
         return item.get("target_qty")
 
     @staticmethod

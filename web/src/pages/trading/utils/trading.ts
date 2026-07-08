@@ -45,6 +45,23 @@ export const SIGNAL_SIDE_CLASS: Record<SignalSide, string> = {
   close: 'signal-card--close',
 };
 
+export const DEFAULT_OPERATOR = 'personal';
+export const DIRECTION_LABEL: Record<string, string> = { long: '看多', short: '看空', neutral: '中性' };
+export const DIRECTION_COLOR: Record<string, string> = { long: 'var(--color-rise)', short: 'var(--color-fall)', neutral: 'default' };
+
+export function formatSignalPct(value: number | null | undefined): string {
+  if (value === null || value === undefined) return '—';
+  return `${(Number(value) * 100).toFixed(0)}%`;
+}
+
+export function formatCompactPnl(value: number): string {
+  const sign = value > 0 ? '+' : '';
+  const abs = Math.abs(value);
+  if (abs >= 1e4) return `${sign}${(value / 1e4).toFixed(1)}万`;
+  if (abs >= 1e3) return `${sign}${(value / 1e3).toFixed(1)}K`;
+  return `${sign}${value.toFixed(0)}`;
+}
+
 export const INSTANCE_STATUS_COLOR: Record<InstanceStatus, string> = { draft: 'default', running: 'success', paused: 'warning', stopped: 'default' };
 export const INSTANCE_STATUS_LABEL: Record<InstanceStatus, string> = { draft: '草稿', running: '运行中', paused: '已暂停', stopped: '已停止' };
 export const RUN_MODE_LABEL: Record<RunMode, string> = { live_manual: '实盘(手动)', live_auto: '实盘(自动)', paper: '模拟盘', backtest: '回测' };

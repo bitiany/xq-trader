@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, Query
@@ -12,6 +13,7 @@ from xqtrader.broker.services.qmt_connection import QmtConnection
 from xqtrader.broker.services.qmt_data_collector import QmtDataCollector
 from xqtrader.broker.services.qmt_query_service import QmtQueryService
 from xqtrader.broker.services.qmt_trader import QmtTrader
+from xqtrader.domain.market.services.local_market_quote_service import LocalMarketQuoteService
 
 router = APIRouter(prefix="/broker", tags=["券商代理"])
 
@@ -21,6 +23,15 @@ _trader = QmtTrader()
 _query_service = QmtQueryService()
 # 复用 lifespan 创建的单例（绑定主事件循环）；若 lifespan 未初始化则惰性创建
 _callback_handler = QmtCallbackHandler.get_instance()
+
+
+def _parse_yyyymmdd(value: str) -> date | None:
+    text = value.strip()
+    if not text:
+        return None
+    if len(text) == 8 and text.isdigit():
+        return date(int(text[0:4]), int(text[4:6]), int(text[6:8]))
+    return date.fromisoformat(text)
 
 
 # ── 连接管理 ──────────────────────────────────────────────
@@ -89,48 +100,39 @@ async def fetch_daily_kline(
     end_time: str = Query(default="", description="结束日期 YYYYMMDD"),
     dividend_type: str = Query(default="front", description="复权: none/front/back/front_ratio/back_ratio"),
 ) -> dict:
-    """获取日线行情数据（先下载补缓存，再获取）。
-
-    支持单支和批量，stock_list 传逗号分隔的证券代码。
-    返回 {stock_code: {count, columns, data}} 格式，每只股票包含
-    trade_date/open/close/high/low/volume/amount/change/pre_close/pct_chg 列。
-    """
+    """从本地 CandlestickDaily 表读取日线行情。"""
+    _ = dividend_type
     codes = [s.strip() for s in stock_list.split(",") if s.strip()]
     if not codes:
         raise BusinessException("stock_list 不能为空")
 
-    raw = await _data_collector.fetch_kline_daily(
-        stock_list=codes,
-        start_time=start_time,
-        end_time=end_time,
-        dividend_type=dividend_type,
+    grouped = await LocalMarketQuoteService.fetch_daily_kline(
+        codes,
+        start_date=_parse_yyyymmdd(start_time),
+        end_date=_parse_yyyymmdd(end_time),
     )
-
-    result: dict[str, Any] = {}
-    for code, df in raw.items():
-        if df.empty:
-            result[code] = {"count": 0, "columns": [], "data": []}
-        else:
-            result[code] = {
-                "count": len(df),
-                "columns": list(df.columns),
-                "data": df.values.tolist(),
-            }
-
-    return {"stock_list": codes, "data": result}
+    result: dict[str, Any] = {
+        code: LocalMarketQuoteService.serialize_kline_rows(rows)
+        for code, rows in grouped.items()
+    }
+    return {"stock_list": codes, "data": result, "source": "local_daily"}
 
 
-@router.get("/data/tick", summary="获取全推Tick数据")
+@router.get("/data/tick", summary="获取最新行情快照")
 async def get_full_tick(
     code_list: str = Query(..., description="证券代码，逗号分隔"),
 ) -> dict:
-    """获取全推 Tick 数据（最新分笔）。"""
+    """从本地 CandlestickDaily 读取最新日线快照（不再直连 QMT Tick）。"""
     codes = [s.strip() for s in code_list.split(",") if s.strip()]
     if not codes:
         raise BusinessException("code_list 不能为空")
 
-    data = await _data_collector.get_full_tick(codes)
-    return {"data": {code: str(val) for code, val in data.items()}}
+    latest_rows = await LocalMarketQuoteService.fetch_latest_daily_rows(codes)
+    data = {
+        code: LocalMarketQuoteService.build_stock_snapshot(code, latest_rows.get(code))
+        for code in codes
+    }
+    return {"data": data, "source": "local_daily"}
 
 
 @router.get("/data/financial", summary="获取财务数据")

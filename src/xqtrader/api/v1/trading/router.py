@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
-from decimal import Decimal
+from datetime import date, datetime
 
 from fastapi import APIRouter, Query, Request
 from sqlalchemy import desc
@@ -43,12 +42,13 @@ from xqtrader.domain.trading.enums import (
 from xqtrader.domain.trading.models.account import AccountSnapshot, TradingAccount
 from xqtrader.domain.trading.models.decision import PositionSizingResult, SignalFusionResult, TradingSignal
 from xqtrader.domain.trading.models.instance import StrategyInstance
-from xqtrader.domain.trading.models.order import Order, PreOrder
+from xqtrader.domain.trading.models.order import Order, PreOrder, Trade
 from xqtrader.domain.trading.models.position import PositionSnapshot
 from xqtrader.domain.trading.models.risk import RiskEvent, RiskRule
 from xqtrader.domain.trading.models.strategy import Strategy
 from xqtrader.domain.trading.models.watchlist import Watchlist, WatchlistItem
 from xqtrader.domain.trading.workflow.kill_switch_service import KillSwitchService
+from xqtrader.domain.watermark.models.trade_calendar import TradeCalendar
 from xqtrader.ws.spi.impl.pnl import sync_account_assets_to_redis
 from xqtrader.ws.spi.impl.watchlist_quotes import WATCHLIST_SYMBOLS_PREFIX
 
@@ -82,6 +82,92 @@ RISK_ACTION_LABEL = {
 
 
 # ==================== 辅助函数 ====================
+
+
+async def _build_security_name_map(symbols: list[str]) -> dict[str, str]:
+    if not symbols:
+        return {}
+    securities = await Security.filter(symbol__in=list(set(symbols)), limit=None)
+    return {sec.symbol: sec.name for sec in securities if sec.name}
+
+
+def _build_signal_detail(
+    *,
+    signal: TradingSignal | None,
+    fusion: SignalFusionResult | None,
+    risk_check_detail: dict | None,
+) -> dict | None:
+    if signal is None and fusion is None and not risk_check_detail:
+        return None
+    raw = signal.raw_values if signal and isinstance(signal.raw_values, dict) else {}
+    entry_price_detail = None
+    if isinstance(risk_check_detail, dict):
+        entry_price_detail = risk_check_detail.get("entry_price_detail")
+    return {
+        "direction": signal.direction if signal else None,
+        "confidence": raw.get("confidence"),
+        "strength": signal.strength if signal else None,
+        "score": raw.get("score"),
+        "reason": raw.get("reason"),
+        "strategy_id": raw.get("strategy_id"),
+        "fused_score": fusion.fused_score if fusion else None,
+        "factor_values": raw.get("factor_values"),
+        "market_data": raw.get("market_data"),
+        "entry_price_detail": entry_price_detail,
+    }
+
+
+async def _load_signal_context(
+    instance_ids: list[int],
+    symbols: list[str],
+    signal_dates: list[date],
+) -> tuple[dict, dict, dict, dict]:
+    if not instance_ids or not symbols or not signal_dates:
+        return {}, {}, {}, {}
+    signal_filters: dict = {
+        "instance_id__in": instance_ids,
+        "symbol__in": symbols,
+        "signal_date__in": signal_dates,
+    }
+    signals = await TradingSignal.filter(
+        **signal_filters,
+        order_by=desc(TradingSignal.id),
+    )
+    fusion_results = await SignalFusionResult.filter(
+        **signal_filters,
+        order_by=desc(SignalFusionResult.id),
+    )
+    signal_by_run: dict[tuple, TradingSignal] = {}
+    signal_by_date: dict[tuple, TradingSignal] = {}
+    fusion_by_run: dict[tuple, SignalFusionResult] = {}
+    fusion_by_date: dict[tuple, SignalFusionResult] = {}
+    for signal_item in signals:
+        date_key = (signal_item.instance_id, signal_item.symbol, signal_item.signal_date)
+        run_key = (signal_item.instance_id, signal_item.workflow_run_id, signal_item.symbol, signal_item.signal_date)
+        signal_by_run[run_key] = signal_item
+        if date_key not in signal_by_date:
+            signal_by_date[date_key] = signal_item
+    for fusion_item in fusion_results:
+        date_key = (fusion_item.instance_id, fusion_item.symbol, fusion_item.signal_date)
+        run_key = (fusion_item.instance_id, fusion_item.workflow_run_id, fusion_item.symbol, fusion_item.signal_date)
+        fusion_by_run[run_key] = fusion_item
+        if date_key not in fusion_by_date:
+            fusion_by_date[date_key] = fusion_item
+    return signal_by_run, signal_by_date, fusion_by_run, fusion_by_date
+
+
+def _resolve_signal_for_pre_order(
+    pre_order: PreOrder,
+    signal_by_run: dict,
+    signal_by_date: dict,
+    fusion_by_run: dict,
+    fusion_by_date: dict,
+) -> tuple[TradingSignal | None, SignalFusionResult | None]:
+    run_key = (pre_order.instance_id, pre_order.workflow_run_id, pre_order.symbol, pre_order.signal_date)
+    date_key = (pre_order.instance_id, pre_order.symbol, pre_order.signal_date)
+    signal = signal_by_run.get(run_key) or signal_by_date.get(date_key)
+    fusion = fusion_by_run.get(run_key) or fusion_by_date.get(date_key)
+    return signal, fusion
 
 
 async def _get_account_or_404(account_id: int) -> TradingAccount:
@@ -484,10 +570,36 @@ async def stop_instance(instance_id: int) -> dict:
 async def _resolve_decision_signal_date(signal_date: str | None) -> date:
     if signal_date:
         return date.fromisoformat(signal_date)
-    latest = await FacFactorValue.filter(limit=1, order_by=desc(FacFactorValue.trade_date))
-    if not latest:
-        raise BusinessException(message="没有可用于运行信号工作流的因子数据")
-    return latest[0].trade_date
+    latest_factor = await FacFactorValue.filter(limit=1, order_by=desc(FacFactorValue.trade_date))
+    latest_bar = await CandlestickDaily.filter(limit=1, order_by=desc(CandlestickDaily.trade_date))
+    latest_trade = await TradeCalendar.get_latest_trade_date()
+    candidates: list[date] = []
+    if latest_factor:
+        candidates.append(latest_factor[0].trade_date)
+    if latest_bar:
+        candidates.append(latest_bar[0].trade_date)
+    if latest_trade is not None:
+        candidates.append(latest_trade)
+    if not candidates:
+        raise BusinessException(message="没有可用于运行信号工作流的因子/行情数据")
+    resolved = min(candidates)
+    logger.info(
+        "决策流解析信号日 | factor=%s bar=%s calendar=%s resolved=%s",
+        latest_factor[0].trade_date if latest_factor else None,
+        latest_bar[0].trade_date if latest_bar else None,
+        latest_trade,
+        resolved,
+    )
+    return resolved
+
+
+async def _resolve_decision_execution_date(signal_date: date, execution_date: str | None) -> date:
+    if execution_date:
+        return date.fromisoformat(execution_date)
+    next_trade = await TradeCalendar.get_next_trade_date(signal_date)
+    if next_trade is None:
+        raise BusinessException(message=f"无法解析执行日：信号日 {signal_date} 之后无交易日")
+    return next_trade
 
 
 async def _get_account_decision_instance(account_id: int) -> StrategyInstance:
@@ -518,7 +630,32 @@ async def _get_account_decision_instance(account_id: int) -> StrategyInstance:
     return await _create_account_decision_instance(account_id, watchlist_strategies)
 
 
+async def _try_get_active_decision_instance_id(account_id: int) -> int | None:
+    """返回账户当前运行中的决策实例 ID；不存在时不自动创建。"""
+    account = await TradingAccount.get_or_none(id=account_id)
+    if account is None:
+        return None
+    instances = await StrategyInstance.filter(
+        account_id=account_id,
+        status=InstanceStatus.RUNNING,
+        universe_pool="watchlist",
+        limit=None,
+        order_by=desc(StrategyInstance.updated_at),
+    )
+    valid_instances = [
+        instance
+        for instance in instances
+        if _instance_run_mode_matches_account(account, instance.run_mode)
+    ]
+    if valid_instances:
+        return valid_instances[0].id
+    return None
+
+
 async def _get_active_decision_instance_id(account_id: int) -> int:
+    instance_id = await _try_get_active_decision_instance_id(account_id)
+    if instance_id is not None:
+        return instance_id
     return (await _get_account_decision_instance(account_id)).id
 
 
@@ -545,7 +682,7 @@ async def run_account_decision_workflow(account_id: int, req: ManualDecisionWork
     await _get_account_or_404(account_id)
     instance = await _get_account_decision_instance(account_id)
     signal_date = await _resolve_decision_signal_date(req.signal_date)
-    execution_date = date.fromisoformat(req.execution_date) if req.execution_date else signal_date + timedelta(days=1)
+    execution_date = await _resolve_decision_execution_date(signal_date, req.execution_date)
     workflow_result = await execute_workflow(
         flow_id="watchlist_after_close_decision_flow",
         workspace_id=f"trading_account:{account_id}",
@@ -796,7 +933,10 @@ async def list_risk_events(
     if instance_id is not None:
         filters["instance_id"] = instance_id
     elif account_id is not None and resolved is False:
-        filters["instance_id"] = await _get_active_decision_instance_id(account_id)
+        active_instance_id = await _try_get_active_decision_instance_id(account_id)
+        if active_instance_id is None:
+            return build_paginated_response([], 0, page, page_size)
+        filters["instance_id"] = active_instance_id
     if resolved is not None:
         filters["resolved"] = resolved
     if level:
@@ -864,7 +1004,14 @@ async def list_positions(
         limit=None,
         order_by=desc(PositionSnapshot.market_value),
     )
-    return {"items": [item.to_dict() for item in items]}
+    items = [item for item in items if int(item.qty or 0) > 0]
+    name_map = await _build_security_name_map([item.symbol for item in items])
+    result_items = []
+    for item in items:
+        data = item.to_dict()
+        data["name"] = name_map.get(item.symbol, item.symbol)
+        result_items.append(data)
+    return {"items": result_items}
 
 
 @router.get(
@@ -886,11 +1033,57 @@ async def list_orders(
     items = await Order.filter(
         skip=skip,
         limit=limit,
-        order_by=desc(Order.created_at),
+        order_by=[desc(Order.execution_date), desc(Order.created_at)],
         **filters,
     )
     total = await Order.count(**filters)
-    return build_paginated_response([item.to_dict() for item in items], total, page, page_size)
+
+    pre_order_ids = [item.pre_order_id for item in items if item.pre_order_id is not None]
+    pre_orders = await PreOrder.filter(id__in=pre_order_ids, limit=None) if pre_order_ids else []
+    pre_order_map = {po.id: po for po in pre_orders}
+
+    order_ids = [item.id for item in items]
+    trades = await Trade.filter(order_id__in=order_ids, limit=None) if order_ids else []
+    trade_time_map: dict[int, datetime] = {}
+    for trade in trades:
+        if trade.trade_time is None:
+            continue
+        existing = trade_time_map.get(trade.order_id)
+        if existing is None or trade.trade_time > existing:
+            trade_time_map[trade.order_id] = trade.trade_time
+
+    instance_ids = list({item.instance_id for item in items if item.instance_id is not None})
+    symbols = list({item.symbol for item in items})
+    signal_dates = list({
+        po.signal_date for po in pre_orders if po.signal_date is not None
+    })
+    signal_by_run, signal_by_date, fusion_by_run, fusion_by_date = await _load_signal_context(
+        instance_ids, symbols, signal_dates,
+    )
+    name_map = await _build_security_name_map(symbols)
+
+    result_items = []
+    for order in items:
+        data = order.to_dict()
+        data["name"] = name_map.get(order.symbol, order.symbol)
+        trade_time = trade_time_map.get(order.id)
+        data["trade_time"] = trade_time.isoformat() if trade_time is not None else None
+        pre_order = pre_order_map.get(order.pre_order_id) if order.pre_order_id is not None else None
+        if pre_order is not None:
+            signal, fusion = _resolve_signal_for_pre_order(
+                pre_order, signal_by_run, signal_by_date, fusion_by_run, fusion_by_date,
+            )
+            risk_detail = pre_order.risk_check_detail if isinstance(pre_order.risk_check_detail, dict) else None
+            data["signal_detail"] = _build_signal_detail(
+                signal=signal,
+                fusion=fusion,
+                risk_check_detail=risk_detail,
+            )
+        else:
+            data["signal_detail"] = None
+        result_items.append(data)
+
+    return build_paginated_response(result_items, total, page, page_size)
 
 
 async def _run_pre_order_execution_workflow(pre_order_id: int, operator: str) -> dict:
@@ -999,58 +1192,27 @@ async def list_pre_orders(
     total = await PreOrder.count(**filters)
 
     # 批量查询关联信号数据，附加 signal_detail
-    signal_by_run: dict[tuple, TradingSignal] = {}
-    signal_by_date: dict[tuple, TradingSignal] = {}
-    fusion_by_run: dict[tuple, SignalFusionResult] = {}
-    fusion_by_date: dict[tuple, SignalFusionResult] = {}
-    if items:
-        instance_ids = list({po.instance_id for po in items})
-        symbols = list({po.symbol for po in items})
-        signal_dates = list({po.signal_date for po in items})
-        signal_filters: dict = {
-            "instance_id__in": instance_ids,
-            "symbol__in": symbols,
-            "signal_date__in": signal_dates,
-        }
-        signals = await TradingSignal.filter(**signal_filters)
-        fusion_results = await SignalFusionResult.filter(**signal_filters)
-        # 构建 (instance_id, symbol, signal_date) 三元组查找表
-        # 同一标的同一信号日可能有多条不同 run_id 的信号，取最新一条
-        for s in signals:
-            date_key = (s.instance_id, s.symbol, s.signal_date)
-            run_key = (s.instance_id, s.workflow_run_id, s.symbol, s.signal_date)
-            signal_by_run[run_key] = s
-            # 同 date_key 只保留最新（后遍历覆盖前）
-            signal_by_date[date_key] = s
-        for f in fusion_results:
-            date_key = (f.instance_id, f.symbol, f.signal_date)
-            run_key = (f.instance_id, f.workflow_run_id, f.symbol, f.signal_date)
-            fusion_by_run[run_key] = f
-            fusion_by_date[date_key] = f
+    instance_ids = list({po.instance_id for po in items}) if items else []
+    symbols = list({po.symbol for po in items}) if items else []
+    signal_dates = list({po.signal_date for po in items if po.signal_date is not None}) if items else []
+    signal_by_run, signal_by_date, fusion_by_run, fusion_by_date = await _load_signal_context(
+        instance_ids, symbols, signal_dates,
+    )
+    name_map = await _build_security_name_map(symbols)
 
     result_items = []
     for po in items:
         d = po.to_dict()
-        run_key = (po.instance_id, po.workflow_run_id, po.symbol, po.signal_date)
-        date_key = (po.instance_id, po.symbol, po.signal_date)
-        signal = signal_by_run.get(run_key) or signal_by_date.get(date_key)
-        fusion = fusion_by_run.get(run_key) or fusion_by_date.get(date_key)
-        raw = signal.raw_values if signal and isinstance(signal.raw_values, dict) else {}
-        d["signal_detail"] = {
-            "direction": signal.direction if signal else None,
-            "confidence": raw.get("confidence"),
-            "strength": signal.strength if signal else None,
-            "score": raw.get("score"),
-            "reason": raw.get("reason"),
-            "strategy_id": raw.get("strategy_id"),
-            "fused_score": fusion.fused_score if fusion else None,
-            "factor_values": raw.get("factor_values"),
-            "market_data": raw.get("market_data"),
-            "entry_price_detail": (
-                d.get("risk_check_detail", {}).get("entry_price_detail")
-                if isinstance(d.get("risk_check_detail"), dict) else None
-            ),
-        }
+        d["name"] = name_map.get(po.symbol, po.symbol)
+        signal, fusion = _resolve_signal_for_pre_order(
+            po, signal_by_run, signal_by_date, fusion_by_run, fusion_by_date,
+        )
+        risk_detail = d.get("risk_check_detail") if isinstance(d.get("risk_check_detail"), dict) else None
+        d["signal_detail"] = _build_signal_detail(
+            signal=signal,
+            fusion=fusion,
+            risk_check_detail=risk_detail,
+        )
         result_items.append(d)
 
     return build_paginated_response(

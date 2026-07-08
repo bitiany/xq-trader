@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Tag, Button, Space, message, Modal, Form, InputNumber, Select, Input } from 'antd';
+import { Tag, Button, Space, message, Modal, Form, InputNumber, Select, Input, Spin } from 'antd';
 import { Zap, ArrowRight, History, AlertTriangle } from 'lucide-react';
 import { ApiError } from '@/api/types';
 import {
@@ -13,16 +13,18 @@ import {
   type SignalDetail,
   type RiskEvent,
 } from '@/api/trading';
-import { SIGNAL_SIDE_LABEL, SIGNAL_SIDE_COLOR } from '../utils/trading';
+import {
+  DEFAULT_OPERATOR,
+  DIRECTION_COLOR,
+  DIRECTION_LABEL,
+  SIGNAL_SIDE_LABEL,
+  SIGNAL_SIDE_COLOR,
+} from '../utils/trading';
 
 function formatWeight(value: number | null) {
   if (value === null || value === undefined) return '—';
   return `${(Number(value) * 100).toFixed(2)}%`;
 }
-
-// 信号方向标签与颜色
-const DIRECTION_LABEL: Record<string, string> = { long: '看多', short: '看空', neutral: '中性' }
-const DIRECTION_COLOR: Record<string, string> = { long: 'var(--color-rise)', short: 'var(--color-fall)', neutral: 'default' }
 
 function formatPct(value: number | null) {
   if (value === null || value === undefined) return '—'
@@ -41,25 +43,6 @@ interface ApprovalFormValues {
   slippage_ticks?: number | null
   slippage_atr_multiplier?: number | null
   comment?: string
-  operator?: string
-}
-
-const OPERATOR_STORAGE_KEY = 'xqtrader:approval_operator';
-
-function loadStoredOperator(): string {
-  try {
-    return localStorage.getItem(OPERATOR_STORAGE_KEY) ?? '';
-  } catch {
-    return '';
-  }
-}
-
-function storeOperator(value: string): void {
-  try {
-    if (value) localStorage.setItem(OPERATOR_STORAGE_KEY, value);
-  } catch {
-    /* ignore quota errors */
-  }
 }
 
 // 信号依据区域
@@ -67,7 +50,7 @@ function SignalDetailSection({ detail }: { detail: SignalDetail }) {
   return (
     <div className="signal-card__signal-detail">
       <div className="signal-card__metric">
-        <span className="signal-card__metric-label">方向</span>
+        <span className="signal-card__metric-label">策略方向</span>
         <span className="signal-card__metric-value">
           <Tag color={DIRECTION_COLOR[detail.direction] ?? 'default'} style={{ fontSize: 11, padding: '0 6px', borderRadius: 4, fontWeight: 600 }}>
             {DIRECTION_LABEL[detail.direction] ?? detail.direction}
@@ -208,10 +191,11 @@ export function SignalApprovalTab({
   const [riskEvents, setRiskEvents] = useState<RiskEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [workflowRunning, setWorkflowRunning] = useState(false);
+  const [batchSubmitting, setBatchSubmitting] = useState(false);
+  const [rejectingId, setRejectingId] = useState<number | null>(null);
   const [approvalTarget, setApprovalTarget] = useState<PreOrder | null>(null);
   const [approvalSubmitting, setApprovalSubmitting] = useState(false);
   const [approvalForm] = Form.useForm<ApprovalFormValues>();
-  const [operator, setOperator] = useState<string>(() => loadStoredOperator());
 
   const reloadPendingData = useCallback(async (targetAccountId: number, targetInstanceId?: number | null) => {
     const [preOrderRes, riskEventRes] = await Promise.all([
@@ -295,20 +279,12 @@ export function SignalApprovalTab({
       slippage_ticks: 1,
       slippage_atr_multiplier: 0.1,
       comment: po.approval_comment ?? '',
-      operator: operator || loadStoredOperator(),
     });
-  }, [approvalForm, operator]);
+  }, [approvalForm]);
 
   const handleConfirmApproval = useCallback(async () => {
     if (approvalTarget === null) return;
     const values = await approvalForm.validateFields();
-    const submitOperator = (values.operator ?? operator).trim();
-    if (!submitOperator) {
-      message.error('请填写操作人');
-      return;
-    }
-    storeOperator(submitOperator);
-    setOperator(submitOperator);
     const limitPrice = values.order_type === 'market'
       ? null
       : values.price_mode === 'atr_offset'
@@ -333,7 +309,7 @@ export function SignalApprovalTab({
       });
       await approvePreOrder(approvalTarget.id, {
         approved: true,
-        approved_by: submitOperator,
+        approved_by: DEFAULT_OPERATOR,
         comment: values.comment ?? '',
       });
       setPreOrders(prev => prev.filter(po => po.id !== approvalTarget.id));
@@ -344,65 +320,60 @@ export function SignalApprovalTab({
     } finally {
       setApprovalSubmitting(false);
     }
-  }, [approvalForm, approvalTarget, operator]);
+  }, [approvalForm, approvalTarget]);
 
   const handleReject = useCallback(async (preOrderId: number) => {
-    const submitOperator = operator.trim();
-    if (!submitOperator) {
-      message.error('请先在审批表单或顶部填写操作人');
-      return;
-    }
+    setRejectingId(preOrderId);
     try {
-      await approvePreOrder(preOrderId, { approved: false, approved_by: submitOperator });
+      await approvePreOrder(preOrderId, { approved: false, approved_by: DEFAULT_OPERATOR });
       setPreOrders(prev => prev.filter(po => po.id !== preOrderId));
       message.success('已拒绝');
     } catch (error) {
       message.error(error instanceof ApiError ? error.message : '操作失败');
+    } finally {
+      setRejectingId(null);
     }
-  }, [operator]);
+  }, []);
 
   const handleBatchApprove = useCallback(async () => {
     if (preOrders.length === 0) return;
-    const submitOperator = operator.trim();
-    if (!submitOperator) {
-      message.error('请先在顶部填写操作人');
-      return;
-    }
+    setBatchSubmitting(true);
     try {
       const result = await batchApprovePreOrders({
         pre_order_ids: preOrders.map(po => po.id),
         approved: true,
-        approved_by: submitOperator,
+        approved_by: DEFAULT_OPERATOR,
       });
       message.success(`批量批准: ${result.approved}条`);
       setPreOrders([]);
     } catch (error) {
       message.error(error instanceof ApiError ? error.message : '批量审批失败');
+    } finally {
+      setBatchSubmitting(false);
     }
-  }, [preOrders, operator]);
+  }, [preOrders]);
 
   const handleBatchReject = useCallback(async () => {
     if (preOrders.length === 0) return;
-    const submitOperator = operator.trim();
-    if (!submitOperator) {
-      message.error('请先在顶部填写操作人');
-      return;
-    }
+    setBatchSubmitting(true);
     try {
       const result = await batchApprovePreOrders({
         pre_order_ids: preOrders.map(po => po.id),
         approved: false,
-        approved_by: submitOperator,
+        approved_by: DEFAULT_OPERATOR,
       });
       message.success(`批量拒绝: ${result.rejected}条`);
       setPreOrders([]);
     } catch (error) {
       message.error(error instanceof ApiError ? error.message : '批量审批失败');
+    } finally {
+      setBatchSubmitting(false);
     }
-  }, [preOrders, operator]);
+  }, [preOrders]);
 
   return (
-    <div className="signal-approval-tab" data-component="Signal & Approval Tab">
+    <Spin spinning={loading}>
+      <div className="signal-approval-tab" data-component="Signal & Approval Tab">
       <div className="signal-approval-tab__active">
         <div className="signal-approval-tab__header">
           <div className="signal-approval-tab__title">
@@ -420,17 +391,6 @@ export function SignalApprovalTab({
             </div>
           )}
           <Space>
-            <Input
-              size="small"
-              style={{ width: 120 }}
-              placeholder="操作人(必填)"
-              value={operator}
-              onChange={(e) => {
-                setOperator(e.target.value);
-                storeOperator(e.target.value);
-              }}
-              maxLength={64}
-            />
             <Button
               size="small"
               icon={<Zap size={12} />}
@@ -441,10 +401,10 @@ export function SignalApprovalTab({
               手动运行工作流
             </Button>
             <Button size="small" icon={<History size={12} />} onClick={onOpenHistory}>历史信号</Button>
-            <Button size="small" danger onClick={handleBatchReject} disabled={preOrders.length === 0}>
+            <Button size="small" danger onClick={handleBatchReject} disabled={preOrders.length === 0} loading={batchSubmitting}>
               全部拒绝
             </Button>
-            <Button type="primary" size="small" icon={<Zap size={12} />} onClick={handleBatchApprove} disabled={preOrders.length === 0} loading={loading}>
+            <Button type="primary" size="small" icon={<Zap size={12} />} onClick={handleBatchApprove} disabled={preOrders.length === 0} loading={batchSubmitting}>
               批量批准 ({preOrders.length})
             </Button>
           </Space>
@@ -461,7 +421,10 @@ export function SignalApprovalTab({
             >
               <div className="signal-card__top">
                 <div className="signal-card__identity">
-                  <span className="signal-card__symbol">{po.symbol}</span>
+                  <span className="signal-card__symbol">{po.name && po.name !== po.symbol ? po.name : po.symbol}</span>
+                  {po.name && po.name !== po.symbol && (
+                    <span className="signal-card__name">{po.symbol}</span>
+                  )}
                   {riskPrecheckTag(po)}
                 </div>
                 <Tag color={SIGNAL_SIDE_COLOR[po.side]} style={{ fontSize: 11, padding: '0 6px', borderRadius: 4, fontWeight: 600 }}>
@@ -491,7 +454,7 @@ export function SignalApprovalTab({
               </div>
               <div className="signal-card__action">
                 <Space size={4}>
-                  <Button size="small" danger onClick={() => handleReject(po.id)}>拒绝</Button>
+                  <Button size="small" danger loading={rejectingId === po.id} onClick={() => handleReject(po.id)}>拒绝</Button>
                   <Button size="small" type="primary" onClick={() => openApprovalDialog(po)}>批准</Button>
                 </Space>
               </div>
@@ -597,15 +560,9 @@ export function SignalApprovalTab({
           <Form.Item name="comment" label="审批意见">
             <Input.TextArea rows={2} maxLength={256} placeholder="可填写调价或调仓原因" />
           </Form.Item>
-          <Form.Item
-            name="operator"
-            label="操作人"
-            rules={[{ required: true, message: '请填写操作人' }]}
-          >
-            <Input maxLength={64} placeholder="实际审批人姓名（必填）" />
-          </Form.Item>
         </Form>
       </Modal>
-    </div>
+      </div>
+    </Spin>
   );
 }

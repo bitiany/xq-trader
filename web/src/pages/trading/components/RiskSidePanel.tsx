@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { Table, Tag, Switch, Badge, Button, message, Modal, Input } from 'antd';
+import { Table, Tag, Switch, Badge, Button, message, Modal, Input, Spin } from 'antd';
 import { Shield, Flame, CheckCircle, ChevronDown, ChevronRight, History } from 'lucide-react';
 import {
   enableAccountKillSwitch,
@@ -11,22 +11,12 @@ import {
   type RiskEvent,
   type RiskRule,
 } from '@/api/trading';
-import { RISK_LEVEL_TAG } from '../utils/trading';
+import { DEFAULT_OPERATOR, RISK_LEVEL_TAG } from '../utils/trading';
 
 interface RiskSidePanelProps {
   accountId: number | null;
   instanceId: number | null;
   onOpenHistory: () => void;
-}
-
-const OPERATOR_STORAGE_KEY = 'xqtrader:approval_operator';
-
-function loadStoredOperator(): string {
-  try {
-    return localStorage.getItem(OPERATOR_STORAGE_KEY) ?? '';
-  } catch {
-    return '';
-  }
 }
 
 function eventDetailText(event: RiskEvent) {
@@ -40,18 +30,26 @@ export function RiskSidePanel({ accountId, instanceId, onOpenHistory }: RiskSide
   const [showRules, setShowRules] = useState(false);
   const [rules, setRules] = useState<RiskRule[]>([]);
   const [events, setEvents] = useState<RiskEvent[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [killSwitchRunning, setKillSwitchRunning] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     Promise.resolve().then(() => {
-      const eventRequest = accountId === null
-        ? Promise.resolve({ items: [], total: 0, page: 1, page_size: 20 })
-        : fetchRiskEvents({
-          account_id: accountId,
-          instance_id: instanceId ?? undefined,
-          resolved: false,
-          page_size: 20,
-        });
+      if (accountId === null) {
+        setRules([]);
+        setEvents([]);
+        setLoading(false);
+        return undefined;
+      }
+
+      setLoading(true);
+      const eventRequest = fetchRiskEvents({
+        account_id: accountId,
+        instance_id: instanceId ?? undefined,
+        resolved: false,
+        page_size: 20,
+      });
 
       return Promise.all([fetchRiskRules(), eventRequest]).then(([ruleRes, eventRes]) => {
         if (cancelled) return;
@@ -59,6 +57,8 @@ export function RiskSidePanel({ accountId, instanceId, onOpenHistory }: RiskSide
         setEvents(eventRes.items ?? []);
       }).catch(() => {
         if (!cancelled) message.error('风控数据加载失败');
+      }).finally(() => {
+        if (!cancelled) setLoading(false);
       });
     });
     return () => { cancelled = true; };
@@ -103,21 +103,14 @@ export function RiskSidePanel({ accountId, instanceId, onOpenHistory }: RiskSide
 
   const handleKillSwitch = useCallback(() => {
     if (accountId === null) return;
-    const storedOperator = loadStoredOperator();
-    let operatorInput = storedOperator;
     let reasonInput = 'manual_kill_switch';
-    const modal = Modal.confirm({
+    Modal.confirm({
       title: '账户紧急全平',
       content: (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
           <div style={{ fontSize: 12, color: 'var(--text-warning)' }}>
             将设置账户为仅减仓、取消所有挂单、并对所有持仓发起市价平仓委托。请确认。
           </div>
-          <Input
-            placeholder="操作人 (必填，禁止 system)"
-            defaultValue={operatorInput}
-            onChange={(e) => { operatorInput = e.target.value.trim(); }}
-          />
           <Input
             placeholder="触发原因 (默认 manual_kill_switch)"
             defaultValue={reasonInput}
@@ -129,18 +122,10 @@ export function RiskSidePanel({ accountId, instanceId, onOpenHistory }: RiskSide
       okType: 'danger',
       cancelText: '取消',
       onOk: async () => {
-        const trimmedOperator = operatorInput.trim();
-        if (!trimmedOperator) {
-          message.error('请填写操作人后再触发紧急全平');
-          throw new Error('operator required');
-        }
-        if (trimmedOperator.toLowerCase() === 'system') {
-          message.error('操作人禁止使用 system，请填写真实姓名');
-          throw new Error('operator forbidden');
-        }
+        setKillSwitchRunning(true);
         try {
           const result = await enableAccountKillSwitch(accountId, {
-            operator: trimmedOperator,
+            operator: DEFAULT_OPERATOR,
             reason: reasonInput,
           });
           showKillSwitchResult(result);
@@ -154,10 +139,11 @@ export function RiskSidePanel({ accountId, instanceId, onOpenHistory }: RiskSide
         } catch {
           message.error('紧急全平失败');
           throw new Error('kill switch failed');
+        } finally {
+          setKillSwitchRunning(false);
         }
       },
     });
-    return modal;
   }, [accountId, instanceId, showKillSwitchResult]);
 
   const enabledCount = rules.filter(r => r.is_enabled).length;
@@ -191,27 +177,28 @@ export function RiskSidePanel({ accountId, instanceId, onOpenHistory }: RiskSide
   const statusText = activeAlerts > 0 ? '风控告警' : '风控正常';
 
   return (
-    <div className={`risk-side-panel ${activeAlerts > 0 ? 'risk-side-panel--warning' : ''}`} data-component="Risk Side Panel">
-      <div className="risk-side-panel__header">
-        <div className="risk-side-panel__status">
-          <Shield size={16} style={{ color: statusColor }} />
-          <span className="risk-side-panel__status-text" style={{ color: statusColor }}>
-            {statusText}
-          </span>
-          {activeAlerts > 0 && (
-            <Badge count={activeAlerts} size="small" style={{ backgroundColor: 'var(--color-warning)' }} />
-          )}
+    <Spin spinning={loading}>
+      <div className={`risk-side-panel ${activeAlerts > 0 ? 'risk-side-panel--warning' : ''}`} data-component="Risk Side Panel">
+        <div className="risk-side-panel__header">
+          <div className="risk-side-panel__status">
+            <Shield size={16} style={{ color: statusColor }} />
+            <span className="risk-side-panel__status-text" style={{ color: statusColor }}>
+              {statusText}
+            </span>
+            {activeAlerts > 0 && (
+              <Badge count={activeAlerts} size="small" style={{ backgroundColor: 'var(--color-warning)' }} />
+            )}
+          </div>
+          <button
+            className="risk-side-panel__kill-btn"
+            data-component="Kill Switch Button"
+            disabled={accountId === null || killSwitchRunning}
+            onClick={handleKillSwitch}
+          >
+            <Flame size={13} />
+            <span>{killSwitchRunning ? '执行中…' : '紧急全平'}</span>
+          </button>
         </div>
-        <button
-          className="risk-side-panel__kill-btn"
-          data-component="Kill Switch Button"
-          disabled={accountId === null}
-          onClick={handleKillSwitch}
-        >
-          <Flame size={13} />
-          <span>紧急全平</span>
-        </button>
-      </div>
 
       <div className="risk-side-panel__section">
         <div className="risk-side-panel__section-title">熔断器</div>
@@ -273,6 +260,7 @@ export function RiskSidePanel({ accountId, instanceId, onOpenHistory }: RiskSide
           <Table dataSource={rules} columns={ruleColumns} rowKey="id" size="small" pagination={false} showHeader={false} />
         )}
       </div>
-    </div>
+      </div>
+    </Spin>
   );
 }

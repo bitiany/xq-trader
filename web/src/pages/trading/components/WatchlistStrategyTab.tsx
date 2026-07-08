@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
-import { Card, Table, Tag, Button, Space, message, Modal, Form, Input, InputNumber, Select } from 'antd';
+import { Card, Table, Tag, Button, Space, message, Modal, Form, Input, InputNumber, Select, Spin } from 'antd';
 import { Star, Search, Plus, Trash2, Cpu, Settings, X, Edit2 } from 'lucide-react';
 import { INSTANCE_STATUS_COLOR, INSTANCE_STATUS_LABEL, RUN_MODE_LABEL } from '../utils/trading';
 import { PositionSizingConfigDrawer } from './PositionSizingConfigDrawer';
@@ -35,6 +35,7 @@ export function WatchlistStrategyTab({ accountId }: WatchlistStrategyTabProps) {
   const [sizingDrawerOpen, setSizingDrawerOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<ApiWatchlistItem | null>(null);
   const [editForm] = Form.useForm();
+  const [loading, setLoading] = useState(false);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -58,25 +59,35 @@ export function WatchlistStrategyTab({ accountId }: WatchlistStrategyTabProps) {
       setInstances([]);
       return;
     }
-    try {
-      const res = await fetchInstances({ account_id: accountId, page_size: 200 });
-      setInstances(res.items);
-    } catch {
-      setInstances([]);
-    }
+    const res = await fetchInstances({ account_id: accountId, page_size: 200 });
+    setInstances(res.items);
   }, [accountId]);
 
-  // 加载当前账户下的策略实例
   useEffect(() => {
     let cancelled = false;
     Promise.resolve().then(async () => {
-      if (cancelled) return;
-      await loadInstances();
+      if (accountId === null) {
+        setWatchlistItems([]);
+        setInstances([]);
+        setLoading(false);
+        return;
+      }
+      setLoading(true);
+      try {
+        const [watchlistRes] = await Promise.all([
+          fetchWatchlist(accountId),
+          loadInstances(),
+        ]);
+        if (cancelled) return;
+        setWatchlistItems(watchlistRes.items ?? []);
+      } catch {
+        if (!cancelled) message.error('自选与策略加载失败');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     });
     return () => { cancelled = true; };
-  }, [loadInstances]);
-
-  // 加载可用于实盘监控的时序交易信号策略
+  }, [accountId, loadInstances]);
   useEffect(() => {
     let cancelled = false;
     Promise.resolve().then(() => {
@@ -102,22 +113,6 @@ export function WatchlistStrategyTab({ accountId }: WatchlistStrategyTabProps) {
     } catch {
       setWatchlistItems([]);
     }
-  }, [accountId]);
-
-  useEffect(() => {
-    let cancelled = false;
-    Promise.resolve().then(() => {
-      if (accountId === null) {
-        setWatchlistItems([]);
-        return undefined;
-      }
-      return fetchWatchlist(accountId).then((res) => {
-        if (!cancelled) setWatchlistItems(res.items ?? []);
-      }).catch(() => {
-        if (!cancelled) message.error('自选池加载失败');
-      });
-    });
-    return () => { cancelled = true; };
   }, [accountId]);
 
   const handleQuotesUpdate = useCallback((_channel: string, data: WatchlistQuotesData) => {
@@ -364,7 +359,8 @@ export function WatchlistStrategyTab({ accountId }: WatchlistStrategyTabProps) {
   );
 
   return (
-    <div className="ws-tab" data-component="Watchlist & Strategy Tab">
+    <Spin spinning={loading}>
+      <div className="ws-tab" data-component="Watchlist & Strategy Tab">
       <div className="ws-tab__panels">
         <div className="ws-tab__panel ws-tab__panel--left">
           <div className="ws-tab__panel-header">
@@ -491,6 +487,7 @@ export function WatchlistStrategyTab({ accountId }: WatchlistStrategyTabProps) {
           </Form.Item>
         </Form>
       </Modal>
-    </div>
+      </div>
+    </Spin>
   );
 }
