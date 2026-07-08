@@ -1,0 +1,24 @@
+name: stock_diagnosis_summary
+celery_task_name: market.stock_diagnosis_summary
+version: "1.0.0"
+task_name: 诊股 AI 解读异步生成
+task_name_en: Stock Diagnosis AI Summary Async
+description: 基于最新诊股快照调用 LLM 生成 narrative 解读并写回 summary 字段，不阻塞评分 refresh。
+description_en: Regenerate LLM diagnosis summary from latest snapshot without blocking score refresh.
+category: compute
+task_type: on_demand
+queue: market
+timeout: 300
+retry_config:
+  max_retries: 1
+  retry_backoff: true
+  retry_backoff_max: 120
+params_schema:
+  type: object
+  required:
+    - symbol
+  properties:
+    symbol:
+      type: string
+      title: 股票代码
+      description: 如 688322.SH

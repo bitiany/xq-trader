@@ -1,9 +1,9 @@
 # xq-trader 交易系统 — 架构与设计（个人版）
 
-> **版本**: v2.1
-> **更新**: 2026-06-27（v2.1 据实修订 §4.2/§6/§7.1/§8/§12/§14 + 新增 §17~§22 平台章程与机构方法论模块设计；v2.0 取代旧版，原文档已归档至 `docs/archive/trading-system-20260623/`）
+> **版本**: v2.2
+> **更新**: 2026-07-07（对齐 factor-system-design §十八 Alpha 信号分层）
 > **定位**: A 股**个人**量化交易终端（参考业界机构方法论，详见 [§17 平台目标章程](#十七平台目标章程)）
-> **前置**: [factor-architecture.md](./factor-architecture.md)（因子管线）
+> **前置**: [factor-system-design.md](./factor-system-design.md)（因子系统）
 > **前端**: 页面交互详见 [trading-product-design.md](./trading-product-design.md)
 
 ---
@@ -159,44 +159,37 @@ T 日 15:00 收盘 → 17:00 数据采集+因子计算 → 17:30 Alpha 信号
 T+1 09:25+ 逐单触发执行流 → 下单 → (盘内监控，见 §9)
 ```
 
-### 3.6 投资域来源：截面选股 ↔ 自选池（HITL 选股）
+### 3.6 投资域与信号分层
 
-决策流的 universe 来自账户**自选池**（`watchlist`），而非全市场截面选股。两者通过**人工选股**桥接：
+> 方法论见 [factor-system-design.md §十八~§十九](./factor-system-design.md)。
 
 ```mermaid
 flowchart LR
-    A[截面选股引擎<br/>selection/engine.py 全市场表达式因子打分] --> B[候选标的<br/>td_selection_result]
-    B -->|用户人工挑选| C[账户自选池 watchlist]
+    A["AlphaSignalService TopN<br/>(composite_alpha / ICIR 加权)"] --> B[候选标的<br/>td_selection_result]
+    B -->|用户挑选| C[账户自选池 watchlist]
     C --> D[决策流 load_watchlist_targets]
-    D --> E[逐标的时序信号 + 融合 + 配仓 + 预订单]
+    D --> E["SPI 战术融合 + 配仓 + 预订单"]
 ```
 
-- **设计取向**：截面选股（低频选篮子）与自选池时序信号（日频择时）**松耦合高内聚**，可在 FlowEngine 重组。"截面选股 → 自动入池 → 自动调仓"的全自动形态可通过**新编排一条 flow** 实现，**现阶段刻意不做**——个人不愿频繁调仓（换手成本/税费/精力）。
-- **必须明确的代价（HITL 选股固有）**：回测验证的是「截面选股组合」的统计表现；实盘跑的是「人工从截面结果挑的子集 + 时序择时」。**人工挑选注入了主观 alpha/bias，因此回测净值不能直接为实盘最终结果背书**。个人可接受，但不能把回测曲线当作实盘预期。
+- **L3 Alpha 信号**（低频）：`AlphaSignalService` 截面排序，输出候选篮子
+- **L4 SPI 战术**（日频）：`OnDemandComputeRegistry` 对自选池标的生成买卖时机
+- **表达式择时**：仅允许 `composite_alpha` / `composite_alpha_quarterly`（§19.2）
+- **自选池**：决策流 universe 来自 `watchlist`；截面 TopN 为候选输入，用户确认后入池
 
-### 3.7 调仓频率原则（后期做自动调仓时遵循）
+### 3.7 调仓频率
 
-若未来编排自动调仓 flow，**应低频再平衡，不应每交易日全量调仓**：
+**两层调仓体系**：
 
-| 论据 | 说明 |
-|------|------|
-| alpha 衰减半衰期 | 多因子截面（价值/质量/低波/成长）IC 半衰期以周~月计，日度调仓只在噪声里摩擦 |
-| 换手成本（决定性） | A 股单次调仓双边约 0.3%~0.6%；日度年换手数十倍吞掉 alpha，月度 ≤12 倍可控 |
-| 税费确定性 | 卖出印花税单边，频繁卖出=确定性亏损 |
-| 个人容量/精力 | 小资金无算法拆单，频繁调仓冲击成本与盯盘精力不划算 |
+- **L3 Alpha 再平衡**：双周~月度 — `AlphaSignalService` / SelectionEngine（§18.4 模式 A/C）
+- **L4 战术与风控**：日频 — 自选池内 SPI 融合、止损/减仓
+- **三机制**：① 阈值带（no-trade band，偏离目标权重 ±3% 才调）；② 最小持有期 N 日；③ 事件驱动（停牌/退市/止损/熔断）
 
-**推荐：两层调仓体系 + 三机制**
-
-- **底层/低频（截面再平衡）**：月度/双周重选篮子 + 重置目标权重 —— 由截面选股承担
-- **上层/日频（择时与风控）**：已持仓标的的止损/减仓/加仓微调 —— 由当前 `watchlist + timing 策略 + 决策流` 承担
-- **三机制**：① **阈值带（no-trade band）**：偏离目标权重超阈值（如 ±3%）才调；② **最小持有期**：单票 N 日防抖动翻动；③ **事件驱动例外**：再平衡可低频，但停牌/退市风险/暴雷/止损/熔断须日度~盘中事件驱动
-
-| 策略类型 | 建议常规调仓频率 |
-|----------|------------------|
+| 策略类型 | 常规调仓频率 |
+|----------|-------------|
 | 多因子截面（价值/质量/低波） | 月度 / 季度 |
 | 动量/趋势截面 | 双周 / 月度 |
 | 量价反转、事件驱动 | 周度 |
-| 风控/止损层 | 日度~盘中（事件驱动，不计入常规换手） |
+| 风控/止损层 | 日度~盘中（事件驱动） |
 
 > AI/LLM 在决策流中的应用边界与旁路设计，见 [ai-in-trading-design.md](./ai-in-trading-design.md)。
 
@@ -560,7 +553,7 @@ daily_factor_pipeline (T日17:00): kline_collect → daily_factor_compute → al
 
 ### 17.4 不照搬清单（显式裁剪）
 
-- ❌ ML 重型合成管线（XGBoost+MLP+AutoEncoder/HDBSCAN）—— `factor-architecture v6.0` 已移除
+- ❌ ML 重型合成管线（XGBoost+MLP+AutoEncoder/HDBSCAN）—— 因子系统不包含 ML 合成
 - ❌ 7 态因子生命周期状态机 —— 简化为 2 态（active/deprecated）
 - ❌ 热/温/冷三层存储 + Parquet 归档 —— 单层 TimescaleDB 自动压缩
 - ❌ 强制合规对账、多角色审批、OMS/EMS 物理分离

@@ -1,0 +1,29 @@
+name: stock_diagnosis
+celery_task_name: market.stock_diagnosis_snapshot
+version: "1.0.0"
+task_name: 诊股评分快照批量计算
+task_name_en: Stock Diagnosis Snapshot Batch Compute
+description: 对自选池与持仓标的批量计算五维诊股评分，写入 sdc_stock_diagnosis_snapshot。建议在日频因子计算完成后执行。
+description_en: Batch compute five-dimension stock diagnosis scores for watchlist and position symbols into sdc_stock_diagnosis_snapshot.
+category: compute
+task_type: on_demand
+queue: market
+timeout: 7200
+retry_config:
+  max_retries: 1
+  retry_backoff: true
+  retry_backoff_max: 300
+params_schema:
+  type: object
+  properties:
+    stock_codes:
+      type: array
+      title: 股票代码列表
+      description: 为空时自动合并自选池与最新持仓
+      items:
+        type: string
+    max_count:
+      type: integer
+      title: 最大标的数量
+      description: 用于测试，0 表示不限
+      default: 0

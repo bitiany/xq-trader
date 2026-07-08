@@ -810,12 +810,17 @@
       "diagnosis": "诊股"
     },
     "news": {
-      "placeholder": "资讯数据源接入中，敬请期待",
-      "empty": "暂无资讯"
+      "empty": "暂无资讯",
+      "keywords": "关键词",
+      "collect": "采集最新资讯",
+      "collectSuccess": "采集任务已提交，请稍后刷新",
+      "expand": "展开",
+      "collapse": "收起"
     },
     "announcements": {
-      "placeholder": "公告数据源接入中，敬请期待",
-      "empty": "暂无公告"
+      "empty": "暂无公告",
+      "type": "公告类型",
+      "collect": "采集最新公告"
     },
     "fundFlow": {
       "empty": "暂无资金流数据",
@@ -860,9 +865,139 @@
       "currentRatio": "流动比率"
     },
     "diagnosis": {
-      "title": "AI 诊股",
-      "placeholder": "基于多因子与财报数据的智能诊股能力即将上线",
-      "comingSoon": "功能预留中"
+      "title": "诊股",
+      "empty": "暂无诊股数据",
+      "overallScore": "综合得分",
+      "beatPercentile": "击败 {{pct}}% 股票",
+      "currentPeriod": "本期",
+      "prevPeriod": "上期",
+      "deepAnalysis": "深度投研分析",
+      "institutionalHold": "机构持股",
+      "institutionalHoldFund": "基金持股（累计占流通股）",
+      "prevScore": "上期 {{score}} 分",
+      "scoreDeltaUp": "较上期 +{{delta}}",
+      "scoreDeltaDown": "较上期 {{delta}}",
+      "industryRank": "行业排名",
+      "aiSummary": "变化解读",
+      "summaryAgent": "AI 解读",
+      "summaryRule": "规则摘要",
+      "generateAiSummary": "生成 AI 解读",
+      "thesisCard": "论点卡",
+      "thesisValidUntil": "有效期至",
+      "cached": "快照",
+      "scoreTrend": "得分走势",
+      "trendEmpty": "暂无历史得分，刷新后将开始记录",
+      "trendPending": "走势将于每日收盘后更新，需积累至少 2 日快照后可对比",
+      "viewAllReports": "查看全部报告（{{count}}）",
+      "allReports": "历史诊股报告（{{count}} 期）",
+      "reportsEmpty": "暂无历史报告",
+      "reportDate": "日期",
+      "reportOrg": "机构",
+      "reportRating": "评级",
+      "reportTitle": "标题",
+      "dimensionDetail": "维度明细",
+      "moduleDetail": "模块明细",
+      "dimensionWeight": "权重",
+      "moduleWeight": "权重",
+      "moduleScore": "得分",
+      "scoreUnit": "分",
+      "earningsReports": "近 180 日研报",
+      "earningsReportsEmpty": "暂无研报数据",
+      "detail": {
+        "report_count": "研报数量",
+        "reason": "说明",
+        "net_5d": "5日主力占比均值",
+        "net_10d": "10日主力占比均值",
+        "net_20d": "20日主力占比均值",
+        "amt_5d": "5日主力净额合计",
+        "amt_10d": "10日主力净额合计",
+        "latest_main_net_pct": "最新主力占比",
+        "flow_trend": "资金趋势",
+        "news_count": "近30日新闻",
+        "announcement_count": "近30日公告",
+        "sentiment_score": "舆情得分",
+        "pe_percentile": "PE 历史分位",
+        "pb_percentile": "PB 历史分位",
+        "industry_rank": "行业 PE 排名",
+        "industry_total": "行业总数",
+        "hold_pct": "机构持股",
+        "hold_source": "持股来源",
+        "valuation_label": "估值标签",
+        "pe_ttm": "PE(TTM)",
+        "factor_percentile": "因子分位"
+      },
+      "dimensions": {
+        "earnings": "收益预测",
+        "momentum": "价格动量",
+        "fundamental": "基本面",
+        "valuation": "相对估值",
+        "risk": "风险"
+      },
+      "modules": {
+        "technical": "技术面",
+        "capital_flow": "资金面",
+        "fundamental": "基本面",
+        "sentiment": "消息面",
+        "industry": "行业面",
+        "institutional": "机构面"
+      },
+      "capitalFlow": {
+        "net5d": "5日",
+        "net10d": "10日",
+        "net20d": "20日",
+        "trend": "趋势",
+        "seriesTitle": "近20日主力流向",
+        "trendInflow": "净流入",
+        "trendOutflow": "净流出",
+        "trendBalanced": "平衡"
+      },
+      "technical": {
+        "horizon": {
+          "short": "短期",
+          "mid": "中期",
+          "long": "长期"
+        },
+        "indicator": "指标",
+        "signalLabel": "信号",
+        "support": "支撑",
+        "resistance": "压力",
+        "noSignals": "暂无技术信号",
+        "trend": {
+          "slightlyBullish": "偏多",
+          "slightlyBearish": "偏空",
+          "neutral": "中性",
+          "bullish": "多头",
+          "bearish": "空头",
+          "consolidation": "震荡",
+          "uptrend": "上升趋势",
+          "downtrend": "下降趋势"
+        },
+        "signalValues": {
+          "goldenCross": "金叉",
+          "deathCross": "死叉",
+          "overbought": "超买",
+          "oversold": "超卖"
+        }
+      },
+      "fundamental": {
+        "rings": {
+          "profit": "盈利",
+          "operation": "营运",
+          "solvency": "偿债",
+          "growth": "成长",
+          "cashflow": "现金流"
+        },
+        "ringDimension": "维度",
+        "periodTrend": "近4期财务趋势",
+        "highlights": {
+          "roe": "ROE",
+          "roa": "ROA",
+          "grossprofit_margin": "毛利率",
+          "debt_to_assets": "负债率",
+          "current_ratio": "流动比率",
+          "end_date": "报告期"
+        }
+      }
     }
   },
   "errors": {

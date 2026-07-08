@@ -363,13 +363,10 @@ _FACTOR_VARIANTS: list[tuple[str, dict[str, Any]]] = [
     ("worker.plugins.factor_compute.factors.candle_pattern:CdlBodyRatioFactor", {}),
     # E1 缠论连续值因子（组合因子，一次 chanpy 计算输出 10 个子因子）
     ("worker.plugins.factor_compute.factors.chanlun:ChanlunFactor", {}),
-    # A 截面风险因子 + D3 z_main_net_pct（CrossSectionReader 按需加载）
+    # A 截面风险因子（CrossSectionReader 按需加载）
     # - nl_size/stom: cross_section_compute 路由到 cross_section_factor_calculator
     # - beta_250/beta_down: cross_section_beta 路由到 compute_beta_panel
-    # - z_main_net_pct/z_turnover: derived 路由，从 base_factor 加载后截面 Z-score
-    # - stoq: derived 路由，从 stom 派生 63 日滚动均值
-    ("worker.plugins.factor_compute.factors.cross_section:ZMainNetPctFactor", {}),
-    ("worker.plugins.factor_compute.factors.cross_section:ZTurnoverFactor", {}),
+    # - stoq: 从 stom 派生 63 日滚动均值
     ("worker.plugins.factor_compute.factors.cross_section:NlSizeFactor", {}),
     ("worker.plugins.factor_compute.factors.cross_section:StomFactor", {}),
     ("worker.plugins.factor_compute.factors.cross_section:StoqFactor", {}),

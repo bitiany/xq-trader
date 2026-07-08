@@ -101,5 +101,6 @@ celery_app.conf.update(
     task_routes={
         "market.*": {"queue": "market"},
         "factor.*": {"queue": "factor"},
+        "ml.*": {"queue": "ml"},
     },
 )

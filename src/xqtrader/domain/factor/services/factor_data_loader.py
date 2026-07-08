@@ -512,11 +512,6 @@ async def load_factor_raw_chunk(
     if origin in ("daily_indicator", "daily_derived"):
         return await load_daily_indicator_factor_panel(start_date, end_date, factor_id, symbols)
 
-    if origin == "derived":
-        return await load_derived_factor_panel(
-            start_date, end_date, factor_id, symbols, pool_id,
-        )
-
     if origin == "cross_section_beta":
         return await load_beta_factor_panel(
             start_date, end_date, factor_id, symbols,
@@ -578,7 +573,6 @@ async def preload_factor_raw_panels(
     reg_map: dict[str, FacFactorRegistry] = {r.factor_id: r for r in regs}
 
     batch_factor_ids: list[str] = []          # 批量加载的因子 ID
-    derived_pairs: list[tuple[str, str]] = []  # (factor_id, base_factor_id)
     independent_factors: list[str] = []        # 独立加载的因子 ID
 
     for fid in factor_ids:
@@ -589,28 +583,17 @@ async def preload_factor_raw_panels(
         origin = reg.data_origin or "computed"
         if origin in _BATCH_LOADABLE_ORIGINS:
             batch_factor_ids.append(fid)
-        elif origin == "derived":
-            base_fid = reg.base_factor or ""
-            if base_fid:
-                derived_pairs.append((fid, base_fid))
-            else:
-                independent_factors.append(fid)
         else:
             independent_factors.append(fid)
 
-    # === 批量加载：computed/fund_flow/market 因子 + derived 因子的 base_factor ===
-    base_factor_ids = {bf for _, bf in derived_pairs}
-    # 去重：base_factor 可能本身也在批量列表中（如 cs_main_net_pct 是 fund_flow 类）
-    all_batch_ids = list(dict.fromkeys(batch_factor_ids + sorted(base_factor_ids)))
-
-    if all_batch_ids:
+    # === 批量加载：computed/fund_flow/market 因子 ===
+    if batch_factor_ids:
         logger.info(
-            "[preload] 批量预加载开始: batch_factors=%d derived_factors=%d "
-            "unique_columns=%d (含 base_factor 去重)",
-            len(batch_factor_ids), len(derived_pairs), len(all_batch_ids),
+            "[preload] 批量预加载开始: batch_factors=%d",
+            len(batch_factor_ids),
         )
         wide_df = await load_from_factor_value(
-            start_date, end_date, all_batch_ids, symbols, pool_id,
+            start_date, end_date, batch_factor_ids, symbols, pool_id,
         )
         wide_elapsed = (pd.Timestamp.now() - t0).total_seconds()
 
@@ -618,17 +601,9 @@ async def preload_factor_raw_panels(
             for fid in batch_factor_ids:
                 if fid in wide_df.columns:
                     panels[fid] = wide_df[[fid]].copy()
-            # derived 因子：从 base_factor 列重命名为 factor_id
-            for fid, base_fid in derived_pairs:
-                if base_fid in wide_df.columns:
-                    panels[fid] = (
-                        wide_df[[base_fid]]
-                        .rename(columns={base_fid: fid})
-                        .copy()
-                    )
         logger.info(
             "[preload] 批量预加载完成: panels=%d / expected=%d 耗时=%.2fs",
-            len(panels), len(batch_factor_ids) + len(derived_pairs), wide_elapsed,
+            len(panels), len(batch_factor_ids), wide_elapsed,
         )
 
     # === 独立加载：fina_indicator/daily_indicator/cross_section_*/混合 ===
@@ -654,38 +629,10 @@ async def preload_factor_raw_panels(
     total_elapsed = (pd.Timestamp.now() - t0).total_seconds()
     logger.info(
         "[preload] 全部预加载完成: total=%d (batch=%d independent=%d) 总耗时=%.2fs",
-        len(panels), len(batch_factor_ids) + len(derived_pairs),
+        len(panels), len(batch_factor_ids),
         len(independent_factors), total_elapsed,
     )
     return panels
-
-
-async def load_derived_factor_panel(
-    start_date: date,
-    end_date: date,
-    factor_id: str,
-    symbols: list[str],
-    pool_id: str,
-) -> pd.DataFrame:
-    """派生因子加载 — 从 base_factor 原值加载并重命名列为 factor_id。
-
-    用于 z_ 前缀截面 Z-score 因子（z_main_net_pct, z_turnover）。
-    CrossSectionReader 后续会做截面 Z-score。
-    """
-    reg = await FacFactorRegistry.get_or_none(factor_id=factor_id)
-    if reg is None or not reg.base_factor:
-        logger.warning("[derived] 因子 %s 未配置 base_factor，回退到 fac_factor_value", factor_id)
-        return await load_from_factor_value(start_date, end_date, [factor_id], symbols, pool_id)
-
-    base_factor_id = reg.base_factor
-    df = await load_from_factor_value(
-        start_date, end_date, [base_factor_id], symbols, pool_id,
-    )
-    if df.empty or base_factor_id not in df.columns:
-        return df
-
-    # z_ 因子：直接重命名列，CrossSectionReader 后续做 Z-score
-    return df.rename(columns={base_factor_id: factor_id})
 
 
 async def load_beta_factor_panel(

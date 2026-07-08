@@ -1,19 +1,23 @@
-import { Tabs, Button, Dropdown } from 'antd'
+import { Tabs, Button, Dropdown, message } from 'antd'
 import type { MenuProps } from 'antd'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { ArrowLeft, FlaskConical, Sparkles, Layers, LineChart, TrendingUp, Wallet } from 'lucide-react'
 
 import {
+  fetchStockAnnouncements,
   fetchStockDiagnosis,
+  fetchStockDiagnosisHistory,
   fetchStockFinancials,
   fetchStockFundFlow,
+  fetchStockNews,
   fetchStockOverview,
   type MainIndicator,
   type SubIndicator,
   type StockOverviewResponse,
 } from '@/api/stock'
+import { triggerCollectTask } from '@/api/data'
 import { AsyncSection } from '@/components/common/AsyncSection'
 import { StockAnnouncementsPanel } from '@/components/stock/StockAnnouncementsPanel'
 import { StockDiagnosisPanel } from '@/components/stock/StockDiagnosisPanel'
@@ -80,14 +84,73 @@ export function StockDetailPage() {
     { deps: requestDeps },
   )
 
-  const [activeTab, setActiveTab] = useState('fundFlow')
-  const fundFlowDeps = useMemo(() => (activeTab === 'fundFlow' || subIndicator === 'fundflow' ? requestDeps : ([] as const)), [activeTab, subIndicator, requestDeps])
+  const [activeTab, setActiveTab] = useState('diagnosis')
+  const fundFlowDeps = useMemo(
+    () =>
+      activeTab === 'fundFlow' || subIndicator === 'fundflow'
+        ? requestDeps
+        : ([] as const),
+    [activeTab, subIndicator, requestDeps],
+  )
   const financialsDeps = useMemo(() => (activeTab === 'financials' ? requestDeps : ([] as const)), [activeTab, requestDeps])
   const diagnosisDeps = useMemo(() => (activeTab === 'diagnosis' ? requestDeps : ([] as const)), [activeTab, requestDeps])
+  const newsDeps = useMemo(() => (activeTab === 'news' ? requestDeps : ([] as const)), [activeTab, requestDeps])
+  const announcementsDeps = useMemo(() => (activeTab === 'announcements' ? requestDeps : ([] as const)), [activeTab, requestDeps])
 
-  const { data: fundFlow } = useRequest(() => fetchStockFundFlow(decodedSymbol, 1200), { deps: fundFlowDeps, immediate: activeTab === 'fundFlow' || subIndicator === 'fundflow' })
+  const diagnosisRefreshRef = useRef(false)
+  const [newsCollecting, setNewsCollecting] = useState(false)
+
+  const { data: fundFlow } = useRequest(() => fetchStockFundFlow(decodedSymbol, 1200), {
+    deps: fundFlowDeps,
+    immediate: activeTab === 'fundFlow' || subIndicator === 'fundflow',
+  })
   const { data: financials } = useRequest(() => fetchStockFinancials(decodedSymbol), { deps: financialsDeps, immediate: activeTab === 'financials' })
-  const { data: diagnosis } = useRequest(() => fetchStockDiagnosis(decodedSymbol), { deps: diagnosisDeps, immediate: activeTab === 'diagnosis' })
+  const { data: diagnosis, loading: diagnosisLoading, reload: reloadDiagnosis } = useRequest(
+    () => fetchStockDiagnosis(decodedSymbol, diagnosisRefreshRef.current),
+    { deps: diagnosisDeps, immediate: activeTab === 'diagnosis' },
+  )
+  const { data: diagnosisHistory, loading: diagnosisHistoryLoading, reload: reloadDiagnosisHistory } = useRequest(
+    () => fetchStockDiagnosisHistory(decodedSymbol, 90),
+    { deps: diagnosisDeps,
+      immediate: activeTab === 'diagnosis' },
+  )
+  const { data: news, reload: reloadNews } = useRequest(() => fetchStockNews(decodedSymbol), { deps: newsDeps, immediate: activeTab === 'news' })
+  const { data: announcements, reload: reloadAnnouncements } = useRequest(
+    () => fetchStockAnnouncements(decodedSymbol),
+    { deps: announcementsDeps,
+      immediate: activeTab === 'announcements' },
+  )
+
+  const handleDiagnosisRefresh = () => {
+    diagnosisRefreshRef.current = true
+    void reloadDiagnosis()
+      .then(() => reloadDiagnosisHistory())
+      .finally(() => {
+        diagnosisRefreshRef.current = false
+      })
+  }
+
+  const handleCollectNews = async () => {
+    setNewsCollecting(true)
+    try {
+      const result = await triggerCollectTask('market.stock_news_collect', {
+        stock_codes: [decodedSymbol],
+        fetch_news: true,
+        fetch_announcements: true,
+      })
+      message.success(result.message || t('stock.news.collectSuccess'))
+      if (activeTab === 'news') {
+        await reloadNews()
+      }
+      if (activeTab === 'announcements') {
+        await reloadAnnouncements()
+      }
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : t('common.loadFailed'))
+    } finally {
+      setNewsCollecting(false)
+    }
+  }
 
   const stockOverview = overview as StockOverviewResponse | undefined
   const overviewReady = stockOverview?.symbol === decodedSymbol
@@ -234,7 +297,14 @@ export function StockDetailPage() {
                 {
                   key: 'news',
                   label: t('stock.tabs.news'),
-                  children: <StockNewsPanel data={undefined} />,
+                  children: (
+                    <StockNewsPanel
+                      data={news}
+                      collecting={newsCollecting}
+                      onCollect={handleCollectNews}
+                      onReload={() => void reloadNews()}
+                    />
+                  ),
                 },
                 {
                   key: 'fundFlow',
@@ -244,7 +314,14 @@ export function StockDetailPage() {
                 {
                   key: 'announcements',
                   label: t('stock.tabs.announcements'),
-                  children: <StockAnnouncementsPanel data={undefined} />,
+                  children: (
+                    <StockAnnouncementsPanel
+                      data={announcements}
+                      collecting={newsCollecting}
+                      onCollect={handleCollectNews}
+                      onReload={() => void reloadAnnouncements()}
+                    />
+                  ),
                 },
                 {
                   key: 'financials',
@@ -254,7 +331,18 @@ export function StockDetailPage() {
                 {
                   key: 'diagnosis',
                   label: t('stock.tabs.diagnosis'),
-                  children: <StockDiagnosisPanel data={diagnosis} />,
+                  children: (
+                    <StockDiagnosisPanel
+                      symbol={decodedSymbol}
+                      data={diagnosis}
+                      history={diagnosisHistory}
+                      loading={diagnosisLoading}
+                      historyLoading={diagnosisHistoryLoading}
+                      onDeepAnalysis={() => triggerAnalysis('full')}
+                      onRefresh={handleDiagnosisRefresh}
+                      onSummaryRefresh={() => void reloadDiagnosis()}
+                    />
+                  ),
                 },
               ]}
             />

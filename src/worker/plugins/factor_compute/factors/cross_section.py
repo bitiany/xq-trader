@@ -3,10 +3,7 @@
 这些因子不在 Task 1 逐标的计算，而是由 CrossSectionReader 在 Task 2/3 中
 按需加载并截面标准化。Plugin 定义仅用于元数据注册，compute() 不参与逐标的计算。
 
-因子清单（参照 docs/factor-catalog.md §4.2 + D3 z_main_net_pct）：
-  - D3 截面 Z-score 派生因子：
-    - z_main_net_pct: cs_main_net_pct 的截面 Z-score 版本
-    - z_turnover: cs_turnover 的截面 Z-score 版本
+因子清单（参照 docs/factor-catalog.md §4.2）：
   - A 截面风险因子：
     - nl_size: 非线性规模，log_mv 三次方对 Size 正交化取残差
     - stom: 月换手率，log(Σ(21日, V_t/S_t))
@@ -15,75 +12,20 @@
     - beta_down: 下行 Beta，负收益日 Cov(ret, mkt_ret)/Var(mkt_ret)
 
 数据血缘：
-  - z_*: 从 fac_factor_value 加载 base_factor 原值，CrossSectionReader 做 Z-score
   - nl_size/stom/stoq: 从 daily_indicator 加载 total_mv/turnover_rate，截面计算
   - beta_250/beta_down: CandlestickDaily 个股收益 + IndexDaily 市场收益，滚动回归
+
+设计说明：
+  截面 Z-score 标准化是 CrossSectionReader 五步预处理管线的一环（对所有因子统一执行），
+  不作为独立因子注册。原 z_main_net_pct / z_turnover 已废弃删除，
+  标准化由 CrossSectionReader._zscore_standardize 统一负责。
 """
 
 from __future__ import annotations
 
-from datetime import date
-
 import pandas as pd
 
 from xqtrader.domain.factor.base import FactorPlugin
-
-# 资金流向派生因子继承数据源起始日期限制（moneyflow_dc 自 2023-09-11 起）
-_FUND_FLOW_DATA_START = date(2023, 9, 11)
-
-
-class ZMainNetPctFactor(FactorPlugin):
-    """主力净流入占比 Z-score 因子 — cs_main_net_pct 的截面 Z-score 版本。
-
-    与 cs_main_net_pct 的区别：z_ 前缀明确标注为截面 Z-score 标准化版本，
-    由 CrossSectionReader 加载 cs_main_net_pct 原值后做截面 Z-score。
-    data_origin='derived' 表示从 base_factor 派生加载。
-    """
-
-    factor_id: str = "z_main_net_pct"
-    display_name: str = "主力净流入占比Z-score"
-    category: str = "fund_flow"
-    group_id: str = "z_main_net_pct"
-    direction: str = "DESC"
-    scope: str = "both"
-    signal_type: str = "continuous"
-    base_factor: str = "cs_main_net_pct"
-    dependencies: list[str] = []
-    min_periods: int = 1
-    requires_full_history: bool = False
-    data_origin: str = "derived"
-    data_start_date: date = _FUND_FLOW_DATA_START
-    update_freq: str = "daily"
-    compute_engine: str = "cross_section"
-    tags: str = "cross_section,z_score"
-    description: str = "cs_main_net_pct 的截面 Z-score 标准化版本"
-
-    def compute(self, df: pd.DataFrame) -> pd.DataFrame:
-        raise NotImplementedError("z_main_net_pct 由 CrossSectionReader 截面 Z-score 派生")
-
-
-class ZTurnoverFactor(FactorPlugin):
-    """换手率 Z-score 因子 — cs_turnover 的截面 Z-score 版本。"""
-
-    factor_id: str = "z_turnover"
-    display_name: str = "换手率Z-score"
-    category: str = "risk"
-    group_id: str = "z_turnover"
-    direction: str = "DESC"
-    scope: str = "both"
-    signal_type: str = "continuous"
-    base_factor: str = "cs_turnover"
-    dependencies: list[str] = []
-    min_periods: int = 1
-    requires_full_history: bool = False
-    data_origin: str = "derived"
-    update_freq: str = "daily"
-    compute_engine: str = "cross_section"
-    tags: str = "cross_section,z_score"
-    description: str = "cs_turnover 的截面 Z-score 标准化版本"
-
-    def compute(self, df: pd.DataFrame) -> pd.DataFrame:
-        raise NotImplementedError("z_turnover 由 CrossSectionReader 截面 Z-score 派生")
 
 
 class NlSizeFactor(FactorPlugin):

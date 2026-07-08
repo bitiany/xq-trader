@@ -1,35 +1,22 @@
-import { Empty } from 'antd'
-import { useTranslation } from 'react-i18next'
-
 import type { StockNewsResponse } from '@/api/stock'
+import { StockNewsList } from '@/components/stock/StockNewsList'
 
 interface StockNewsPanelProps {
   data?: StockNewsResponse
+  collecting?: boolean
+  onCollect?: () => void
+  onReload?: () => void
 }
 
-export function StockNewsPanel({ data }: StockNewsPanelProps) {
-  const { t } = useTranslation()
-
-  if (!data || data.items.length === 0) {
-    return (
-      <div className="stock-panel card">
-        <Empty description={data?.placeholder ? t('stock.news.placeholder') : t('stock.news.empty')} />
-      </div>
-    )
-  }
-
+export function StockNewsPanel({ data, collecting, onCollect, onReload }: StockNewsPanelProps) {
   return (
-    <div className="stock-panel card">
-      <ul className="stock-news">
-        {data.items.map((item) => (
-          <li key={item.id} className="stock-news__item">
-            <div className="stock-news__title">{item.title}</div>
-            <div className="stock-news__meta">
-              {item.source} · {item.published_at}
-            </div>
-          </li>
-        ))}
-      </ul>
-    </div>
+    <StockNewsList
+      data={data}
+      emptyKey="stock.news.empty"
+      keywordLabelKey="stock.news.keywords"
+      collecting={collecting}
+      onCollect={onCollect}
+      onReload={onReload}
+    />
   )
 }

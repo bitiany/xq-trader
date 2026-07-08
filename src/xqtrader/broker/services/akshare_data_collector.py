@@ -42,6 +42,7 @@ _REPORT_PDF_LIMIT: tuple[int, float] = (60, 60.0)
 _AKSHARE_NEWS_LIMIT: tuple[int, float] = (30, 60.0)
 _AKSHARE_ANNOUNCEMENT_LIMIT: tuple[int, float] = (30, 60.0)
 _AKSHARE_WEIBO_LIMIT: tuple[int, float] = (30, 60.0)
+_AKSHARE_FUND_HOLDER_LIMIT: tuple[int, float] = (30, 60.0)
 
 # 东财研报 API 端点
 _REPORT_LIST_URL = "https://reportapi.eastmoney.com/report/list"
@@ -206,6 +207,11 @@ def _call_akshare_weibo(time_period: str) -> pd.DataFrame:
     return cast(pd.DataFrame, ak.stock_js_weibo_report())
 
 
+def _call_akshare_fund_stock_holder(code: str) -> pd.DataFrame:
+    """同步调用 akshare stock_fund_stock_holder（新浪基金持股）。"""
+    return cast(pd.DataFrame, ak.stock_fund_stock_holder(symbol=code))
+
+
 def _normalize_report_columns(df: pd.DataFrame, symbol: str | None) -> pd.DataFrame:
     """标准化东财研报 API 返回字段名为 ORM 字段名。
 
@@ -361,6 +367,7 @@ class AkshareDataCollector:
             "stock_news_em": SlidingWindowLimiter(*_AKSHARE_NEWS_LIMIT),
             "stock_individual_notice_report": SlidingWindowLimiter(*_AKSHARE_ANNOUNCEMENT_LIMIT),
             "stock_js_weibo_report": SlidingWindowLimiter(*_AKSHARE_WEIBO_LIMIT),
+            "stock_fund_stock_holder": SlidingWindowLimiter(*_AKSHARE_FUND_HOLDER_LIMIT),
         }
         self._default_limiter = SlidingWindowLimiter(30, 60.0)
         self._http_client: httpx.AsyncClient | None = None
@@ -667,6 +674,47 @@ class AkshareDataCollector:
                 f"stock_announcement 采集失败 symbol={symbol} "
                 f"range={begin_date}~{end_date}: {e}"
             ) from e
+
+    async def fetch_fund_hold_pct(self, symbol: str) -> float | None:
+        """获取基金持股占流通股比例合计（akshare stock_fund_stock_holder，新浪数据源）。
+
+        广义机构持股（akshare stock_institute_hold）对多数 A 股返回空表，
+        暂以基金累计持股作为 key_metrics.institutional_hold_pct，并通过
+        institutional_hold_source=fund 标注数据来源。
+
+        返回值为百分比，如 27.70 表示 27.70%。无数据时返回 None。
+        """
+        code = _strip_symbol_suffix(symbol)
+        try:
+            await self._get_limiter("stock_fund_stock_holder").acquire()
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(
+                self._get_executor(),
+                partial(_call_akshare_fund_stock_holder, code),
+            )
+            if result is None or result.empty:
+                logger.debug("[akshare.fund_holder] 无数据: %s", symbol)
+                return None
+
+            ratio_col = next(
+                (col for col in result.columns if "流通" in str(col)),
+                None,
+            )
+            if ratio_col is None:
+                raise DataCollectionError(
+                    f"stock_fund_stock_holder 缺少占流通股比例列: symbol={symbol} cols={list(result.columns)}",
+                )
+
+            ratios = pd.to_numeric(result[ratio_col], errors="coerce").dropna()
+            if ratios.empty:
+                return None
+
+            total = float(ratios.sum())
+            return round(total, 2)
+        except DataCollectionError:
+            raise
+        except Exception as e:
+            raise DataCollectionError(f"stock_fund_stock_holder 采集失败 symbol={symbol}: {e}") from e
 
     async def fetch_weibo_sentiment(self, time_period: str = "") -> pd.DataFrame:
         """获取微博财经舆情报告（akshare stock_js_weibo_report）。

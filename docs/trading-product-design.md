@@ -2,7 +2,7 @@
 
 > **版本**: v2.0
 > **更新**: 2026-06-26（取代旧版，原文档已归档至 `docs/archive/trading-product-20260623/`）
-> **关联**: [trading-system-design.md](./trading-system-design.md)（后端架构）、[factor-architecture.md](./factor-architecture.md)（因子管线）
+> **关联**: [trading-system-design.md](./trading-system-design.md)（后端架构）、[factor-system-design.md](./factor-system-design.md)（因子系统）
 > **定位**: **个人**量化交易终端前端，本文档为前端**权威口径**
 
 ---

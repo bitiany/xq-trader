@@ -95,16 +95,17 @@ export interface StockKlineResponse {
 export interface StockNewsItem {
   id: string
   title: string
-  source: string
+  source: string | null
   published_at: string
   summary: string | null
   url: string | null
+  keywords: string[]
 }
 
 export interface StockNewsResponse {
   symbol: string
   items: StockNewsItem[]
-  placeholder: boolean
+  total: number
 }
 
 export type StockAnnouncementsResponse = StockNewsResponse
@@ -146,12 +147,87 @@ export interface StockFinancialsResponse {
   balance_sheet: FinancialReportSummary | null
   cash_flow: FinancialReportSummary | null
   financial_indicator: FinancialReportSummary | null
+  financial_indicator_history?: FinancialReportSummary[]
+}
+
+export interface DiagnosisModuleScore {
+  key: 'technical' | 'capital_flow' | 'fundamental' | 'sentiment' | 'industry' | 'institutional'
+  label: string
+  score: number | null
+  prev_score: number | null
+  weight: number
+  detail: Record<string, unknown>
+}
+
+export interface DiagnosisKeyMetrics {
+  pe_ttm: number | null
+  pb: number | null
+  dv_ttm: number | null
+  institutional_hold_pct: number | null
+  institutional_hold_source?: 'fund' | null
+  industry_rank: number | null
+  industry_total: number | null
+  industry_name: string | null
+}
+
+export interface DiagnosisSummaryHighlight {
+  key: string
+  label: string
+  segments: Array<{ text: string; highlight?: boolean }>
+}
+
+export interface DiagnosisSummary {
+  bullets: string[]
+  narrative?: string
+  highlights?: DiagnosisSummaryHighlight[]
+  generated_by: 'agent' | 'rule'
+  generated_at: string
+}
+
+export interface DiagnosisEarningsPreviewItem {
+  info_code: string
+  title: string | null
+  org_name: string | null
+  rating: string | null
+  publish_date: string | null
+  eps_forecast: Array<Record<string, unknown>>
+}
+
+export interface DiagnosisThesisSnapshot {
+  direction: string
+  as_of: string
+  valid_until: string
+  core_assumption: string
 }
 
 export interface StockDiagnosisResponse {
   symbol: string
-  available: boolean
-  message: string
+  name: string
+  industry: string | null
+  intro: string | null
+  as_of: string
+  overall_score: number | null
+  prev_overall_score: number | null
+  prev_as_of: string | null
+  market_percentile: number | null
+  rating_label: string | null
+  module_scores: DiagnosisModuleScore[]
+  key_metrics: DiagnosisKeyMetrics
+  summary: DiagnosisSummary
+  thesis: DiagnosisThesisSnapshot | null
+  reports_count: number
+  cached?: boolean
+}
+
+export interface StockDiagnosisHistoryItem {
+  as_of: string
+  overall_score: number | null
+  modules: Record<string, number | null>
+}
+
+export interface StockDiagnosisHistoryResponse {
+  symbol: string
+  items: StockDiagnosisHistoryItem[]
 }
 
 export async function searchStocks(query: string, limit = 20): Promise<StockSearchItem[]> {
@@ -188,8 +264,37 @@ export async function fetchStockFinancials(symbol: string): Promise<StockFinanci
   return request.get<StockFinancialsResponse>(`/stocks/${encodeURIComponent(symbol)}/financials`)
 }
 
-export async function fetchStockDiagnosis(symbol: string): Promise<StockDiagnosisResponse> {
-  return request.get<StockDiagnosisResponse>(`/stocks/${encodeURIComponent(symbol)}/diagnosis`)
+export async function fetchStockDiagnosis(
+  symbol: string,
+  refresh = false,
+): Promise<StockDiagnosisResponse> {
+  return request.get<StockDiagnosisResponse>(`/stocks/${encodeURIComponent(symbol)}/diagnosis`, {
+    params: refresh ? { refresh: true } : undefined,
+  })
+}
+
+export async function fetchStockDiagnosisHistory(
+  symbol: string,
+  days = 90,
+): Promise<StockDiagnosisHistoryResponse> {
+  return request.get<StockDiagnosisHistoryResponse>(
+    `/stocks/${encodeURIComponent(symbol)}/diagnosis/history`,
+    { params: { days } },
+  )
+}
+
+export interface DiagnosisSummaryTriggerResponse {
+  symbol: string
+  task_id: string
+  status: string
+}
+
+export async function triggerStockDiagnosisSummary(
+  symbol: string,
+): Promise<DiagnosisSummaryTriggerResponse> {
+  return request.post<DiagnosisSummaryTriggerResponse>(
+    `/stocks/${encodeURIComponent(symbol)}/diagnosis/summary`,
+  )
 }
 
 export interface StockListItem {

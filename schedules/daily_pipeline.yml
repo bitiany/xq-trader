@@ -1,12 +1,12 @@
 name: daily_pipeline
-description: "日频流水线：全市场个股增量采集 → 指数增量采集 → 申万行业增量采集 → 日频因子计算（各步骤为独立插件任务，仅编排执行顺序）"
+description: "日频流水线：采集 → 因子计算 → ML因子推理"
 mode: canvas
 queue: celery
 enabled: true
 
 steps:
   - name: stock_daily_collect
-    task: market.daily_incremental_collect
+    task: market.daily-incremental-collect
     args: {}
 
   - name: index_daily_collect
@@ -24,3 +24,15 @@ steps:
     depends_on: [sw_daily_collect]
     args:
       mode: incremental
+
+  - name: ml_predict
+    task: ml.predict_daily
+    depends_on: [daily_factor_compute]
+    args:
+      pool_ids: ["idx_300"]
+      factor_id: "ml_alpha_v1"
+
+  - name: stock_diagnosis_snapshot
+    task: market.stock_diagnosis_snapshot
+    depends_on: [daily_factor_compute]
+    args: {}

@@ -24,6 +24,7 @@ from framework.commons.logger import get_logger
 from framework.scheduler.base_task import BaseTask
 from xqtrader.broker.services.akshare_data_collector import AkshareDataCollector
 from xqtrader.domain.research.models.stock_sentiment import StockSentiment
+from xqtrader.domain.security.models import Security
 
 logger = get_logger(__name__)
 
@@ -118,6 +119,72 @@ def clean_sentiment_data(
         snapshot["summary"] = "热门标的: " + " / ".join(words)
 
     return pd.DataFrame([snapshot])
+
+
+async def persist_symbol_sentiment_from_keywords(
+    df: pd.DataFrame,
+    snapshot_date: date_type,
+    sentiment_type: str,
+) -> int:
+    """将微博舆情原始数据按标的名称匹配，写入个股级快照。"""
+    if df.empty:
+        return 0
+
+    name_col = "name" if "name" in df.columns else df.columns[0]
+    rate_col = "rate" if "rate" in df.columns else (df.columns[1] if len(df.columns) > 1 else None)
+    if rate_col is None:
+        return 0
+
+    names = [
+        str(value).strip()
+        for value in df[name_col].dropna().tolist()
+        if str(value).strip() not in {"", "nan", "None"}
+    ]
+    if not names:
+        return 0
+
+    securities = await Security.filter(name__in=names, list_status="L", limit=0)
+    name_to_symbol = {security.name: security.symbol for security in securities}
+    if not name_to_symbol:
+        return 0
+
+    instances: list[StockSentiment] = []
+    for _, row in df.iterrows():
+        name = str(row.get(name_col, "")).strip()
+        symbol = name_to_symbol.get(name)
+        if not symbol:
+            continue
+        rate_value = row.get(rate_col)
+        if rate_value is None:
+            continue
+        rate_raw = pd.to_numeric(rate_value, errors="coerce")
+        if pd.isna(rate_raw):
+            continue
+        rate = float(rate_raw)
+        instances.append(
+            StockSentiment(
+                symbol=symbol,
+                snapshot_date=snapshot_date,
+                sentiment_type=sentiment_type,
+                sentiment_score=rate,
+                heat_score=abs(rate),
+                positive_count=1 if rate > 0 else 0,
+                negative_count=1 if rate < 0 else 0,
+                neutral_count=1 if rate == 0 else 0,
+                keywords=[{"word": name, "rate": rate}],
+                summary=f"微博舆情: {name}",
+            ),
+        )
+
+    if not instances:
+        return 0
+
+    return await StockSentiment.bulk_create_or_update(
+        instances,  # type: ignore[arg-type]
+        on_conflict=["snapshot_date", "sentiment_type", "symbol"],
+        update_fields=_PERSIST_UPDATE_FIELDS,
+        batch_size=50,
+    )
 
 
 async def persist_sentiment_data(df: pd.DataFrame) -> int:
@@ -225,21 +292,25 @@ class StockSentimentCollectTask(BaseTask):
             )
 
             # 清洗 + 聚合
-            df = clean_sentiment_data(df, snapshot_date, sentiment_type)
+            cleaned = clean_sentiment_data(df, snapshot_date, sentiment_type)
 
-            # 持久化
-            count = await persist_sentiment_data(df)
+            # 持久化市场级快照
+            count = await persist_sentiment_data(cleaned)
+            symbol_count = await persist_symbol_sentiment_from_keywords(
+                df, snapshot_date, sentiment_type,
+            )
 
             logger.info(
-                "[stock_sentiment.collect] 完成: date=%s persisted=%d",
-                snapshot_date, count,
+                "[stock_sentiment.collect] 完成: date=%s market=%d symbols=%d",
+                snapshot_date, count, symbol_count,
             )
             return {
                 "total": 1,
-                "succeeded": 1 if count > 0 else 0,
-                "failed": 0 if count > 0 else 1,
+                "succeeded": 1 if count > 0 or symbol_count > 0 else 0,
+                "failed": 0 if count > 0 or symbol_count > 0 else 1,
                 "snapshot_date": str(snapshot_date),
                 "rows": count,
+                "symbol_rows": symbol_count,
             }
         except Exception as e:
             logger.error(

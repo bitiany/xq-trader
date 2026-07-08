@@ -11,6 +11,7 @@ from xqtrader.domain.security.services.stock_detail_service import (
     StockFundFlowService,
     StockKlineService,
 )
+from xqtrader.domain.security.services.stock_diagnosis_service import StockDiagnosisService
 from xqtrader.domain.security.services.stock_technical_service import (
     StockTechnicalService,
 )
@@ -23,6 +24,7 @@ _kline_service = StockKlineService()
 _fund_flow_service = StockFundFlowService()
 _chanlun_service = StockChanlunService()
 _technical_service = StockTechnicalService()
+_diagnosis_service = StockDiagnosisService()
 
 
 @router.get("", summary="查询股票列表")
@@ -140,6 +142,40 @@ async def get_stock_fund_flow(
     return await _fund_flow_service.get_fund_flow(symbol, limit=limit)
 
 
-@router.get("/{symbol}/diagnosis", summary="查询个股诊断", operation_id="get_stock_diagnosis")
-async def get_stock_diagnosis(symbol: str) -> dict:
-    return await _detail_service.get_diagnosis(symbol)
+@router.get("/{symbol}/diagnosis", summary="查询个股诊股评分", operation_id="get_stock_diagnosis")
+async def get_stock_diagnosis(
+    symbol: str,
+    refresh: bool = Query(default=False, description="强制重算评分（忽略当日快照）"),
+) -> dict:
+    return await _diagnosis_service.get_diagnosis(symbol, refresh=refresh)
+
+
+@router.get(
+    "/{symbol}/diagnosis/history",
+    summary="查询个股诊股得分走势",
+    operation_id="get_stock_diagnosis_history",
+)
+async def get_stock_diagnosis_history(
+    symbol: str,
+    days: int = Query(default=90, ge=7, le=365, description="回溯天数"),
+) -> dict:
+    return await _diagnosis_service.get_history(symbol, days=days)
+
+
+@router.post(
+    "/{symbol}/diagnosis/summary",
+    summary="异步生成诊股 AI 解读",
+    operation_id="trigger_stock_diagnosis_summary",
+)
+async def trigger_stock_diagnosis_summary(symbol: str) -> dict:
+    from worker.celery_app import celery_app
+
+    result = celery_app.send_task(
+        "market.stock_diagnosis_summary",
+        kwargs={"symbol": symbol},
+    )
+    return {
+        "symbol": symbol,
+        "task_id": result.id,
+        "status": "PENDING",
+    }

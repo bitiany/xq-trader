@@ -394,7 +394,9 @@ async def _compute_nl_size(
         resid[valid] = y_v - (alpha + beta * x_v)
         return pd.Series(resid, index=group.index)
 
-    df["nl_size"] = df.groupby(level="trade_date", group_keys=False).apply(_residualize)
+    # 截面回归取残差（用循环避免 pandas apply 在多列返回时的兼容性问题）
+    nl_size_parts = [_residualize(group) for _, group in df.groupby(level="trade_date")]
+    df["nl_size"] = pd.concat(nl_size_parts) if nl_size_parts else pd.Series(dtype=float)
 
     result = df[["nl_size"]].dropna(subset=["nl_size"])
     if result.empty:

@@ -788,8 +788,17 @@
       "diagnosis": "Diagnosis"
     },
     "news": {
-      "placeholder": "News feed integration coming soon",
-      "empty": "No news"
+      "empty": "No news",
+      "keywords": "Keywords",
+      "collect": "Collect latest news",
+      "collectSuccess": "Collection task queued. Refresh shortly.",
+      "expand": "Expand",
+      "collapse": "Collapse"
+    },
+    "announcements": {
+      "empty": "No announcements",
+      "type": "Type",
+      "collect": "Collect latest announcements"
     },
     "financials": {
       "income": "Income Statement",
@@ -820,9 +829,139 @@
       "currentRatio": "Current Ratio"
     },
     "diagnosis": {
-      "title": "AI Diagnosis",
-      "placeholder": "Smart stock diagnosis is coming soon",
-      "comingSoon": "Reserved for future release"
+      "title": "Diagnosis",
+      "empty": "No diagnosis data",
+      "overallScore": "Overall Score",
+      "beatPercentile": "Beats {{pct}}% of stocks",
+      "currentPeriod": "Current",
+      "prevPeriod": "Previous",
+      "deepAnalysis": "Deep Research",
+      "institutionalHold": "Institutional Holdings",
+      "institutionalHoldFund": "Fund holdings (% of float)",
+      "prevScore": "Prev {{score}}",
+      "scoreDeltaUp": "Up {{delta}} vs prev",
+      "scoreDeltaDown": "Down {{delta}} vs prev",
+      "industryRank": "Industry Rank",
+      "aiSummary": "Summary",
+      "summaryAgent": "AI Insight",
+      "summaryRule": "Rule-based",
+      "generateAiSummary": "Generate AI Summary",
+      "thesisCard": "Thesis",
+      "thesisValidUntil": "Valid until",
+      "cached": "Snapshot",
+      "scoreTrend": "Score Trend",
+      "trendEmpty": "No history yet",
+      "trendPending": "Trend updates after daily close; at least 2 snapshots needed",
+      "viewAllReports": "All Reports ({{count}})",
+      "allReports": "Diagnosis Reports ({{count}})",
+      "reportsEmpty": "No historical reports",
+      "reportDate": "Date",
+      "reportOrg": "Institution",
+      "reportRating": "Rating",
+      "reportTitle": "Title",
+      "dimensionDetail": "Dimension Detail",
+      "moduleDetail": "Module Detail",
+      "dimensionWeight": "Weight",
+      "moduleWeight": "Weight",
+      "moduleScore": "Score",
+      "scoreUnit": " pts",
+      "earningsReports": "Reports (180d)",
+      "earningsReportsEmpty": "No research reports",
+      "detail": {
+        "report_count": "Report count",
+        "reason": "Note",
+        "net_5d": "5D avg main flow %",
+        "net_10d": "10D avg main flow %",
+        "net_20d": "20D avg main flow %",
+        "amt_5d": "5D main net amount",
+        "amt_10d": "10D main net amount",
+        "latest_main_net_pct": "Latest main flow %",
+        "flow_trend": "Flow trend",
+        "news_count": "News (30d)",
+        "announcement_count": "Announcements (30d)",
+        "sentiment_score": "Sentiment score",
+        "pe_percentile": "PE percentile",
+        "pb_percentile": "PB percentile",
+        "industry_rank": "Industry PE rank",
+        "industry_total": "Industry total",
+        "hold_pct": "Institutional hold",
+        "hold_source": "Hold source",
+        "valuation_label": "Valuation label",
+        "pe_ttm": "PE (TTM)",
+        "factor_percentile": "Factor percentile"
+      },
+      "dimensions": {
+        "earnings": "Earnings",
+        "momentum": "Momentum",
+        "fundamental": "Fundamental",
+        "valuation": "Valuation",
+        "risk": "Risk"
+      },
+      "modules": {
+        "technical": "Technical",
+        "capital_flow": "Capital Flow",
+        "fundamental": "Fundamental",
+        "sentiment": "Sentiment",
+        "industry": "Industry",
+        "institutional": "Institutional"
+      },
+      "capitalFlow": {
+        "net5d": "5D",
+        "net10d": "10D",
+        "net20d": "20D",
+        "trend": "Trend",
+        "seriesTitle": "Main flow (last 20 sessions)",
+        "trendInflow": "Net inflow",
+        "trendOutflow": "Net outflow",
+        "trendBalanced": "Balanced"
+      },
+      "technical": {
+        "horizon": {
+          "short": "Short",
+          "mid": "Mid",
+          "long": "Long"
+        },
+        "indicator": "Indicator",
+        "signalLabel": "Signal",
+        "support": "Support",
+        "resistance": "Resistance",
+        "noSignals": "No technical signals",
+        "trend": {
+          "slightlyBullish": "Slightly bullish",
+          "slightlyBearish": "Slightly bearish",
+          "neutral": "Neutral",
+          "bullish": "Bullish",
+          "bearish": "Bearish",
+          "consolidation": "Range-bound",
+          "uptrend": "Uptrend",
+          "downtrend": "Downtrend"
+        },
+        "signalValues": {
+          "goldenCross": "Golden cross",
+          "deathCross": "Death cross",
+          "overbought": "Overbought",
+          "oversold": "Oversold"
+        }
+      },
+      "fundamental": {
+        "rings": {
+          "profit": "Profit",
+          "operation": "Operation",
+          "solvency": "Solvency",
+          "growth": "Growth",
+          "cashflow": "Cash Flow"
+        },
+        "ringDimension": "Dimension",
+        "periodTrend": "Recent 4 periods",
+        "highlights": {
+          "roe": "ROE",
+          "roa": "ROA",
+          "grossprofit_margin": "Gross margin",
+          "debt_to_assets": "Debt ratio",
+          "current_ratio": "Current ratio",
+          "end_date": "Report period"
+        }
+      }
     }
   },
   "errors": {

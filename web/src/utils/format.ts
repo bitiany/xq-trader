@@ -2,6 +2,19 @@
  * 通用格式化工具函数
  */
 
+import dayjs from 'dayjs'
+
+export function formatDateTime(value: string | null | undefined, pattern = 'YYYY-MM-DD HH:mm'): string {
+  if (!value) return '—'
+  const parsed = dayjs(value)
+  if (!parsed.isValid()) return value
+  return parsed.format(pattern)
+}
+
+export function formatDate(value: string | null | undefined): string {
+  return formatDateTime(value, 'YYYY-MM-DD')
+}
+
 export function formatMoney(value: number | null | undefined, decimals = 2): string {
   if (value == null || Number.isNaN(value)) {
     return '--'

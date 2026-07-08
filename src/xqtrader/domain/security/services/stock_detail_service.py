@@ -287,9 +287,13 @@ class StockDetailService(SecurityMixin):
         cash_flow = await CashFlowStatement.filter(
             symbol=symbol, update_flag="1", order_by=CashFlowStatement.end_date.desc(), limit=1,
         )
-        indicator = await FinancialIndicator.filter(
-            symbol=symbol, update_flag="1", order_by=FinancialIndicator.end_date.desc(), limit=1,
+        indicators = await FinancialIndicator.filter(
+            symbol=symbol, update_flag="1", order_by=FinancialIndicator.end_date.desc(), limit=4,
         )
+        indicator_fields = [
+            "eps", "roe", "roa", "grossprofit_margin", "netprofit_margin",
+            "debt_to_assets", "current_ratio", "ocfps",
+        ]
         return {
             "symbol": symbol,
             "income_statement": StockApiFormatter.report_summary(
@@ -305,17 +309,14 @@ class StockDetailService(SecurityMixin):
                 ["n_cashflow_act", "n_cashflow_inv_act", "n_cash_flows_fnc_act", "free_cashflow"],
             ),
             "financial_indicator": StockApiFormatter.report_summary(
-                indicator[0] if indicator else None,
-                ["eps", "roe", "roa", "grossprofit_margin", "netprofit_margin", "debt_to_assets", "current_ratio"],
+                indicators[0] if indicators else None,
+                indicator_fields,
             ),
-        }
-
-    async def get_diagnosis(self, symbol: str) -> dict[str, Any]:
-        overview = await self.get_overview(symbol)
-        return {
-            "symbol": symbol,
-            "available": True,
-            "message": self._diagnosis_message(overview["valuation"]),
+            "financial_indicator_history": [
+                StockApiFormatter.report_summary(row, indicator_fields)
+                for row in indicators
+                if StockApiFormatter.report_summary(row, indicator_fields) is not None
+            ],
         }
 
     async def get_news(self, symbol: str) -> dict[str, Any]:
@@ -324,7 +325,7 @@ class StockDetailService(SecurityMixin):
             symbol=symbol, news_type="news",
             order_by=StockNews.publish_time.desc(), limit=20,
         )
-        return {"symbol": symbol, "items": [self._news_item(r) for r in rows]}
+        return {"symbol": symbol, "total": len(rows), "items": [self._news_item(r) for r in rows]}
 
     async def get_announcements(self, symbol: str) -> dict[str, Any]:
         await self._ensure_security(symbol)
@@ -332,17 +333,18 @@ class StockDetailService(SecurityMixin):
             symbol=symbol, news_type="announcement",
             order_by=StockNews.publish_time.desc(), limit=20,
         )
-        return {"symbol": symbol, "items": [self._news_item(r) for r in rows]}
+        return {"symbol": symbol, "total": len(rows), "items": [self._news_item(r) for r in rows]}
 
     @staticmethod
     def _news_item(row: StockNews) -> dict[str, Any]:
         return {
+            "id": str(row.id),
             "title": row.title,
             "source": row.source,
             "url": row.news_url,
-            "publish_time": StockApiFormatter.value(row.publish_time),
+            "published_at": StockApiFormatter.value(row.publish_time),
+            "summary": row.content,
             "keywords": row.keywords or [],
-            "content": row.content,
         }
 
     def _quote_snapshot(self, symbol: str, candle: CandlestickDaily | None) -> dict[str, Any]:
@@ -377,11 +379,6 @@ class StockDetailService(SecurityMixin):
             "turnover_rate",
         ]
         return StockApiFormatter.model_highlights(indicator, fields)
-
-    def _diagnosis_message(self, valuation: dict[str, Any]) -> str:
-        pe_ttm = valuation.get("pe_ttm")
-        pb = valuation.get("pb")
-        return f"当前估值 PE(TTM)={pe_ttm or '--'}，PB={pb or '--'}，可结合趋势、资金与财务标签进一步分析。"
 
 
 class StockKlineService(SecurityMixin):
