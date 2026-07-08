@@ -784,8 +784,15 @@
     },
     "tabs": {
       "news": "News",
+      "fundFlow": "Fund flow",
+      "announcements": "Announcements",
       "financials": "Financials",
       "diagnosis": "Diagnosis"
+    },
+    "loadErrors": {
+      "overview": "Overview",
+      "diagnosis": "Diagnosis",
+      "diagnosisHistory": "Diagnosis history"
     },
     "news": {
       "empty": "No news",

@@ -1,4 +1,4 @@
-import { Button, Empty, Spin, Tag } from 'antd'
+import { Alert, Button, Empty, Spin, Tag } from 'antd'
 
 import { useMemo, useState, useCallback } from 'react'
 
@@ -48,11 +48,15 @@ interface StockDiagnosisPanelProps {
 
   historyLoading?: boolean
 
+  error?: string | null
+
   onDeepAnalysis?: () => void
 
   onRefresh?: () => void
 
   onSummaryRefresh?: () => void
+
+  onRetry?: () => void
 
 }
 
@@ -80,11 +84,15 @@ export function StockDiagnosisPanel({
 
   historyLoading,
 
+  error,
+
   onDeepAnalysis,
 
   onRefresh,
 
   onSummaryRefresh,
+
+  onRetry,
 
 }: StockDiagnosisPanelProps) {
 
@@ -145,6 +153,44 @@ export function StockDiagnosisPanel({
 
 
   if (!data) {
+
+    if (error) {
+
+      return (
+
+        <div className="stock-panel card stock-diagnosis">
+
+          <Alert
+
+            type="error"
+
+            showIcon
+
+            message={t('common.loadFailed')}
+
+            description={error}
+
+            action={
+
+              onRetry ? (
+
+                <Button size="small" onClick={onRetry}>
+
+                  {t('common.retry')}
+
+                </Button>
+
+              ) : undefined
+
+            }
+
+          />
+
+        </div>
+
+      )
+
+    }
 
     return (
 

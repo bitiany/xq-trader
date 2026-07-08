@@ -22,6 +22,17 @@
   align-items: center;
 }
 
+.stock-page__fallback-header {
+  padding: 16px 20px;
+}
+
+.stock-page__symbol {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
 .stock-header {
   display: grid;
   grid-template-columns: 1fr auto;

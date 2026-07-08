@@ -80,7 +80,7 @@ export function DiagnosisReportsDrawer({
       title={t('stock.diagnosis.allReports', { count: reportsCount })}
       open={open}
       onClose={onClose}
-      width={720}
+      size={720}
       destroyOnClose
     >
       {loading ? (

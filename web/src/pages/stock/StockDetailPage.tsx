@@ -28,6 +28,7 @@ import { StockKlineChart } from '@/components/stock/StockKlineChart'
 import { StockNewsPanel } from '@/components/stock/StockNewsPanel'
 import { StockQuoteHeader } from '@/components/stock/StockQuoteHeader'
 import { useRequest } from '@/hooks/useRequest'
+import { useRequestErrorToast } from '@/hooks/useRequestErrorToast'
 import { useStockKline } from '@/hooks/useStockKline'
 import { useStockQuote } from '@/hooks/useStockQuote'
 import { useAgentStore } from '@/stores/agentStore'
@@ -100,22 +101,38 @@ export function StockDetailPage() {
   const diagnosisRefreshRef = useRef(false)
   const [newsCollecting, setNewsCollecting] = useState(false)
 
-  const { data: fundFlow } = useRequest(() => fetchStockFundFlow(decodedSymbol, 1200), {
+  const { data: fundFlow, error: fundFlowError } = useRequest(() => fetchStockFundFlow(decodedSymbol, 1200), {
     deps: fundFlowDeps,
     immediate: activeTab === 'fundFlow' || subIndicator === 'fundflow',
   })
-  const { data: financials } = useRequest(() => fetchStockFinancials(decodedSymbol), { deps: financialsDeps, immediate: activeTab === 'financials' })
-  const { data: diagnosis, loading: diagnosisLoading, reload: reloadDiagnosis } = useRequest(
+  const { data: financials, error: financialsError } = useRequest(
+    () => fetchStockFinancials(decodedSymbol),
+    { deps: financialsDeps, immediate: activeTab === 'financials' },
+  )
+  const {
+    data: diagnosis,
+    loading: diagnosisLoading,
+    error: diagnosisError,
+    reload: reloadDiagnosis,
+  } = useRequest(
     () => fetchStockDiagnosis(decodedSymbol, diagnosisRefreshRef.current),
     { deps: diagnosisDeps, immediate: activeTab === 'diagnosis' },
   )
-  const { data: diagnosisHistory, loading: diagnosisHistoryLoading, reload: reloadDiagnosisHistory } = useRequest(
+  const {
+    data: diagnosisHistory,
+    loading: diagnosisHistoryLoading,
+    error: diagnosisHistoryError,
+    reload: reloadDiagnosisHistory,
+  } = useRequest(
     () => fetchStockDiagnosisHistory(decodedSymbol, 90),
     { deps: diagnosisDeps,
       immediate: activeTab === 'diagnosis' },
   )
-  const { data: news, reload: reloadNews } = useRequest(() => fetchStockNews(decodedSymbol), { deps: newsDeps, immediate: activeTab === 'news' })
-  const { data: announcements, reload: reloadAnnouncements } = useRequest(
+  const { data: news, reload: reloadNews, error: newsError } = useRequest(
+    () => fetchStockNews(decodedSymbol),
+    { deps: newsDeps, immediate: activeTab === 'news' },
+  )
+  const { data: announcements, reload: reloadAnnouncements, error: announcementsError } = useRequest(
     () => fetchStockAnnouncements(decodedSymbol),
     { deps: announcementsDeps,
       immediate: activeTab === 'announcements' },
@@ -160,7 +177,6 @@ export function StockDetailPage() {
     maOverlays,
     allOverlays,
     chanlun,
-    chanlunLoading,
     loading: klineLoading,
   } = useStockKline(decodedSymbol, mainIndicator, subIndicator)
 
@@ -210,7 +226,17 @@ export function StockDetailPage() {
     [t],
   )
 
-  const pageLoading = loading || klineLoading || chanlunLoading || !overviewReady
+  const hasOverview = overviewReady && stockOverview != null && displayQuote != null
+  const pageLoading = loading && !overview && !error
+  const showPageBody = !loading
+
+  useRequestErrorToast(error, t('stock.loadErrors.overview'))
+  useRequestErrorToast(diagnosisError, t('stock.loadErrors.diagnosis'))
+  useRequestErrorToast(diagnosisHistoryError, t('stock.loadErrors.diagnosisHistory'))
+  useRequestErrorToast(fundFlowError, t('stock.tabs.fundFlow'))
+  useRequestErrorToast(financialsError, t('stock.tabs.financials'))
+  useRequestErrorToast(newsError, t('stock.tabs.news'))
+  useRequestErrorToast(announcementsError, t('stock.tabs.announcements'))
 
   return (
     <div key={decodedSymbol} className="page stock-page">
@@ -252,14 +278,20 @@ export function StockDetailPage() {
         </div>
       </div>
 
-      <AsyncSection loading={pageLoading} error={error} onRetry={() => void reload()}>
-        {overviewReady && stockOverview && displayQuote ? (
+      <AsyncSection loading={pageLoading} onRetry={() => void reload()}>
+        {showPageBody ? (
           <>
-            <StockQuoteHeader
-              overview={stockOverview}
-              quote={displayQuote}
-              valuation={stockOverview.valuation}
-            />
+            {hasOverview ? (
+              <StockQuoteHeader
+                overview={stockOverview}
+                quote={displayQuote}
+                valuation={stockOverview.valuation}
+              />
+            ) : (
+              <div className="card stock-page__fallback-header">
+                <h2 className="stock-page__symbol">{decodedSymbol}</h2>
+              </div>
+            )}
 
             <div className="stock-page__main">
               <div className="stock-page__chart card">
@@ -279,7 +311,7 @@ export function StockDetailPage() {
                 />
               </div>
 
-              {stockOverview.introduction ? (
+              {hasOverview && stockOverview.introduction ? (
                 <div className="card stock-intro">
                   <div className="card__header">
                     <h3 className="card__title">{t('stock.intro.title')}</h3>
@@ -338,9 +370,11 @@ export function StockDetailPage() {
                       history={diagnosisHistory}
                       loading={diagnosisLoading}
                       historyLoading={diagnosisHistoryLoading}
+                      error={diagnosisError}
                       onDeepAnalysis={() => triggerAnalysis('full')}
                       onRefresh={handleDiagnosisRefresh}
                       onSummaryRefresh={() => void reloadDiagnosis()}
+                      onRetry={() => void reloadDiagnosis()}
                     />
                   ),
                 },

@@ -46,7 +46,7 @@ export function DiagnosisDimensionDrawer({
 
   if (!dimension) {
     return (
-      <Drawer open={open} onClose={onClose} title={t('stock.diagnosis.dimensionDetail')} width={560}>
+      <Drawer open={open} onClose={onClose} title={t('stock.diagnosis.dimensionDetail')} size={560}>
         <Empty />
       </Drawer>
     )
@@ -73,7 +73,7 @@ export function DiagnosisDimensionDrawer({
       open={open}
       onClose={onClose}
       title={`${dimension.label} · ${dimension.score != null ? dimension.score.toFixed(1) : '—'}分`}
-      width={640}
+      size={640}
       destroyOnClose
     >
       <Descriptions column={1} size="small" bordered>

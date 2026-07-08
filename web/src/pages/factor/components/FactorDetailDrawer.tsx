@@ -142,7 +142,7 @@ export function FactorDetailDrawer({ factorId, poolId, open, onClose }: FactorDe
     <Drawer
       title={factorId ?? ''}
       placement="right"
-      width={720}
+      size={720}
       open={open}
       onClose={onClose}
       destroyOnHidden

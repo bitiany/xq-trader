@@ -218,7 +218,7 @@ export function DiagnosisModuleDrawer({ open, module, onClose }: DiagnosisModule
 
   if (!module) {
     return (
-      <Drawer open={open} onClose={onClose} title={t('stock.diagnosis.moduleDetail')} width={560}>
+      <Drawer open={open} onClose={onClose} title={t('stock.diagnosis.moduleDetail')} size={560}>
         <Empty />
       </Drawer>
     )
@@ -257,7 +257,7 @@ export function DiagnosisModuleDrawer({ open, module, onClose }: DiagnosisModule
       open={open}
       onClose={onClose}
       title={`${module.label} · ${module.score != null ? module.score.toFixed(1) : '—'}${t('stock.diagnosis.scoreUnit')}`}
-      width={640}
+      size={640}
       destroyOnClose
     >
       <Descriptions column={1} size="small" bordered>

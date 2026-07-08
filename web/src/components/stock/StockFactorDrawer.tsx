@@ -322,7 +322,7 @@ export function StockFactorDrawer({ open, symbol, stockName, onClose }: StockFac
       title={`截面因子 — ${symbol}${stockName ? `（${stockName}）` : ''}`}
       open={open}
       onClose={onClose}
-      width="80%"
+      size="80%"
       styles={{ body: { padding: 16 } }}
     >
       {loading ? (
