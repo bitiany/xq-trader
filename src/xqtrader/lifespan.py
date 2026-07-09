@@ -6,8 +6,11 @@ from fastapi import FastAPI
 
 import xqtrader.domain.agent.models  # noqa: F401
 import xqtrader.domain.factor.models  # noqa: F401
+import xqtrader.domain.market.models.candlestick  # noqa: F401
 import xqtrader.domain.trading.models  # noqa: F401
 from framework.commons.logger import get_logger
+from framework.dal.enginee import engines_manager
+from xqtrader.domain.market.intraday.continuous_aggregate_setup import setup_continuous_aggregates
 from xqtrader.ws.scheduler import WsTopicScheduler
 
 logger = get_logger("LIFESPAN")
@@ -51,6 +54,14 @@ async def app_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
 
     register_default_on_demand_computes()
+
+    # 初始化分钟级数据的 Continuous Aggregate 与 retention policy
+    # （表和 hypertable 已由 DatasourceManager 在 datasource_lifespan 中创建）
+    try:
+        stock_engine = engines_manager.get_engine("stock")
+        await setup_continuous_aggregates(stock_engine)
+    except Exception as e:
+        logger.error("Continuous Aggregate 初始化失败: %s", e, exc_info=True)
 
     # 自动连接 QMT 交易服务
     await _auto_connect_qmt()

@@ -476,30 +476,71 @@ class DataService:
     # ── 私有方法 ──
 
     async def _query_table_stats(self) -> list[dict[str, Any]]:
-        """查询 PostgreSQL 系统表获取 stock schema 下的表统计信息。"""
+        """查询 stock schema 下用户表的行数与占用空间。
+
+        TimescaleDB hypertable 的父表 ``pg_class.reltuples`` /
+        ``pg_total_relation_size`` 不含 chunk（压缩后偏差更大），
+        因此对 hypertable 使用 ``approximate_row_count`` 与
+        ``hypertable_approximate_size``（扩展安装在 stock schema，
+        stock 引擎 search_path 已包含该 schema）。
+        """
         sql = text("""
+            WITH base AS (
+                SELECT
+                    n.nspname AS schema_name,
+                    c.relname AS table_name,
+                    COALESCE(NULLIF(c.reltuples, -1)::bigint, 0) AS reltuples,
+                    COALESCE(pg_total_relation_size(c.oid), 0) AS pg_total_bytes,
+                    EXISTS (
+                        SELECT 1
+                        FROM timescaledb_information.hypertables h
+                        WHERE h.hypertable_schema = n.nspname
+                          AND h.hypertable_name = c.relname
+                    ) AS is_hypertable
+                FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE n.nspname = 'stock'
+                  AND c.relkind = 'r'
+                  AND c.relname NOT LIKE '\\_hyper\\_%' ESCAPE '\\'
+                  AND c.relname NOT LIKE '\\_compressed\\_%' ESCAPE '\\'
+            ),
+            sized AS (
+                SELECT
+                    schema_name,
+                    table_name,
+                    CASE
+                        WHEN is_hypertable THEN COALESCE(
+                            approximate_row_count(
+                                format('%I.%I', schema_name, table_name)::regclass
+                            ),
+                            0
+                        )::bigint
+                        ELSE reltuples
+                    END AS approx_rows,
+                    CASE
+                        WHEN is_hypertable THEN COALESCE(
+                            hypertable_approximate_size(
+                                format('%I.%I', schema_name, table_name)::regclass
+                            ),
+                            0
+                        )
+                        ELSE pg_total_bytes
+                    END AS total_bytes
+                FROM base
+            )
             SELECT
-                n.nspname AS schema_name,
-                c.relname AS table_name,
-                COALESCE(c.reltuples::bigint, 0) AS approx_rows,
-                pg_size_pretty(pg_total_relation_size(c.oid)) AS total_size,
-                COALESCE(pg_total_relation_size(c.oid), 0) AS total_bytes
-            FROM pg_class c
-            JOIN pg_namespace n ON n.oid = c.relnamespace
-            WHERE n.nspname = 'stock'
-                AND c.relkind = 'r'
-                AND NOT c.relname LIKE '_hyper_%'
-                AND NOT c.relname LIKE '_compressed_%'
+                schema_name,
+                table_name,
+                approx_rows,
+                pg_size_pretty(total_bytes) AS total_size,
+                total_bytes
+            FROM sized
             ORDER BY total_bytes DESC
         """)
-        try:
-            engine = engines_manager.get_engine("default")
-            async with engine.begin() as conn:
-                result = await conn.execute(sql)
-                return [dict(row._mapping) for row in result.fetchall()]
-        except Exception:
-            logger.error("查询表统计信息失败", exc_info=True)
-            return []
+        engine = engines_manager.get_engine("stock")
+        async with engine.begin() as conn:
+            result = await conn.execute(sql)
+            return [dict(row._mapping) for row in result.fetchall()]
 
     async def _check_worker_available(self) -> bool:
         """检查 Celery Worker 是否在线。"""
