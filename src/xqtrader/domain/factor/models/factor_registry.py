@@ -20,7 +20,10 @@ class FacFactorRegistry(AuditedBase):
     category: Mapped[str] = mapped_column(String(32), nullable=False, comment="因子分类")
     group_id: Mapped[str] = mapped_column(String(32), nullable=True, default="", comment="组合因子组ID")
     direction: Mapped[str] = mapped_column(String(8), nullable=True, default="DESC", comment="因子方向 DESC/ASC")
-    scope: Mapped[str] = mapped_column(String(16), nullable=True, default="both", comment="适用范围 long/short/both")
+    usage: Mapped[str] = mapped_column(
+        String(16), nullable=True, default="both",
+        comment="适用场景 cross_section/time_series/both",
+    )
     signal_type: Mapped[str] = mapped_column(String(16), nullable=True, default="continuous", comment="信号类型")
     base_factor: Mapped[str] = mapped_column(String(32), nullable=True, default="", comment="基础因子")
     dependencies: Mapped[str] = mapped_column(String(256), nullable=True, default="", comment="依赖列，逗号分隔")
@@ -47,7 +50,18 @@ class FacFactorRegistry(AuditedBase):
     composite_factor_ids: Mapped[str] = mapped_column(
         Text, nullable=True, default="", comment="组合因子子ID，逗号分隔",
     )
-    skip_preprocess: Mapped[int] = mapped_column(Integer, nullable=True, default=0, comment="是否跳过预处理 0/1")
+    compute_mode: Mapped[str] = mapped_column(
+        String(16), nullable=True, default="precomputed",
+        comment="计算模式 precomputed（预计算落库）/ on_demand（消费时实时计算）",
+    )
+    density: Mapped[str] = mapped_column(
+        String(16), nullable=True, default="dense",
+        comment="时间稠密度 dense（日频稠密）/ sparse（事件稀疏）/ discrete（离散信号）",
+    )
+    preprocess_policy: Mapped[str] = mapped_column(
+        String(32), nullable=True, default="cross_section_standard",
+        comment="截面消费预处理策略 cross_section_standard/raw",
+    )
     composite_method: Mapped[str] = mapped_column(
         String(32), nullable=True, default="",
         comment="合成方法: equal_weight/icir_weight/ml/interaction",

@@ -16,14 +16,21 @@ import pandas as pd
 
 @dataclass
 class FactorDefinition:
-    """因子元数据声明 — 代码为唯一真相源，启动时同步到 fac_factor_registry。"""
+    """因子元数据声明 — 代码为唯一真相源，启动时同步到 fac_factor_registry。
+
+    正交维度（见 docs/factor-system-design.md §3.3）：
+      - compute_mode: precomputed（预计算落库）/ on_demand（消费时实时计算）
+      - density: dense（日频稠密）/ sparse（事件稀疏）/ discrete（离散信号）
+      - usage: cross_section（截面选股）/ time_series（时序回测）/ both
+      - preprocess_policy: cross_section_standard（截面标准化）/ raw（不预处理）
+    """
 
     factor_id: str
     display_name: str
     category: str
     group_id: str = ""
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     base_factor: str = ""
     dependencies: list[str] = field(default_factory=list)
@@ -42,7 +49,9 @@ class FactorDefinition:
     is_composite: bool = False
     composite_factor_ids: list[str] = field(default_factory=list)
     child_display_names: dict[str, str] = field(default_factory=dict)
-    skip_preprocess: bool = False
+    compute_mode: str = "precomputed"
+    density: str = "dense"
+    preprocess_policy: str = "cross_section_standard"
     composite_method: str = ""
 
 
@@ -64,7 +73,7 @@ class FactorPlugin(ABC):
     category: str = ""
     group_id: str = ""
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     base_factor: str = ""
     dependencies: list[str] = ["close"]
@@ -74,7 +83,9 @@ class FactorPlugin(ABC):
     is_composite: bool = False
     composite_factor_ids: list[str] = []
     child_display_names: dict[str, str] = {}
-    skip_preprocess: bool = False
+    compute_mode: str = "precomputed"
+    density: str = "dense"
+    preprocess_policy: str = "cross_section_standard"
     composite_method: str = ""
     data_origin: str = "computed"
     data_start_date: date | None = None
@@ -102,7 +113,7 @@ class FactorPlugin(ABC):
             category=self.category,
             group_id=self.group_id,
             direction=self.direction,
-            scope=self.scope,
+            usage=self.usage,
             signal_type=self.signal_type,
             base_factor=self.base_factor,
             dependencies=list(self.dependencies),
@@ -119,6 +130,8 @@ class FactorPlugin(ABC):
             is_composite=self.is_composite,
             composite_factor_ids=list(self.composite_factor_ids),
             child_display_names=dict(self.child_display_names),
-            skip_preprocess=self.skip_preprocess,
+            compute_mode=self.compute_mode,
+            density=self.density,
+            preprocess_policy=self.preprocess_policy,
             composite_method=self.composite_method,
         )
