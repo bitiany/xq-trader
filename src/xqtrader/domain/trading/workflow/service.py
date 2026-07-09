@@ -7,11 +7,14 @@ from decimal import Decimal
 from math import floor, fsum
 from typing import Any
 
+import pandas as pd
+
 from framework.commons.exceptions import WorkflowConfigError
 from framework.commons.logger import get_logger
 from framework.commons.time_util import now_shanghai
 from framework.dal.transaction.transactional import transactional
 from xqtrader.domain.factor.models.factor_value import FacFactorValue
+from xqtrader.domain.factor.services.on_demand_compute_registry import get_registry
 from xqtrader.domain.market.models.candlestick import CandlestickDaily
 from xqtrader.domain.trading.backtest.core import RuleContext
 from xqtrader.domain.trading.backtest.engine import SignalEngine
@@ -200,16 +203,33 @@ class WatchlistDecisionWorkflowService:
         strategy_id = str(target["strategy_id"])
         signal_date = self._parse_date(context["signal_date"])
         strategy_config = await StrategyConfigLoader.load(strategy_id)
+        all_factor_ids = strategy_config.get_all_factor_ids()
+        # 因子分流：on_demand 因子由注册表实时计算（chan_*/td_seq_*/donchian_* 等，
+        # §5.4 白名单），DB 因子从 FacFactorValue 加载。
+        registry = get_registry()
+        on_demand_factor_ids = sorted({
+            fid for fid in all_factor_ids if registry.is_on_demand_factor(fid)
+        })
+        db_factor_ids = [fid for fid in all_factor_ids if fid not in on_demand_factor_ids]
         factor_values = await self._load_factor_values(
             symbol=symbol,
             signal_date=signal_date,
             pool_id=str(target.get("pool_id") or "all"),
-            factor_ids=strategy_config.get_all_factor_ids(),
+            factor_ids=db_factor_ids,
             prev_factor_ids=strategy_config.get_all_prev_factor_ids(),
             lookback_days=lookback_days,
         )
         market_data = await self._load_entry_quote(symbol, signal_date)
         factor_values = factor_values | self._build_market_factor_values(market_data.get("bars", []))
+        # on_demand 因子经 OnDemandComputeRegistry 实时计算（与 BacktestService 保持一致）
+        if on_demand_factor_ids:
+            on_demand_values = await self._compute_on_demand_factors(
+                symbol=symbol,
+                signal_date=signal_date,
+                factor_ids=on_demand_factor_ids,
+                lookback_days=lookback_days,
+            )
+            factor_values = factor_values | on_demand_values
         result = SignalEngine(strategy_config).execute(RuleContext(
             symbol=symbol,
             signal_date=signal_date,
@@ -872,6 +892,57 @@ class WatchlistDecisionWorkflowService:
             "donchian_high_20": max(highs) if highs else None,
             "donchian_low_10": min(lows) if lows else None,
         }
+
+    async def _compute_on_demand_factors(
+        self,
+        symbol: str,
+        signal_date: date,
+        factor_ids: list[str],
+        lookback_days: int,
+    ) -> dict[str, float | None]:
+        """经 OnDemandComputeRegistry 实时计算 on_demand 因子（signal_date 当天的值）。
+
+        与 BacktestService._load_data 保持一致：加载 OHLCV -> compute_factors ->
+        取目标日期的因子值。预热期使用 lookback_days*2 日历日（约 lookback_days 个交易日），
+        与 BacktestService 的 warmup_days*2 算法对齐，确保 EMA 类指标结果一致。
+        """
+        registry = get_registry()
+        if not factor_ids or not registry.list_on_demand_factors():
+            return {fid: None for fid in factor_ids}
+        warmup_start = signal_date - timedelta(days=lookback_days * 2)
+        bars = await CandlestickDaily.filter(
+            symbol=symbol,
+            trade_date__gte=warmup_start,
+            trade_date__lte=signal_date,
+            limit=None,
+            order_by=CandlestickDaily.trade_date.asc(),
+        )
+        if not bars:
+            return {fid: None for fid in factor_ids}
+        ohlcv_df = pd.DataFrame([
+            {
+                "trade_date": pd.Timestamp(b.trade_date),
+                "open": float(b.open),
+                "high": float(b.high),
+                "low": float(b.low),
+                "close": float(b.close),
+                "volume": int(b.volume),
+            }
+            for b in bars
+        ]).set_index("trade_date")
+        computed = registry.compute_factors(ohlcv_df, sorted(factor_ids))
+        signal_ts = pd.Timestamp(signal_date)
+        result: dict[str, float | None] = {}
+        for fid in factor_ids:
+            if fid not in computed.columns or signal_ts not in computed.index:
+                result[fid] = None
+                continue
+            val = computed.loc[signal_ts, fid]
+            if val is None or pd.isna(val):
+                result[fid] = None
+            else:
+                result[fid] = float(val)  # type: ignore[arg-type]
+        return result
 
     async def _load_factor_values(
         self,

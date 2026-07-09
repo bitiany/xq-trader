@@ -59,6 +59,13 @@ class SimulatedMatchingService:
         if account.account_type != AccountType.PAPER:
             raise BusinessException(message=f"模拟提交仅支持模拟盘账户: {account.id}")
         pre_order = await PreOrder.get(order.pre_order_id) if order.pre_order_id is not None else None
+        # T+1 结算：在检查卖出可用持仓前，将历史持仓的 available_qty 结算为 qty。
+        # 买入当日 available_qty 不变（T+1 规则），次日及以后结算为可用。
+        # 此处按订单 execution_date 结算，确保跨日持仓可正常卖出。
+        execution_date = order.execution_date
+        if execution_date is not None:
+            positions = await self._load_latest_account_positions(account.id)
+            await self._settle_t_plus_one(positions, execution_date)
         fill_context = await self._build_simulated_fill_context(order, account, pre_order)
         broker_order_id = f"SIM-{order.platform_order_id}"
         await self._execution_service.mark_submitted(
@@ -350,6 +357,31 @@ class SimulatedMatchingService:
             order_by=AccountSnapshot.snapshot_date.desc(),
         )
         return prev_snapshots[0] if prev_snapshots else None
+
+    @staticmethod
+    async def _settle_t_plus_one(
+        positions: list[PositionSnapshot],
+        snapshot_date: date,
+    ) -> None:
+        """T+1 结算：将历史持仓（snapshot_date < 当前 snapshot_date）的 available_qty 更新为 qty。
+
+        A 股 T+1 规则：买入当日 available_qty 不变，次日开盘后结算为可用。
+        若持仓的 snapshot_date 早于当前 snapshot_date，说明已过 T+1，应结算为可用。
+        使用 update_by 单条 SQL 批量更新，避免循环逐条 update（dal-orm skill 反模式）。
+        """
+        settle_ids = [
+            p.id for p in positions
+            if p.id is not None
+            and int(p.qty) > 0
+            and p.snapshot_date < snapshot_date
+            and int(p.available_qty) != int(p.qty)
+        ]
+        if not settle_ids:
+            return
+        await PositionSnapshot.update_by(
+            {"available_qty": PositionSnapshot.qty},
+            id__in=settle_ids,
+        )
 
     @staticmethod
     async def _load_latest_account_positions(account_id: int) -> list[PositionSnapshot]:
