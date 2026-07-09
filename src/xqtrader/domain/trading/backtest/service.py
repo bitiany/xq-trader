@@ -11,11 +11,9 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import date, datetime, timedelta
-from typing import Any, cast
+from typing import Any
 
-import numpy as np
 import pandas as pd
-import talib as ta
 
 from framework.dal.transaction.transactional import transactional
 from xqtrader.domain.factor.models.factor_registry import FacFactorRegistry
@@ -24,14 +22,15 @@ from xqtrader.domain.factor.services.factor_data_loader import (
     load_financial_composite_panel,
     load_financial_pit_panel,
 )
+from xqtrader.domain.factor.services.on_demand_compute_registry import get_registry
 from xqtrader.domain.market.models.candlestick import CandlestickDaily
 
 from ..backtest.core import StrategyConfig
-from ..backtest.plugins.chanlun_signal import compute_chanlun_signals
 from ..backtest.runner import run_backtest
 from ..enums import BacktestRunStatus
 from ..loaders import StrategyConfigLoader
 from ..models.backtest import BacktestResult, BacktestRun
+from .on_demand_registration import register_default_on_demand_computes
 
 logger = logging.getLogger(__name__)
 
@@ -168,14 +167,23 @@ class BacktestService:
 
         合并为一个 DataFrame，列名小写。
 
-        内置技术因子（MACD/RSI 等）需要预热数据，因此加载时向前扩展 120 个交易日，
-        计算指标后再截取到目标日期范围。
+        on_demand 因子（macd/ma/boll/缠论/九转等因子库无 precomputed 版本的战术指标）
+        由 OnDemandComputeRegistry 实时计算（§19.3），需要预热数据，因此加载时向前
+        扩展 120 个交易日，计算指标后再截取到目标日期范围。
         """
         factor_ids = strategy_config.get_all_factor_ids()
-        builtin_factor_ids = BacktestService._get_builtin_factor_ids(factor_ids)
 
-        # 需要预热时，向前扩展 120 个交易日（约 6 个月）
-        warmup_days = 120 if builtin_factor_ids else 0
+        # 确保注册表已初始化（API lifespan 或 worker 首次执行时幂等注册）
+        register_default_on_demand_computes()
+        registry = get_registry()
+
+        # 区分 on_demand 因子（注册表实时计算）和 DB 因子（从因子库加载）
+        # 因子库已有的 precomputed 因子（rsi_14/bias_6/mom_5d/kdj_k/adx_14/boll_width 等）
+        # 不在 on_demand 注册表中，自动走 DB 加载路径（§5.4：禁止重复实现 precomputed 因子）
+        on_demand_factor_ids = {fid for fid in factor_ids if registry.is_on_demand_factor(fid)}
+
+        # on_demand 因子需要预热（talib 指标需要历史数据），向前扩展 120 个交易日
+        warmup_days = 120 if on_demand_factor_ids else 0
         warmup_start = start_date - timedelta(days=warmup_days * 2)  # 日历日约为交易日 2 倍
 
         # OHLCV — 含预热期
@@ -200,10 +208,10 @@ class BacktestService:
             for c in candles
         ])
 
-        # 因子分流加载：内置因子 / 日频因子 / 季频因子 / 季频合成因子
-        # 内置技术因子由 _add_builtin_technical_factors 计算，
-        # 此处仅加载非内置因子，避免 merge 时列名冲突产生 _x/_y 后缀
-        db_factor_ids = [fid for fid in factor_ids if fid not in builtin_factor_ids]
+        # 因子分流加载：on_demand 因子（注册表实时计算）/ DB 因子（从因子库加载）
+        # on_demand 因子由 OnDemandComputeRegistry 统一计算（§5.4：禁止重复实现 precomputed 因子）
+        # 此处仅加载 DB 因子，避免 merge 时列名冲突产生 _x/_y 后缀
+        db_factor_ids = [fid for fid in factor_ids if fid not in on_demand_factor_ids]
         if db_factor_ids:
             # 查询因子注册表，按 update_freq 分流
             regs = await FacFactorRegistry.filter(factor_id__in=db_factor_ids)
@@ -291,8 +299,14 @@ class BacktestService:
             if fid not in df.columns:
                 df[fid] = float("nan")
 
-        # 内置技术因子在 DB 因子之后计算，确保覆盖缺失或为 0 的值
-        BacktestService._add_builtin_technical_factors(df, factor_ids)
+        # on_demand 因子统一经 OnDemandComputeRegistry 计算
+        # （§5.4：禁止对 fac_factor_registry 中已存在的 precomputed 因子在业务层重复实现；
+        #  §19.3：BacktestService 统一经 OnDemandComputeRegistry 加载战术指标）
+        if on_demand_factor_ids:
+            requested = sorted(on_demand_factor_ids)
+            computed = registry.compute_factors(df, requested)
+            for col in computed.columns:
+                df[col] = computed[col].values
 
         # 截取到目标日期范围（丢弃预热期数据）
         start_ts = pd.Timestamp(start_date)
@@ -300,311 +314,26 @@ class BacktestService:
         df = df[(df["trade_date"] >= start_ts) & (df["trade_date"] <= end_ts)].reset_index(drop=True)
 
         # 因子数据覆盖率诊断 — 覆盖率过低的因子会导致信号稀疏
-        BacktestService._log_factor_coverage(df, factor_ids, builtin_factor_ids, symbol)
+        BacktestService._log_factor_coverage(df, factor_ids, on_demand_factor_ids, symbol)
 
         return df
-
-    @staticmethod
-    def _get_builtin_factor_ids(factor_ids: list[str]) -> set[str]:
-        """返回由 _add_builtin_technical_factors 计算的因子 ID 集合。"""
-        builtin = set()
-        macd_related = {"macd", "signal", "hist", "hist_slope", "hist_area"}
-        if set(factor_ids).intersection(macd_related):
-            builtin.update(macd_related)
-        if "rsi" in factor_ids:
-            builtin.add("rsi")
-        if "bias" in factor_ids:
-            builtin.add("bias")
-        if "mon_5d" in factor_ids:
-            builtin.add("mon_5d")
-        # 缠论信号 — 基于 OHLCV 实时计算，不依赖 DB 因子库
-        chan_related = {"chan_buy_point", "chan_sell_point", "chan_bi_direction"}
-        if set(factor_ids).intersection(chan_related):
-            builtin.update(chan_related)
-        # KDJ 指标
-        kdj_related = {"kdj_k", "kdj_d", "kdj_j"}
-        if set(factor_ids).intersection(kdj_related):
-            builtin.update(kdj_related)
-        # 布林带
-        boll_related = {"boll_upper", "boll_middle", "boll_lower", "boll_width"}
-        if set(factor_ids).intersection(boll_related):
-            builtin.update(boll_related)
-        # 均线
-        ma_related = {"ma_short", "ma_long"}
-        if set(factor_ids).intersection(ma_related):
-            builtin.update(ma_related)
-        # 量价因子
-        vol_related = {"vol_ma_20", "vol_ratio"}
-        if set(factor_ids).intersection(vol_related):
-            builtin.update(vol_related)
-        # ADX 趋势强度（含 +DI / -DI 用于方向判断）
-        adx_related = {"adx", "adx_plus_di", "adx_minus_di"}
-        if set(factor_ids).intersection(adx_related):
-            builtin.update(adx_related)
-        # ATR 波动率
-        if "atr" in factor_ids:
-            builtin.add("atr")
-        # 动量因子（已有 mon_5d，新增 mon_10d/mon_20d）
-        mon_related = {"mon_5d", "mon_10d", "mon_20d"}
-        if set(factor_ids).intersection(mon_related):
-            builtin.update(mon_related)
-        # 神奇九转 TD Sequential
-        td_related = {"td_seq_buy", "td_seq_sell", "td_seq_count"}
-        if set(factor_ids).intersection(td_related):
-            builtin.update(td_related)
-        # close 也作为内置因子（从 OHLCV 直接获取）
-        if "close" in factor_ids:
-            builtin.add("close")
-        return builtin
-
-    @staticmethod
-    def _add_builtin_technical_factors(df: pd.DataFrame, factor_ids: list[str]) -> None:
-        """按需计算轻量回测内置技术因子。
-
-        因子库数据 + 按需实时计算结合：
-          - MACD/RSI/BIAS/KDJ/布林带/均线等技术指标由 talib/pandas 实时计算
-          - 缠论信号由 chanpy 实时计算笔/中枢/背驰
-          - 资金流/动量等因子从 DB 加载
-        """
-        required = set(factor_ids)
-        close = df["close"].astype(float)
-        close_values = cast(
-            np.ndarray[tuple[Any, ...], np.dtype[np.float64]],
-            close.to_numpy(dtype=np.float64),
-        )
-        high_values = cast(
-            np.ndarray[tuple[Any, ...], np.dtype[np.float64]],
-            df["high"].astype(float).to_numpy(dtype=np.float64),
-        )
-        low_values = cast(
-            np.ndarray[tuple[Any, ...], np.dtype[np.float64]],
-            df["low"].astype(float).to_numpy(dtype=np.float64),
-        )
-
-        if required.intersection({"macd", "signal", "hist", "hist_slope", "hist_area"}):
-            macd, signal, hist = ta.MACD(close_values, fastperiod=12, slowperiod=26, signalperiod=9)
-            df["macd"] = macd
-            df["signal"] = signal
-            df["hist"] = hist * 2  # 国内主流机构实现：hist = 2 * (MACD - Signal)
-            df["hist_slope"] = df["hist"] - df["hist"].shift(5)
-            df["hist_area"] = df["hist"].rolling(5).apply(
-                BacktestService._calc_hist_area,
-                raw=False,
-            )
-
-        if "rsi" in required:
-            df["rsi"] = ta.RSI(close_values, timeperiod=14)
-
-        if "bias" in required:
-            ma6 = close.rolling(6).mean()
-            df["bias"] = (close - ma6) / ma6 * 100
-
-        if "mon_5d" in required:
-            df["mon_5d"] = close / close.shift(5) - 1
-
-        # 10日/20日动量
-        if "mon_10d" in required:
-            df["mon_10d"] = close / close.shift(10) - 1
-        if "mon_20d" in required:
-            df["mon_20d"] = close / close.shift(20) - 1
-
-        # KDJ 指标 — 国内主流实现：RSV -> K -> D -> J
-        kdj_related = {"kdj_k", "kdj_d", "kdj_j"}
-        if required.intersection(kdj_related):
-            kdj_k, kdj_d = BacktestService._calc_kdj(high_values, low_values, close_values)
-            df["kdj_k"] = kdj_k
-            df["kdj_d"] = kdj_d
-            df["kdj_j"] = 3 * kdj_k - 2 * kdj_d
-
-        # 布林带 — middle=SMA20, upper/lower=middle±2*std
-        boll_related = {"boll_upper", "boll_middle", "boll_lower", "boll_width"}
-        if required.intersection(boll_related):
-            boll_middle = close.rolling(20).mean()
-            boll_std = close.rolling(20).std()
-            df["boll_middle"] = boll_middle
-            df["boll_upper"] = boll_middle + 2 * boll_std
-            df["boll_lower"] = boll_middle - 2 * boll_std
-            # 布林带宽度（归一化）
-            df["boll_width"] = (df["boll_upper"] - df["boll_lower"]) / boll_middle
-
-        # 均线 — ma_short=MA5, ma_long=MA20
-        ma_related = {"ma_short", "ma_long"}
-        if required.intersection(ma_related):
-            df["ma_short"] = close.rolling(5).mean()
-            df["ma_long"] = close.rolling(20).mean()
-
-        # 成交量均线 — 用于量价突破判断
-        if "vol_ma_20" in required:
-            df["vol_ma_20"] = df["volume"].astype(float).rolling(20).mean()
-
-        # 量比 — 当日成交量 / 5日平均成交量（衡量成交活跃度）
-        if "vol_ratio" in required:
-            vol_ma5 = df["volume"].astype(float).rolling(5).mean()
-            df["vol_ratio"] = df["volume"].astype(float) / vol_ma5.replace(0, np.nan)
-
-        # ADX 趋势强度（DI+/DI-/ADX） — 衡量趋势强度，不区分方向
-        adx_related = {"adx", "adx_plus_di", "adx_minus_di"}
-        if required.intersection(adx_related):
-            adx_vals = ta.ADX(high_values, low_values, close_values, timeperiod=14)
-            plus_di = ta.PLUS_DI(high_values, low_values, close_values, timeperiod=14)
-            minus_di = ta.MINUS_DI(high_values, low_values, close_values, timeperiod=14)
-            df["adx"] = adx_vals
-            df["adx_plus_di"] = plus_di
-            df["adx_minus_di"] = minus_di
-
-        # ATR 波动率 — 用于止损止盈与突破强度判断
-        if "atr" in required:
-            df["atr"] = ta.ATR(high_values, low_values, close_values, timeperiod=14)
-
-        # 神奇九转 TD Sequential — 经典反转信号
-        # Setup: 连续9个 close < close.shift(4) → 买入信号
-        #        连续9个 close > close.shift(4) → 卖出信号
-        td_related = {"td_seq_buy", "td_seq_sell", "td_seq_count"}
-        if required.intersection(td_related):
-            BacktestService._calc_td_sequential(df)
-
-        # 缠论买卖点信号 — 基于 OHLCV 实时计算笔/中枢/背驰
-        # 缠论不作为截面因子入库，回测时直接由 chanpy 实时计算
-        chan_factor_ids = {"chan_buy_point", "chan_sell_point", "chan_bi_direction"}
-        if required.intersection(chan_factor_ids):
-            chan_signals = compute_chanlun_signals(df)
-            for col in chan_signals.columns:
-                df[col] = chan_signals[col].values
-
-    @staticmethod
-    def _calc_td_sequential(df: pd.DataFrame) -> None:
-        """计算神奇九转 TD Sequential 指标
-
-        TD Setup 经典规则:
-          买入信号: 连续 9 个交易日收盘价 < 4 日前收盘价（下跌动能衰竭）
-          卖出信号: 连续 9 个交易日收盘价 > 4 日前收盘价（上涨动能衰竭）
-
-        计数中断条件:
-          - 连续计数中断后归零，重新开始
-          - 第 9 根 K 线确认后产生信号
-
-        输出列:
-          td_seq_buy: 1.0=买入信号触发, 0.0=否
-          td_seq_sell: 1.0=卖出信号触发, 0.0=否
-          td_seq_count: 正数=上涨计数(卖出预警), 负数=下跌计数(买入预警)
-        """
-        n = len(df)
-        close = df["close"].astype(float)
-        buy_signal = np.zeros(n)
-        sell_signal = np.zeros(n)
-        td_count = np.zeros(n)
-
-        if n < 9:
-            df["td_seq_buy"] = buy_signal
-            df["td_seq_sell"] = sell_signal
-            df["td_seq_count"] = td_count
-            return
-
-        # close.shift(4) — 4 日前收盘价
-        close_prev4 = close.shift(4)
-
-        up_count = 0   # 连续 close > close.shift(4) 的天数（卖出预警）
-        down_count = 0  # 连续 close < close.shift(4) 的天数（买入预警）
-
-        for i in range(4, n):
-            curr = close.iloc[i]
-            prev4 = close_prev4.iloc[i]
-            if pd.isna(curr) or pd.isna(prev4):
-                td_count[i] = up_count if up_count > 0 else -down_count
-                continue
-
-            if curr > prev4:
-                up_count += 1
-                down_count = 0
-            elif curr < prev4:
-                down_count += 1
-                up_count = 0
-            else:
-                # 相等不计数，重置
-                up_count = 0
-                down_count = 0
-
-            # 第 9 根确认信号
-            if up_count == 9:
-                sell_signal[i] = 1.0
-                # 信号触发后重置计数（避免重复触发）
-                up_count = 0
-            if down_count == 9:
-                buy_signal[i] = 1.0
-                down_count = 0
-
-            td_count[i] = up_count if up_count > 0 else -down_count
-
-        df["td_seq_buy"] = buy_signal
-        df["td_seq_sell"] = sell_signal
-        df["td_seq_count"] = td_count
-
-    @staticmethod
-    def _calc_kdj(
-        high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int = 9,
-    ) -> tuple[np.ndarray, np.ndarray]:
-        """计算 KDJ 指标的 K 和 D 值
-
-        国内主流实现:
-          RSV = (close - lowest_low_n) / (highest_high_n - lowest_low_n) * 100
-          K = 前K * 2/3 + RSV * 1/3
-          D = 前D * 2/3 + K * 1/3
-
-        Args:
-            high: 最高价数组
-            low: 最低价数组
-            close: 收盘价数组
-            period: RSV 计算周期（默认9日）
-
-        Returns:
-            (K, D) 数组
-        """
-        n = len(close)
-        k = np.full(n, np.nan)
-        d = np.full(n, np.nan)
-        if n < period:
-            return k, d
-
-        # 滚动计算最高价和最低价
-        for i in range(period - 1, n):
-            highest = np.max(high[i - period + 1:i + 1])
-            lowest = np.min(low[i - period + 1:i + 1])
-            if highest == lowest:
-                rsv = 50.0
-            else:
-                rsv = (close[i] - lowest) / (highest - lowest) * 100
-
-            if i == period - 1:
-                k[i] = 50 * 2 / 3 + rsv * 1 / 3
-                d[i] = 50 * 2 / 3 + k[i] * 1 / 3
-            else:
-                k[i] = k[i - 1] * 2 / 3 + rsv * 1 / 3
-                d[i] = d[i - 1] * 2 / 3 + k[i] * 1 / 3
-
-        return k, d
-
-    @staticmethod
-    def _calc_hist_area(window: pd.Series) -> float:
-        pos = window[window > 0].sum()
-        neg = window[window < 0].sum()
-        return float(pos if window.iloc[-1] > 0 else neg)
 
     @staticmethod
     def _log_factor_coverage(
         df: pd.DataFrame,
         factor_ids: list[str],
-        builtin_factor_ids: set[str],
+        on_demand_factor_ids: set[str],
         symbol: str,
     ) -> None:
         """诊断因子数据覆盖率 — 覆盖率过低的因子会导致信号稀疏。
 
-        内置技术因子（MACD/RSI 等）由 _add_builtin_technical_factors 计算，
-        覆盖率取决于 K 线数据，不需要诊断。仅诊断 DB 加载的因子。
+        on_demand 因子（MACD/RSI/缠论 等）由 OnDemandComputeRegistry 实时计算，
+        覆盖率取决于 K 线数据，不需要诊断。仅诊断 DB 加载的 precomputed 因子。
         """
         total_rows = len(df)
         if total_rows == 0:
             return
-        db_factor_ids = [fid for fid in factor_ids if fid not in builtin_factor_ids]
+        db_factor_ids = [fid for fid in factor_ids if fid not in on_demand_factor_ids]
         low_coverage: list[str] = []
         for fid in db_factor_ids:
             if fid not in df.columns:

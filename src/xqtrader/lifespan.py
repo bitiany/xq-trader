@@ -44,6 +44,14 @@ async def app_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("应用启动中...")
     WsTopicScheduler.start()
 
+    # 注册 on_demand 因子计算 + SPI 插件到统一注册中心
+    # （trading 层向 factor 层 OnDemandComputeRegistry 注入默认实现，依赖反转）
+    from xqtrader.domain.trading.backtest.on_demand_registration import (
+        register_default_on_demand_computes,
+    )
+
+    register_default_on_demand_computes()
+
     # 自动连接 QMT 交易服务
     await _auto_connect_qmt()
 

@@ -2,8 +2,8 @@
 
 通过 buy_expr / sell_expr 定义信号条件，支持因子名作为变量名。
 表达式语法参考 QLib:
-  - 比较运算: rsi < 30, hist > 0, macd > signal
-  - 逻辑运算: rsi < 30 and hist > 0
+  - 比较运算: rsi_14 < 30, hist > 0, macd > signal
+  - 逻辑运算: rsi_14 < 30 and hist > 0
   - 算术运算: close / open > 1.05
   - 函数: abs(hist) > 0.1, max(rsi_6, rsi_14) > 70
 

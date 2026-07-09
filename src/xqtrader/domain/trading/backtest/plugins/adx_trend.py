@@ -15,7 +15,7 @@ DI+/DI- 用于判断趋势方向:
   卖出: ADX > 25 且 -DI 上穿 +DI（空头趋势形成）
   或简化版: ADX > 25 且 +DI > -DI 买入, ADX > 25 且 -DI > +DI 卖出
 
-依赖内置因子: adx, adx_plus_di, adx_minus_di
+依赖因子: adx_14, adx_plus_di, adx_minus_di
 前值因子: adx_plus_di, adx_minus_di（用于判断穿越）
 """
 from ..core import RuleContext, RulePlugin, RuleResult
@@ -30,12 +30,12 @@ class ADXTrendPlugin(RulePlugin):
 
     rule_id: str = "ts_adx_trend"
     name: str = "ADX 趋势强度"
-    factor_ids: list[str] = ["adx", "adx_plus_di", "adx_minus_di"]
+    factor_ids: list[str] = ["adx_14", "adx_plus_di", "adx_minus_di"]
     prev_factor_ids: list[str] = ["adx_plus_di", "adx_minus_di"]
 
     def evaluate(self, context: RuleContext) -> RuleResult:
         fv = context.factor_values
-        adx = fv.get("adx")
+        adx = fv.get("adx_14")
         plus_di = fv.get("adx_plus_di")
         minus_di = fv.get("adx_minus_di")
         plus_di_prev = fv.get("adx_plus_di_prev")
@@ -68,7 +68,7 @@ class ADXTrendPlugin(RulePlugin):
                     f"(前+DI={plus_di_prev:.2f}, 前-DI={minus_di_prev:.2f})"
                 ),
                 detail={
-                    "adx": adx, "adx_plus_di": plus_di, "adx_minus_di": minus_di,
+                    "adx_14": adx, "adx_plus_di": plus_di, "adx_minus_di": minus_di,
                     "adx_plus_di_prev": plus_di_prev, "adx_minus_di_prev": minus_di_prev,
                     "signal": "bullish_trend_cross",
                 },
@@ -89,7 +89,7 @@ class ADXTrendPlugin(RulePlugin):
                     f"(前+DI={plus_di_prev:.2f}, 前-DI={minus_di_prev:.2f})"
                 ),
                 detail={
-                    "adx": adx, "adx_plus_di": plus_di, "adx_minus_di": minus_di,
+                    "adx_14": adx, "adx_plus_di": plus_di, "adx_minus_di": minus_di,
                     "adx_plus_di_prev": plus_di_prev, "adx_minus_di_prev": minus_di_prev,
                     "signal": "bearish_trend_cross",
                 },
@@ -104,7 +104,7 @@ class ADXTrendPlugin(RulePlugin):
                     reason=(
                         f"ADX 多头趋势持续: ADX={adx:.2f}, +DI={plus_di:.2f} > -DI={minus_di:.2f}"
                     ),
-                    detail={"adx": adx, "adx_plus_di": plus_di, "adx_minus_di": minus_di},
+                    detail={"adx_14": adx, "adx_plus_di": plus_di, "adx_minus_di": minus_di},
                 )
             return RuleResult(
                 rule_id=self.rule_id,
@@ -112,12 +112,12 @@ class ADXTrendPlugin(RulePlugin):
                 reason=(
                     f"ADX 空头趋势持续: ADX={adx:.2f}, -DI={minus_di:.2f} > +DI={plus_di:.2f}"
                 ),
-                detail={"adx": adx, "adx_plus_di": plus_di, "adx_minus_di": minus_di},
+                detail={"adx_14": adx, "adx_plus_di": plus_di, "adx_minus_di": minus_di},
             )
 
         return RuleResult(
             rule_id=self.rule_id,
             direction="neutral",
             reason=f"ADX 无趋势: ADX={adx:.2f} < 25（震荡市）",
-            detail={"adx": adx, "adx_plus_di": plus_di, "adx_minus_di": minus_di},
+            detail={"adx_14": adx, "adx_plus_di": plus_di, "adx_minus_di": minus_di},
         )

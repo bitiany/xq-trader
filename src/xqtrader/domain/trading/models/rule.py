@@ -4,7 +4,7 @@
 
 definition JSONB 结构:
   rule_type = "expression" + category = "timing":
-    {"buy_expr": "rsi < 30", "sell_expr": "rsi > 70", "prev_factors": []}
+    {"buy_expr": "rsi_14 < 30", "sell_expr": "rsi_14 > 70", "prev_factors": []}
 
   rule_type = "expression" + category = "selection":
     {"bullish_expr": "pe < 20 and roe > 0.15",

@@ -68,7 +68,7 @@ class RuleConfig:
 
     支持两种规则类型:
       1. expression: 表达式规则，通过 buy_expr / sell_expr 定义信号条件
-         例: buy_expr="rsi < 30", sell_expr="rsi > 70"
+         例: buy_expr="rsi_14 < 30", sell_expr="rsi_14 > 70"
       2. plugin: SPI 插件规则，通过 plugin_class 指定插件全限定类名
          例: plugin_class="xqtrader.domain.trading.backtest.plugins.macd.MACDPlugin"
 

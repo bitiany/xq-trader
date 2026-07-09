@@ -13,7 +13,7 @@
   - max_pct: 最大仓位占可用资金比例上限
 
 依赖因子:
-  - atr: ATR 指标值
+  - atr_14: 14日 ATR 指标值（on_demand 实时计算，因子库无 precomputed 版本）
 """
 
 from ..context import PositionContext, PositionResult
@@ -26,7 +26,7 @@ class ATRPositionPlugin(PositionPlugin):
 
     position_id: str = "atr"
     name: str = "ATR仓位管理"
-    factor_ids: list[str] = ["atr"]
+    factor_ids: list[str] = ["atr_14"]
 
     def __init__(self, params: dict | None = None) -> None:
         p = params or {}
@@ -38,7 +38,7 @@ class ATRPositionPlugin(PositionPlugin):
         price = context.current_price
         portfolio_value = context.portfolio_value
         cash = context.available_cash
-        atr = context.factor_values.get("atr")
+        atr = context.factor_values.get("atr_14")
 
         if atr is None or atr <= 0:
             # ATR 数据不可用，回退到固定比例

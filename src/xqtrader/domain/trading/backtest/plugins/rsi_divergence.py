@@ -10,8 +10,8 @@ RSI 背离是经典的反转信号:
 
 背离和超买超卖判断都需要时序数据，表达式无法实现，必须用 SPI 机制。
 
-依赖内置因子: close, rsi
-前值因子: close_prev, rsi_prev（用于判断是否突破前高/前低）
+依赖因子: close, rsi_14
+前值因子: close_prev, rsi_14_prev（用于判断是否突破前高/前低）
 """
 from ..core import RuleContext, RulePlugin, RuleResult
 
@@ -30,15 +30,15 @@ class RSIDivergencePlugin(RulePlugin):
 
     rule_id: str = "ts_rsi_divergence"
     name: str = "RSI 背离超买超卖"
-    factor_ids: list[str] = ["close", "rsi"]
-    prev_factor_ids: list[str] = ["close", "rsi"]
+    factor_ids: list[str] = ["close", "rsi_14"]
+    prev_factor_ids: list[str] = ["close", "rsi_14"]
 
     def evaluate(self, context: RuleContext) -> RuleResult:
         fv = context.factor_values
         close = fv.get("close")
-        rsi = fv.get("rsi")
+        rsi = fv.get("rsi_14")
         close_prev = fv.get("close_prev")
-        rsi_prev = fv.get("rsi_prev")
+        rsi_prev = fv.get("rsi_14_prev")
 
         if close is None or rsi is None:
             return RuleResult(rule_id=self.rule_id, direction="neutral", reason="RSI 数据不充分")
@@ -54,8 +54,8 @@ class RSIDivergencePlugin(RulePlugin):
                 confidence=0.85,
                 reason=f"RSI 超卖买入: RSI={rsi:.2f} < 40{prev_info}",
                 detail={
-                    "close": close, "rsi": rsi,
-                    "close_prev": close_prev, "rsi_prev": rsi_prev,
+                    "close": close, "rsi_14": rsi,
+                    "close_prev": close_prev, "rsi_14_prev": rsi_prev,
                     "signal": "oversold",
                 },
             )
@@ -71,8 +71,8 @@ class RSIDivergencePlugin(RulePlugin):
                 confidence=0.85,
                 reason=f"RSI 超买卖出: RSI={rsi:.2f} > 60{prev_info}",
                 detail={
-                    "close": close, "rsi": rsi,
-                    "close_prev": close_prev, "rsi_prev": rsi_prev,
+                    "close": close, "rsi_14": rsi,
+                    "close_prev": close_prev, "rsi_14_prev": rsi_prev,
                     "signal": "overbought",
                 },
             )
@@ -92,8 +92,8 @@ class RSIDivergencePlugin(RulePlugin):
                         f"(前close={close_prev:.4f}, 前RSI={rsi_prev:.2f})"
                     ),
                     detail={
-                        "close": close, "rsi": rsi,
-                        "close_prev": close_prev, "rsi_prev": rsi_prev,
+                        "close": close, "rsi_14": rsi,
+                        "close_prev": close_prev, "rsi_14_prev": rsi_prev,
                         "signal": "bullish_divergence",
                     },
                 )
@@ -112,8 +112,8 @@ class RSIDivergencePlugin(RulePlugin):
                         f"(前close={close_prev:.4f}, 前RSI={rsi_prev:.2f})"
                     ),
                     detail={
-                        "close": close, "rsi": rsi,
-                        "close_prev": close_prev, "rsi_prev": rsi_prev,
+                        "close": close, "rsi_14": rsi,
+                        "close_prev": close_prev, "rsi_14_prev": rsi_prev,
                         "signal": "bearish_divergence",
                     },
                 )
@@ -124,7 +124,7 @@ class RSIDivergencePlugin(RulePlugin):
             direction="neutral",
             reason=f"RSI 无信号: RSI={rsi:.2f}{prev_info}",
             detail={
-                "close": close, "rsi": rsi,
-                "close_prev": close_prev, "rsi_prev": rsi_prev,
+                "close": close, "rsi_14": rsi,
+                "close_prev": close_prev, "rsi_14_prev": rsi_prev,
             },
         )
