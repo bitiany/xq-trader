@@ -34,7 +34,7 @@ class DebtToAssetsFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "debt_to_assets"
     direction: str = "ASC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["debt_to_assets"]
     min_periods: int = 1
@@ -56,7 +56,7 @@ class CurrentRatioFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "current_ratio"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["current_ratio"]
     min_periods: int = 1
@@ -78,7 +78,7 @@ class EqtToTalcapitalFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "eqt_to_talcapital"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["eqt_to_talcapital"]
     min_periods: int = 1
@@ -100,7 +100,7 @@ class EbitToInterestFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "ebit_to_interest"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["ebit_to_interest"]
     min_periods: int = 1
@@ -122,7 +122,7 @@ class OcfToDebtFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "ocf_to_debt"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["ocf_to_debt"]
     min_periods: int = 1
@@ -150,7 +150,7 @@ class MlevFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "mlev"
     direction: str = "ASC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["debt_to_assets", "assets_to_eqt"]
     min_periods: int = 1
@@ -182,7 +182,7 @@ class QuickRatioFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "quick_ratio"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["quick_ratio"]
     min_periods: int = 1
@@ -207,7 +207,7 @@ class CashRatioFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "cash_ratio"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["cash_ratio"]
     min_periods: int = 1
@@ -233,7 +233,7 @@ class DebtToEqtFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "debt_to_eqt"
     direction: str = "ASC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["debt_to_eqt"]
     min_periods: int = 1
@@ -259,7 +259,7 @@ class AssetsToEqtFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "assets_to_eqt"
     direction: str = "ASC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["assets_to_eqt"]
     min_periods: int = 1
@@ -284,7 +284,7 @@ class EbitdaToDebtFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "ebitda_to_debt"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["ebitda_to_debt"]
     min_periods: int = 1
@@ -310,7 +310,7 @@ class IntToTalcapFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "int_to_talcap"
     direction: str = "ASC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["int_to_talcap"]
     min_periods: int = 1
@@ -335,7 +335,7 @@ class TangibleassetToDebtFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "tangibleasset_to_debt"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["tangibleasset_to_debt"]
     min_periods: int = 1
@@ -360,7 +360,7 @@ class OcfToShortdebtFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "ocf_to_shortdebt"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["ocf_to_shortdebt"]
     min_periods: int = 1
@@ -385,7 +385,7 @@ class OcfToInterestdebtFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "ocf_to_interestdebt"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["ocf_to_interestdebt"]
     min_periods: int = 1
@@ -410,7 +410,7 @@ class OcfToNetdebtFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "ocf_to_netdebt"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["ocf_to_netdebt"]
     min_periods: int = 1

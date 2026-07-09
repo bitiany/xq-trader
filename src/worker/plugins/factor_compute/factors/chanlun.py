@@ -294,7 +294,7 @@ class ChanlunFactor(FactorPlugin):
     category: str = "chanlun"
     group_id: str = "chanlun"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["open", "high", "low", "close"]
     min_periods: int = 5

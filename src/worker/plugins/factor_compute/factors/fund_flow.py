@@ -44,7 +44,7 @@ class CsMainNetPctFactor(FactorPlugin):
     category: str = "fund_flow"
     group_id: str = "cs_main_net_pct"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["main_net_pct"]
     min_periods: int = 1
@@ -68,7 +68,7 @@ class CsNetMfPctFactor(FactorPlugin):
     category: str = "fund_flow"
     group_id: str = "cs_net_mf_pct"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["net_mf_amt", "amount"]
     min_periods: int = 1
@@ -94,7 +94,7 @@ class HugeNetPctFactor(FactorPlugin):
     category: str = "fund_flow"
     group_id: str = "huge_net_pct"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["huge_net_pct"]
     min_periods: int = 1
@@ -118,7 +118,7 @@ class BigNetPctFactor(FactorPlugin):
     category: str = "fund_flow"
     group_id: str = "big_net_pct"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["big_net_pct"]
     min_periods: int = 1
@@ -147,7 +147,7 @@ class MainSmallDivergenceFactor(FactorPlugin):
     category: str = "fund_flow"
     group_id: str = "main_small_divergence"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["main_net_pct", "small_net_pct"]
     min_periods: int = 1
@@ -175,7 +175,7 @@ class HugeBigDivergenceFactor(FactorPlugin):
     category: str = "fund_flow"
     group_id: str = "huge_big_divergence"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["huge_net_pct", "big_net_pct"]
     min_periods: int = 1
@@ -206,7 +206,7 @@ class MainNetPct3dFactor(FactorPlugin):
     category: str = "fund_flow"
     group_id: str = "main_net_pct_3d"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["main_net_pct"]
     min_periods: int = 3
@@ -233,7 +233,7 @@ class MainNetPct5dFactor(FactorPlugin):
     category: str = "fund_flow"
     group_id: str = "main_net_pct_5d"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["main_net_pct"]
     min_periods: int = 5
@@ -263,7 +263,7 @@ class MainNetPctChgFactor(FactorPlugin):
     category: str = "fund_flow"
     group_id: str = "main_net_pct_chg"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["main_net_pct"]
     min_periods: int = 2

@@ -39,7 +39,7 @@ class ATRRatioFactor(FactorPlugin):
     category: str = "tech_volatility"
     group_id: str = "atr"
     direction: str = "ASC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["high", "low", "close"]
     min_periods: int = 15
@@ -70,7 +70,7 @@ class ATRRatioDeltaFactor(FactorPlugin):
     category: str = "tech_volatility"
     group_id: str = "atr"
     direction: str = "ASC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["high", "low", "close"]
     min_periods: int = 16
@@ -99,7 +99,7 @@ class VolatilityFactor(FactorPlugin):
     category: str = "tech_volatility"
     group_id: str = "hist_vol"
     direction: str = "ASC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["close"]
     min_periods: int = 10
@@ -127,7 +127,7 @@ class NatrFactor(FactorPlugin):
     category: str = "tech_volatility"
     group_id: str = "natr"
     direction: str = "ASC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["high", "low", "close"]
     min_periods: int = 15
@@ -154,7 +154,7 @@ class DownsideVolFactor(FactorPlugin):
     category: str = "tech_volatility"
     group_id: str = "downside_vol"
     direction: str = "ASC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["close"]
     min_periods: int = 20
@@ -183,7 +183,7 @@ class AmihudFactor(FactorPlugin):
     category: str = "tech_volatility"
     group_id: str = "amihud"
     direction: str = "ASC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["close", "amount"]
     min_periods: int = 20
@@ -212,7 +212,7 @@ class VolOscFactor(FactorPlugin):
     category: str = "tech_volatility"
     group_id: str = "vol_osc"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["volume"]
     min_periods: int = 20
@@ -240,7 +240,7 @@ class ADVFactor(FactorPlugin):
     category: str = "tech_volatility"
     group_id: str = "adv"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["volume"]
     min_periods: int = 20

@@ -33,7 +33,7 @@ class MABiasFactor(FactorPlugin):
     category: str = "tech_ma"
     group_id: str = "ma_bias"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["close"]
     min_periods: int = 5
@@ -67,7 +67,7 @@ class MABiasDeltaFactor(FactorPlugin):
     category: str = "tech_ma"
     group_id: str = "ma_bias_delta"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["close"]
     min_periods: int = 21

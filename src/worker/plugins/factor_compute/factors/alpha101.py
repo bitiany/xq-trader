@@ -33,7 +33,7 @@ class Alpha12Factor(FactorPlugin):
     category: str = "alpha101"
     group_id: str = "alpha_12"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["close", "open", "volume"]
     min_periods: int = 2
@@ -55,7 +55,7 @@ class Alpha101Factor(FactorPlugin):
     category: str = "alpha101"
     group_id: str = "alpha_101"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["close", "open", "high", "low"]
     min_periods: int = 1
@@ -78,7 +78,7 @@ class Alpha55Factor(FactorPlugin):
     category: str = "alpha101"
     group_id: str = "alpha_55"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["close", "open", "volume"]
     min_periods: int = 5
@@ -105,7 +105,7 @@ class Alpha1Factor(FactorPlugin):
     category: str = "alpha101"
     group_id: str = "alpha_1"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["close", "open", "volume"]
     min_periods: int = 5
@@ -131,7 +131,7 @@ class Alpha33Factor(FactorPlugin):
     category: str = "alpha101"
     group_id: str = "alpha_33"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["close", "open"]
     min_periods: int = 5
@@ -156,7 +156,7 @@ class Alpha41Factor(FactorPlugin):
     category: str = "alpha101"
     group_id: str = "alpha_41"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["high", "low", "close"]
     min_periods: int = 1

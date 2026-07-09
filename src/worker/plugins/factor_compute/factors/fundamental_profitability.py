@@ -37,7 +37,7 @@ class RoeFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "roe"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["roe"]
     min_periods: int = 1
@@ -59,7 +59,7 @@ class RoeWaaFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "roe_waa"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["roe_waa"]
     min_periods: int = 1
@@ -81,7 +81,7 @@ class RoeDtFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "roe_dt"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["roe_dt"]
     min_periods: int = 1
@@ -103,7 +103,7 @@ class RoaFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "roa"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["roa"]
     min_periods: int = 1
@@ -125,7 +125,7 @@ class RoicFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "roic"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["roic"]
     min_periods: int = 1
@@ -147,7 +147,7 @@ class GrossprofitMarginFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "grossprofit_margin"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["grossprofit_margin"]
     min_periods: int = 1
@@ -169,7 +169,7 @@ class NetprofitMarginFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "netprofit_margin"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["netprofit_margin"]
     min_periods: int = 1
@@ -195,7 +195,7 @@ class GpToAssetsFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "gp_to_assets"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["grossprofit_margin", "assets_turn"]
     min_periods: int = 1
@@ -224,7 +224,7 @@ class OpOfGrFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "op_of_gr"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["op_of_gr"]
     min_periods: int = 1
@@ -246,7 +246,7 @@ class EbitOfGrFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "ebit_of_gr"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["ebit_of_gr"]
     min_periods: int = 1
@@ -271,7 +271,7 @@ class ExpenseOfSalesFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "expense_of_sales"
     direction: str = "ASC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["expense_of_sales"]
     min_periods: int = 1

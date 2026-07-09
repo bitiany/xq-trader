@@ -40,7 +40,7 @@ class MACDHistRatioFactor(FactorPlugin):
     category: str = "tech_trend"
     group_id: str = "macd"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["close"]
     min_periods: int = 35
@@ -75,7 +75,7 @@ class MACDHistDeltaFactor(FactorPlugin):
     category: str = "tech_trend"
     group_id: str = "macd"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["close"]
     min_periods: int = 36
@@ -110,7 +110,7 @@ class ADXFactor(FactorPlugin):
     category: str = "tech_trend"
     group_id: str = "adx"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["high", "low", "close"]
     min_periods: int = 28
@@ -152,7 +152,7 @@ class ADXDeltaFactor(FactorPlugin):
     category: str = "tech_trend"
     group_id: str = "adx_delta"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["high", "low", "close"]
     min_periods: int = 29
@@ -185,7 +185,7 @@ class BOLLPositionFactor(FactorPlugin):
     category: str = "tech_trend"
     group_id: str = "boll"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["close"]
     min_periods: int = 20
@@ -236,7 +236,7 @@ class SARDeviationFactor(FactorPlugin):
     category: str = "tech_trend"
     group_id: str = "sar"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["high", "low", "close"]
     min_periods: int = 6

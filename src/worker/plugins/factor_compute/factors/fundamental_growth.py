@@ -39,7 +39,7 @@ class QOrYoyFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "q_or_yoy"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["q_or_yoy"]
     min_periods: int = 1
@@ -61,7 +61,7 @@ class QNetprofitYoyFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "q_netprofit_yoy"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["q_netprofit_yoy"]
     min_periods: int = 1
@@ -83,7 +83,7 @@ class QDtprofitYoyFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "q_dtprofit_yoy"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["q_dtprofit_yoy"]
     min_periods: int = 1
@@ -105,7 +105,7 @@ class QOpYoyFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "q_op_yoy"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["q_op_yoy"]
     min_periods: int = 1
@@ -127,7 +127,7 @@ class QOcfYoyFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "q_ocf_yoy"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["q_ocf_yoy"]
     min_periods: int = 1
@@ -149,7 +149,7 @@ class QRoeYoyFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "q_roe_yoy"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["q_roe_yoy"]
     min_periods: int = 1
@@ -171,7 +171,7 @@ class QNetprofitgrowQoqFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "q_netprofitgrow_qoq"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["q_netprofitgrow_qoq"]
     min_periods: int = 1
@@ -193,7 +193,7 @@ class QOrgrowQoqFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "q_orgrow_qoq"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["q_orgrow_qoq"]
     min_periods: int = 1
@@ -215,7 +215,7 @@ class QOpgrowQoqFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "q_opgrow_qoq"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["q_opgrow_qoq"]
     min_periods: int = 1
@@ -237,7 +237,7 @@ class QRoegrowQoqFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "q_roegrow_qoq"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["q_roegrow_qoq"]
     min_periods: int = 1
@@ -262,7 +262,7 @@ class DtNetprofitYoyFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "dt_netprofit_yoy"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["dt_netprofit_yoy"]
     min_periods: int = 1
@@ -287,7 +287,7 @@ class EquityYoyFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "equity_yoy"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["equity_yoy"]
     min_periods: int = 1
@@ -312,7 +312,7 @@ class AssetsYoyFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "assets_yoy"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["assets_yoy"]
     min_periods: int = 1

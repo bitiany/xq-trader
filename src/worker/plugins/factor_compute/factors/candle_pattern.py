@@ -82,7 +82,7 @@ class CdlBullFreqFactor(FactorPlugin):
     category: str = "candle_pattern"
     group_id: str = "cdl_agg"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["open", "high", "low", "close"]
     min_periods: int = 20
@@ -107,7 +107,7 @@ class CdlBearFreqFactor(FactorPlugin):
     category: str = "candle_pattern"
     group_id: str = "cdl_agg"
     direction: str = "ASC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["open", "high", "low", "close"]
     min_periods: int = 20
@@ -135,7 +135,7 @@ class CdlNetScoreFactor(FactorPlugin):
     category: str = "candle_pattern"
     group_id: str = "cdl_agg"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["open", "high", "low", "close"]
     min_periods: int = 20
@@ -166,7 +166,7 @@ class CdlUpperShadowRatioFactor(FactorPlugin):
     category: str = "candle_pattern"
     group_id: str = "cdl_agg"
     direction: str = "ASC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["open", "high", "low", "close"]
     min_periods: int = 20
@@ -199,7 +199,7 @@ class CdlLowerShadowRatioFactor(FactorPlugin):
     category: str = "candle_pattern"
     group_id: str = "cdl_agg"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["open", "high", "low", "close"]
     min_periods: int = 20
@@ -232,7 +232,7 @@ class CdlBodyRatioFactor(FactorPlugin):
     category: str = "candle_pattern"
     group_id: str = "cdl_agg"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["open", "high", "low", "close"]
     min_periods: int = 20

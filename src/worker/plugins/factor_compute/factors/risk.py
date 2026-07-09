@@ -38,7 +38,7 @@ class CsLogMvFactor(FactorPlugin):
     category: str = "risk"
     group_id: str = "cs_log_mv"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["total_mv"]
     min_periods: int = 1
@@ -59,7 +59,7 @@ class CsTurnoverFactor(FactorPlugin):
     category: str = "risk"
     group_id: str = "cs_turnover"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["turnover_rate"]
     min_periods: int = 1
@@ -79,7 +79,7 @@ class TurnoverFFactor(FactorPlugin):
     category: str = "risk"
     group_id: str = "turnover_f"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["turnover_rate_f"]
     min_periods: int = 1
@@ -102,7 +102,7 @@ class CsLogAmountFactor(FactorPlugin):
     category: str = "risk"
     group_id: str = "cs_log_amount"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["amount"]
     min_periods: int = 1
@@ -126,7 +126,7 @@ class CsVolumeRatioFactor(FactorPlugin):
     category: str = "risk"
     group_id: str = "cs_volume_ratio"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["volume"]
     min_periods: int = 5
@@ -152,7 +152,7 @@ class DastdFactor(FactorPlugin):
     category: str = "risk"
     group_id: str = "dastd"
     direction: str = "ASC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["close"]
     min_periods: int = 42
@@ -178,7 +178,7 @@ class CmraFactor(FactorPlugin):
     category: str = "risk"
     group_id: str = "cmra"
     direction: str = "ASC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["close"]
     min_periods: int = 252

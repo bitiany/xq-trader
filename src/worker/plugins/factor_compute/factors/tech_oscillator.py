@@ -34,7 +34,7 @@ class RSIFactor(FactorPlugin):
     category: str = "tech_oscillator"
     group_id: str = "rsi"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["close"]
     min_periods: int = 15
@@ -64,7 +64,7 @@ class RSIDeltaFactor(FactorPlugin):
     category: str = "tech_oscillator"
     group_id: str = "rsi_delta"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["close"]
     min_periods: int = 16
@@ -92,7 +92,7 @@ class KDJFactor(FactorPlugin):
     category: str = "tech_oscillator"
     group_id: str = "kdj"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["high", "low", "close"]
     min_periods: int = 12
@@ -136,7 +136,7 @@ class CCIFactor(FactorPlugin):
     category: str = "tech_oscillator"
     group_id: str = "cci"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["high", "low", "close"]
     min_periods: int = 15
@@ -165,7 +165,7 @@ class WILLRFactor(FactorPlugin):
     category: str = "tech_oscillator"
     group_id: str = "willr"
     direction: str = "ASC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["high", "low", "close"]
     min_periods: int = 15
@@ -194,7 +194,7 @@ class BIASFactor(FactorPlugin):
     category: str = "tech_oscillator"
     group_id: str = "bias"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["close"]
     min_periods: int = 6

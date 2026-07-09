@@ -47,7 +47,7 @@ class EarningsYieldFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "ep"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["pe_ttm"]
     min_periods: int = 1
@@ -74,7 +74,7 @@ class BookToPriceFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "bp"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["pb"]
     min_periods: int = 1
@@ -100,7 +100,7 @@ class DividendYieldFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "dp"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["dv_ttm"]
     min_periods: int = 1
@@ -128,7 +128,7 @@ class EvEbitdaFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "ev_ebitda"
     direction: str = "ASC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["total_mv", "ebitda"]
     min_periods: int = 1
@@ -164,7 +164,7 @@ class SalesToPriceFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "sp"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["ps_ttm"]
     min_periods: int = 1
@@ -189,7 +189,7 @@ class PeTtmFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "pe_ttm"
     direction: str = "ASC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["pe_ttm"]
     min_periods: int = 1
@@ -212,7 +212,7 @@ class PsTtmFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "ps_ttm"
     direction: str = "ASC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["ps_ttm"]
     min_periods: int = 1
@@ -240,7 +240,7 @@ class CashFlowPriceFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "cfp"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["ocf_to_or", "revenue", "total_mv"]
     min_periods: int = 1

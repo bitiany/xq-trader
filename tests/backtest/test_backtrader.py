@@ -59,18 +59,18 @@ async def ohlcv_df(app_with_datasource):
 
     df["hist_area"] = df["hist"].rolling(5).apply(_hist_area, raw=False)
 
-    # RSI 指标
-    df["rsi"] = ta.RSI(df.close, timeperiod=14)
+    # RSI 指标（统一命名：rsi_14，与因子库 precomputed 因子一致）
+    df["rsi_14"] = ta.RSI(df.close, timeperiod=14)
 
-    # BIAS 乖离率: (close - MA6) / MA6 * 100
+    # BIAS 乖离率（统一命名：bias_6）: (close - MA6) / MA6 * 100
     ma6 = df.close.rolling(6).mean()
-    df["bias"] = (df.close - ma6) / ma6 * 100
+    df["bias_6"] = (df.close - ma6) / ma6 * 100
 
-    # MON_5D 5日动量: close / close.shift(5) - 1
-    df["mon_5d"] = df.close / df.close.shift(5) - 1
+    # 5日动量（统一命名：mom_5d，与因子库 precomputed 因子一致）: close / close.shift(5) - 1
+    df["mom_5d"] = df.close / df.close.shift(5) - 1
 
-    # ATR 指标
-    df["atr"] = ta.ATR(df.high, df.low, df.close, timeperiod=14)
+    # ATR 指标（统一命名：atr_14，on_demand 因子库无 precomputed 版本）
+    df["atr_14"] = ta.ATR(df.high, df.low, df.close, timeperiod=14)
 
     # 全量计算指标后，按时间窗口截取
     df["trade_date"] = pd.to_datetime(df["trade_date"])

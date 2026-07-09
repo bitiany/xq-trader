@@ -41,7 +41,7 @@ class NlSizeFactor(FactorPlugin):
     category: str = "risk"
     group_id: str = "nl_size"
     direction: str = "ASC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["total_mv"]
     min_periods: int = 1
@@ -69,7 +69,7 @@ class StomFactor(FactorPlugin):
     category: str = "risk"
     group_id: str = "stom"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["turnover_rate"]
     min_periods: int = 21
@@ -98,7 +98,7 @@ class StoqFactor(FactorPlugin):
     category: str = "risk"
     group_id: str = "stoq"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     base_factor: str = "stom"
     dependencies: list[str] = ["turnover_rate"]
@@ -128,7 +128,7 @@ class Beta250Factor(FactorPlugin):
     category: str = "risk"
     group_id: str = "beta_250"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["close"]
     min_periods: int = 250
@@ -157,7 +157,7 @@ class BetaDownFactor(FactorPlugin):
     category: str = "risk"
     group_id: str = "beta_down"
     direction: str = "ASC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["close"]
     min_periods: int = 250

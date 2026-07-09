@@ -786,7 +786,7 @@ src/xqtrader/domain/trading/
 │   │                                    # StrategyConfig, FusionConfig, RulePlugin ABC
 │   ├── engine.py                        # SignalEngine — 规则评估 + 融合
 │   ├── runner.py                        # run_backtest — 数据准备 + cerebro 运行
-│   ├── service.py                       # BacktestService — API 入口 + 数据加载 + 内置因子计算
+│   ├── service.py                       # BacktestService — API 入口 + 数据加载 + on_demand 因子计算委托
 │   ├── performance.py                   # 绩效指标提取
 │   ├── backtrader_ext.py                # Backtrader 适配层 (XqTraderStrategy, PluginSizer, create_factor_datafeed)
 │   ├── fusion/                          # 信号融合策略
@@ -956,30 +956,41 @@ flowchart TD
 
 ---
 
-## 十二、回测引擎内置技术因子
+## 十二、回测引擎 on_demand 战术指标
 
-回测引擎在加载数据时，可按需从 OHLCV 计算常用技术因子，无需依赖 `fac_factor_value` 表的预存数据。
+回测引擎加载数据时，因子分两类来源（docs/factor-system-design.md §5.4 / §19.3）：
+  - **DB 预计算因子**：因子库 `fac_factor_value` 已有 precomputed 版本的因子（`rsi_14` / `bias_6` / `mom_5d` / `mom_20d` / `kdj_k` / `kdj_d` / `kdj_j` / `adx_14` / `adx_plus_di` / `adx_minus_di` / `boll_width` 等），直接从 DB 加载，**禁止业务层重复实现**。
+  - **on_demand 实时计算因子**：因子库无 precomputed 版本的战术指标，由 `OnDemandComputeRegistry` 统一计算（SPI 插件 + compute 函数），`BacktestService._load_data` 委托注册表计算后注入 DataFrame。
 
-### 12.1 内置因子列表
+### 12.1 on_demand 因子列表
 
-| 因子 ID | 计算方式 | 依赖 | 说明 |
-|---------|---------|------|------|
-| `macd` | TA-Lib MACD fast=12 slow=26 signal=9 | close | MACD 线 |
-| `signal` | TA-Lib MACD | close | Signal 线 |
-| `hist` | `2 * (MACD - Signal)` | close | MACD 柱（国内主流机构实现） |
-| `hist_slope` | `hist - hist.shift(5)` | hist | 柱斜率（5日变化） |
-| `hist_area` | `hist.rolling(5).apply(calc_area)` | hist | 柱面积（5日积分） |
-| `rsi` | TA-Lib RSI timeperiod=14 | close | RSI 相对强弱 |
-| `bias` | `(close - MA6) / MA6 * 100` | close | 乖离率 |
-| `mon_5d` | `close / close.shift(5) - 1` | close | 5日动量 |
+注册表 `ON_DEMAND_FACTOR_IDS`（`on_demand_registration.py`）共 25 个因子，按计算组分组：
+
+| 计算组 | 因子 ID | 计算方式 | 依赖 |
+|--------|---------|---------|------|
+| macd | `macd` / `signal` / `hist` / `hist_slope` / `hist_area` | TA-Lib MACD fast=12 slow=26 signal=9；hist=2×(MACD−Signal) | close |
+| ma | `ma_short` / `ma_long` | SMA5 / SMA20 | close |
+| bollinger | `boll_upper` / `boll_middle` / `boll_lower` | middle=SMA20, upper/lower=middle±2×std | close |
+| volume | `vol_ma_20` / `vol_ratio` | 20日均量 / 当日量÷5日均量 | volume |
+| mom_10d | `mom_10d` | `close / close.shift(10) - 1` | close |
+| atr_14 | `atr_14` | TA-Lib ATR timeperiod=14（绝对值） | high/low/close |
+| donchian | `donchian_high_20` / `donchian_low_10` | 20日最高 / 10日最低 | high/low |
+| chanlun | `chan_buy_point` / `chan_sell_point` / `chan_bi_direction` | chanpy 笔/中枢/背驰 | OHLCV |
+| td_sequential | `td_seq_buy` / `td_seq_sell` / `td_seq_count` | 自研神奇九转 | close |
+| ohlcv | `close` / `volume` | OHLCV 直取 | close/volume |
+
+> **命名规范**：因子库已有 precomputed 版本的因子统一使用因子库命名（`rsi_14` 而非 `rsi`，`bias_6` 而非 `bias`，`mom_5d` 而非 `mon_5d`，`adx_14` 而非 `adx`）。on_demand 注册表不重复注册这些因子，避免双轨命名。
 
 ### 12.2 预热期处理
 
-EMA 类指标（MACD/RSI）需要约 33 个 bar 的历史数据才能产生有效值。`BacktestService._load_data` 在加载 OHLCV 时向前扩展 120 个交易日作为预热期，计算完所有因子后截取到目标日期范围。
+EMA 类指标（MACD）需要约 33 个 bar 的历史数据才能产生有效值；缠论/唐奇安等需要历史笔/中枢/通道。`BacktestService._load_data` 检测到 on_demand 因子时，向前扩展 120 个交易日（日历日 × 2）作为预热期，委托 `registry.compute_factors()` 计算后截取到目标日期范围。
 
 ### 12.3 列名冲突防护
 
-当 `fac_factor_value` 表中存在与内置因子同名的列（如 `macd`）时，`_load_data` 通过 `_get_builtin_factor_ids()` 识别内置因子集合，在 DB 查询时排除内置因子，避免 `df.merge()` 产生 `_x/_y` 后缀。内置因子在 merge 之后计算，覆盖缺失值。
+`_load_data` 通过 `registry.is_on_demand_factor(fid)` 区分 on_demand 因子和 DB 因子：
+  - DB 因子从 `fac_factor_value` 加载（按 `update_freq` 分流日频/季频）
+  - on_demand 因子在 DB 加载之后由注册表统一计算注入，避免 `df.merge()` 产生 `_x/_y` 后缀
+  - 缺失因子列填充 NaN（`0.0` 是合法因子值，可能错误触发 `>= 0` 类信号，不使用 `fillna(0.0)`）
 
 ### 12.4 StrategyConfigLoader
 

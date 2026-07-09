@@ -123,8 +123,10 @@ class FactorCalcStage(Stage):
             result_df.insert(0, "trade_date", df["trade_date"].values)  # type: ignore[arg-type]
 
         ctx.set("factor_df", result_df)
-        # 记录跳过预处理的因子列名，供 PreprocessStage 使用
-        skip_cols = [fid for f in valid_factors if getattr(f, "skip_preprocess", False)
+        # 记录跳过截面预处理的因子列名，供 PreprocessStage 使用
+        # preprocess_policy='raw' 的因子不参与截面标准化（如前向收益率）
+        skip_cols = [fid for f in valid_factors
+                     if getattr(f, "preprocess_policy", "cross_section_standard") == "raw"
                      for fid in (f.composite_factor_ids if f.is_composite else [f.factor_id])]
         ctx.set("skip_preprocess_cols", set(skip_cols))
         factor_count = len(result_parts)

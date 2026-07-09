@@ -38,7 +38,7 @@ class Kmid5Factor(FactorPlugin):
     category: str = "alpha158"
     group_id: str = "kmid"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["close", "open"]
     min_periods: int = 5
@@ -59,7 +59,7 @@ class Klen5Factor(FactorPlugin):
     category: str = "alpha158"
     group_id: str = "klen"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["high", "low", "open"]
     min_periods: int = 5
@@ -81,7 +81,7 @@ class Kup25Factor(FactorPlugin):
     category: str = "alpha158"
     group_id: str = "kup2"
     direction: str = "ASC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["high", "open", "close", "low"]
     min_periods: int = 5
@@ -105,7 +105,7 @@ class Klow25Factor(FactorPlugin):
     category: str = "alpha158"
     group_id: str = "klow2"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["low", "open", "close", "high"]
     min_periods: int = 5
@@ -129,7 +129,7 @@ class Rsv9Factor(FactorPlugin):
     category: str = "alpha158"
     group_id: str = "rsv"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["close", "high", "low"]
     min_periods: int = 9
@@ -153,7 +153,7 @@ class Cntp20Factor(FactorPlugin):
     category: str = "alpha158"
     group_id: str = "cntp"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["close"]
     min_periods: int = 20
@@ -173,7 +173,7 @@ class Imax20Factor(FactorPlugin):
     category: str = "alpha158"
     group_id: str = "imax"
     direction: str = "ASC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["close"]
     min_periods: int = 20
@@ -193,7 +193,7 @@ class Roc5CloseFactor(FactorPlugin):
     category: str = "alpha158"
     group_id: str = "roc5_close"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["close"]
     min_periods: int = 6
@@ -213,7 +213,7 @@ class Std20CloseFactor(FactorPlugin):
     category: str = "alpha158"
     group_id: str = "std20_close"
     direction: str = "ASC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["close"]
     min_periods: int = 20
@@ -235,7 +235,7 @@ class CorrPv10Factor(FactorPlugin):
     category: str = "alpha158"
     group_id: str = "corr_pv_10"
     direction: str = "ASC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["close", "volume"]
     min_periods: int = 10

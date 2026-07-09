@@ -1,7 +1,7 @@
 """收益率因子 — 前向收益率，用于因子评估。
 
 计算 T 日的前向收益率：fwd_ret_nd = close[T+n] / close[T] - 1
-跳过预处理（MAD 去极值不适用于收益率）。
+跳过截面预处理（MAD 去极值不适用于收益率）。
 """
 
 from __future__ import annotations
@@ -21,12 +21,12 @@ class ReturnFactor(FactorPlugin):
     category: str = "return"
     group_id: str = "return"
     direction: str = "ASC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["close"]
     min_periods: int = 1
     requires_full_history: bool = False
-    skip_preprocess: bool = True
+    preprocess_policy: str = "raw"
     data_origin: str = "computed"
 
     def __init__(self, period: int = 1, **kwargs: Any) -> None:

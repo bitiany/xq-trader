@@ -34,7 +34,7 @@ class OcfToProfitFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "ocf_to_profit"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["ocf_to_profit"]
     min_periods: int = 1
@@ -56,7 +56,7 @@ class OcfToOrFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "ocf_to_or"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["ocf_to_or"]
     min_periods: int = 1
@@ -78,7 +78,7 @@ class SalescashToOrFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "salescash_to_or"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["salescash_to_or"]
     min_periods: int = 1
@@ -100,7 +100,7 @@ class DtprofitToProfitFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "dtprofit_to_profit"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["dtprofit_to_profit"]
     min_periods: int = 1
@@ -122,7 +122,7 @@ class AssetsTurnFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "assets_turn"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["assets_turn"]
     min_periods: int = 1
@@ -144,7 +144,7 @@ class InvTurnFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "inv_turn"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["inv_turn"]
     min_periods: int = 1
@@ -166,7 +166,7 @@ class ArTurnFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "ar_turn"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["ar_turn"]
     min_periods: int = 1
@@ -192,7 +192,7 @@ class AccraFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "accra"
     direction: str = "ASC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["netprofit_margin", "ocf_to_or", "assets_turn"]
     min_periods: int = 1
@@ -225,7 +225,7 @@ class FaTurnFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "fa_turn"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["fa_turn"]
     min_periods: int = 1
@@ -250,7 +250,7 @@ class CaTurnFactor(FactorPlugin):
     category: str = "fundamental"
     group_id: str = "ca_turn"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["ca_turn"]
     min_periods: int = 1

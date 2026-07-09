@@ -234,6 +234,14 @@ class FactorPanelService:
 | `td_seq_buy` / `td_seq_sell` / `td_seq_count` | 自研 | time_series |
 | `donchian_high_20` / `donchian_low_10` | talib | time_series |
 | `close` / `volume` | OHLCV 直取 | both |
+| `macd` / `signal` / `hist` / `hist_slope` / `hist_area` | talib MACD | time_series |
+| `ma_short` / `ma_long` | SMA5 / SMA20 | time_series |
+| `boll_upper` / `boll_middle` / `boll_lower` | pandas rolling | time_series |
+| `vol_ma_20` / `vol_ratio` | pandas rolling | time_series |
+| `mom_10d` | pandas | time_series |
+| `atr_14` | talib ATR | time_series |
+
+> **命名规范**：因子库已有 precomputed 版本的因子（`rsi_14` / `bias_6` / `mom_5d` / `mom_20d` / `kdj_k` / `kdj_d` / `kdj_j` / `adx_14` / `adx_plus_di` / `adx_minus_di` / `boll_width` 等）统一使用因子库命名，不在 on_demand 注册表重复注册。战术指标（上表）是因子库无 precomputed 版本的指标，由 trading 层 `on_demand_registration.py` 注册（§19.3）。
 
 **禁止**对 `fac_factor_registry` 中已存在的 `precomputed` 因子在业务层重复实现（如 talib 版 `rsi_14`）。
 

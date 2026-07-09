@@ -31,7 +31,7 @@ class CsPctChgFactor(FactorPlugin):
     category: str = "momentum"
     group_id: str = "cs_pct_chg"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["close"]
     min_periods: int = 2
@@ -51,7 +51,7 @@ class MomentumFactor(FactorPlugin):
     category: str = "momentum"
     group_id: str = "momentum"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["close"]
     min_periods: int = 5
@@ -82,7 +82,7 @@ class BarraMomentumFactor(FactorPlugin):
     category: str = "momentum"
     group_id: str = "barra_momentum"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["close"]
     min_periods: int = 252
@@ -109,7 +109,7 @@ class BarraShortTermReversalFactor(FactorPlugin):
     category: str = "momentum"
     group_id: str = "barra_strev"
     direction: str = "ASC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["close"]
     min_periods: int = 21
@@ -129,7 +129,7 @@ class RocFactor(FactorPlugin):
     category: str = "momentum"
     group_id: str = "roc"
     direction: str = "DESC"
-    scope: str = "both"
+    usage: str = "both"
     signal_type: str = "continuous"
     dependencies: list[str] = ["close"]
     min_periods: int = 10

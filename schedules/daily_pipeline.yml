@@ -6,7 +6,7 @@ enabled: true
 
 steps:
   - name: stock_daily_collect
-    task: market.daily-incremental-collect
+    task: market.daily_incremental_collect
     args: {}
 
   - name: index_daily_collect
