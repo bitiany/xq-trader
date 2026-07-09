@@ -35,7 +35,7 @@ export function AsyncSection({
         <Alert
           type="error"
           showIcon
-          message={t('common.loadFailed')}
+          title={t('common.loadFailed')}
           description={error}
           action={
             onRetry ? (

@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { Tabs, Select, Space, Table, Tag, Modal, message } from 'antd';
+import { App, Tabs, Select, Space, Table, Tag, Modal } from 'antd';
 import { Star, Briefcase, ListOrdered, GitBranch } from 'lucide-react';
 import { usePageWebSocket } from '@/ws/usePageWebSocket';
 import { TOPIC_TRADING_PNL, type TradingPnlData } from '@/ws/protocol';
@@ -48,6 +48,7 @@ const ACCOUNT_TYPE_COLOR: Record<TradingAccount['account_type'], string> = {
 };
 
 export function LiveCockpitPage() {
+  const { message } = App.useApp();
   const [accounts, setAccounts] = useState<TradingAccount[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
   const [activeDecisionInstanceId, setActiveDecisionInstanceId] = useState<number | null>(null);

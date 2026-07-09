@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Card, message, Space, Spin, Steps, Table, Tag } from 'antd';
+import { App, Button, Card, Space, Spin, Steps, Table, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { GitBranch, Zap } from 'lucide-react';
 import { ApiError } from '@/api/types';
@@ -80,6 +80,7 @@ function formatWeight(value: number | null) {
 }
 
 export function WorkflowRunTab({ accountId, onOpenApproval }: WorkflowRunTabProps) {
+  const { message } = App.useApp();
   const [preOrders, setPreOrders] = useState<PreOrder[]>([]);
   const [loading, setLoading] = useState(false);
   const [submittingIds, setSubmittingIds] = useState<number[]>([]);

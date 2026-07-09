@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { Drawer, Input, Switch, Table, Button, Popconfirm, Tag, message } from 'antd'
+import { App, Drawer, Input, Switch, Table, Button, Popconfirm, Tag } from 'antd'
 import { Plus } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import {
@@ -51,6 +51,7 @@ function toTableRows(keys: AiProviderKey[]): KeyTableRow[] {
 
 export function ProviderKeysDrawer({ open, provider, onClose }: ProviderKeysDrawerProps) {
   const { t } = useTranslation()
+  const { message } = App.useApp()
   const [rows, setRows] = useState<KeyTableRow[]>([])
   const [keysLoading, setKeysLoading] = useState(false)
   const [keysError, setKeysError] = useState<string | null>(null)

@@ -812,7 +812,9 @@
     "loadErrors": {
       "overview": "概览",
       "diagnosis": "诊股",
-      "diagnosisHistory": "诊股历史"
+      "diagnosisHistory": "诊股历史",
+      "kline": "K线",
+      "chanlun": "缠论"
     },
     "news": {
       "empty": "暂无资讯",

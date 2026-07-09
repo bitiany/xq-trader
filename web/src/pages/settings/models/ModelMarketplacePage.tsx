@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Button, message, Modal } from 'antd'
+import { App, Button, Modal } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { aiModelApi, type AiModelItem } from '@/api/ai/models'
 import type { AiProviderDefinition } from '@/api/ai/providers'
@@ -15,6 +15,7 @@ import './ModelMarketplacePage.css'
 
 export function ModelMarketplacePage() {
   const { t } = useTranslation()
+  const { message } = App.useApp()
   const {
     models,
     providers,

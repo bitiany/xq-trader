@@ -134,7 +134,14 @@ export function StockDiagnosisPanel({
 
   const activeModule = moduleKey ? moduleMap[moduleKey] ?? null : null
 
+  const scrollToModule = useCallback((key: string) => {
+    setModuleKey(key)
+    document.getElementById(`diagnosis-module-${key}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [])
 
+  const openModuleDrawer = useCallback((key: string) => {
+    setModuleKey(key)
+  }, [])
 
   if (loading && !data) {
 
@@ -142,7 +149,7 @@ export function StockDiagnosisPanel({
 
       <div className="stock-panel card stock-diagnosis stock-diagnosis--loading">
 
-        <Spin tip={t('common.loading')} />
+        <Spin description={t('common.loading')} />
 
       </div>
 
@@ -166,7 +173,7 @@ export function StockDiagnosisPanel({
 
             showIcon
 
-            message={t('common.loadFailed')}
+            title={t('common.loadFailed')}
 
             description={error}
 
@@ -239,21 +246,7 @@ export function StockDiagnosisPanel({
 
 
   const hasSummary =
-
     Boolean(data.summary?.narrative) || (data.summary?.bullets?.length ?? 0) > 0
-
-
-
-  const scrollToModule = useCallback((key: string) => {
-    setModuleKey(key)
-    document.getElementById(`diagnosis-module-${key}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }, [])
-
-  const openModuleDrawer = useCallback((key: string) => {
-    setModuleKey(key)
-  }, [])
-
-
 
   return (
 

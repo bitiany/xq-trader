@@ -1,4 +1,4 @@
-import { Tabs, Button, Dropdown, message } from 'antd'
+import { App, Tabs, Button, Dropdown } from 'antd'
 import type { MenuProps } from 'antd'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
@@ -40,6 +40,7 @@ export function StockDetailPage() {
   const { symbol = '' } = useParams()
   const decodedSymbol = decodeURIComponent(symbol)
   const { t } = useTranslation()
+  const { message } = App.useApp()
   const navigate = useNavigate()
   const [mainIndicator, setMainIndicator] = useState<MainIndicator>('ma')
   const [subIndicator, setSubIndicator] = useState<SubIndicator>('macd')
@@ -101,11 +102,21 @@ export function StockDetailPage() {
   const diagnosisRefreshRef = useRef(false)
   const [newsCollecting, setNewsCollecting] = useState(false)
 
-  const { data: fundFlow, error: fundFlowError } = useRequest(() => fetchStockFundFlow(decodedSymbol, 1200), {
+  const {
+    data: fundFlow,
+    loading: fundFlowLoading,
+    error: fundFlowError,
+    reload: reloadFundFlow,
+  } = useRequest(() => fetchStockFundFlow(decodedSymbol, 1200), {
     deps: fundFlowDeps,
     immediate: activeTab === 'fundFlow' || subIndicator === 'fundflow',
   })
-  const { data: financials, error: financialsError } = useRequest(
+  const {
+    data: financials,
+    loading: financialsLoading,
+    error: financialsError,
+    reload: reloadFinancials,
+  } = useRequest(
     () => fetchStockFinancials(decodedSymbol),
     { deps: financialsDeps, immediate: activeTab === 'financials' },
   )
@@ -128,11 +139,21 @@ export function StockDetailPage() {
     { deps: diagnosisDeps,
       immediate: activeTab === 'diagnosis' },
   )
-  const { data: news, reload: reloadNews, error: newsError } = useRequest(
+  const {
+    data: news,
+    loading: newsLoading,
+    reload: reloadNews,
+    error: newsError,
+  } = useRequest(
     () => fetchStockNews(decodedSymbol),
     { deps: newsDeps, immediate: activeTab === 'news' },
   )
-  const { data: announcements, reload: reloadAnnouncements, error: announcementsError } = useRequest(
+  const {
+    data: announcements,
+    loading: announcementsLoading,
+    reload: reloadAnnouncements,
+    error: announcementsError,
+  } = useRequest(
     () => fetchStockAnnouncements(decodedSymbol),
     { deps: announcementsDeps,
       immediate: activeTab === 'announcements' },
@@ -178,6 +199,8 @@ export function StockDetailPage() {
     allOverlays,
     chanlun,
     loading: klineLoading,
+    error: klineError,
+    chanlunError,
   } = useStockKline(decodedSymbol, mainIndicator, subIndicator)
 
   const { quote: liveQuote, inSession } = useStockQuote(decodedSymbol)
@@ -227,8 +250,8 @@ export function StockDetailPage() {
   )
 
   const hasOverview = overviewReady && stockOverview != null && displayQuote != null
+  // 仅首次无数据时整页 Spin；失败或已有数据时仍展示骨架
   const pageLoading = loading && !overview && !error
-  const showPageBody = !loading
 
   useRequestErrorToast(error, t('stock.loadErrors.overview'))
   useRequestErrorToast(diagnosisError, t('stock.loadErrors.diagnosis'))
@@ -237,6 +260,8 @@ export function StockDetailPage() {
   useRequestErrorToast(financialsError, t('stock.tabs.financials'))
   useRequestErrorToast(newsError, t('stock.tabs.news'))
   useRequestErrorToast(announcementsError, t('stock.tabs.announcements'))
+  useRequestErrorToast(klineError, t('stock.loadErrors.kline'))
+  useRequestErrorToast(chanlunError, t('stock.loadErrors.chanlun'))
 
   return (
     <div key={decodedSymbol} className="page stock-page">
@@ -279,109 +304,125 @@ export function StockDetailPage() {
       </div>
 
       <AsyncSection loading={pageLoading} onRetry={() => void reload()}>
-        {showPageBody ? (
-          <>
-            {hasOverview ? (
-              <StockQuoteHeader
-                overview={stockOverview}
-                quote={displayQuote}
-                valuation={stockOverview.valuation}
+        <>
+          {hasOverview ? (
+            <StockQuoteHeader
+              overview={stockOverview}
+              quote={displayQuote}
+              valuation={stockOverview.valuation}
+            />
+          ) : (
+            <div className="card stock-page__fallback-header">
+              <h2 className="stock-page__symbol">{decodedSymbol}</h2>
+            </div>
+          )}
+
+          <div className="stock-page__main">
+            <div className="stock-page__chart card">
+              <StockKlineChart
+                bars={displayBars}
+                mainIndicator={mainIndicator}
+                subIndicator={subIndicator}
+                mainIndicatorOptions={mainIndicatorOptions}
+                subIndicatorOptions={subIndicatorOptions}
+                onMainIndicatorChange={setMainIndicator}
+                onSubIndicatorChange={setSubIndicator}
+                allOverlays={allOverlays}
+                maOverlays={maOverlays}
+                chanlun={chanlun ?? undefined}
+                fundFlowItems={fundFlow?.items}
+                loading={klineLoading}
               />
-            ) : (
-              <div className="card stock-page__fallback-header">
-                <h2 className="stock-page__symbol">{decodedSymbol}</h2>
-              </div>
-            )}
-
-            <div className="stock-page__main">
-              <div className="stock-page__chart card">
-                <StockKlineChart
-                  bars={displayBars}
-                  mainIndicator={mainIndicator}
-                  subIndicator={subIndicator}
-                  mainIndicatorOptions={mainIndicatorOptions}
-                  subIndicatorOptions={subIndicatorOptions}
-                  onMainIndicatorChange={setMainIndicator}
-                  onSubIndicatorChange={setSubIndicator}
-                  allOverlays={allOverlays}
-                  maOverlays={maOverlays}
-                  chanlun={chanlun ?? undefined}
-                  fundFlowItems={fundFlow?.items}
-                  loading={klineLoading}
-                />
-              </div>
-
-              {hasOverview && stockOverview.introduction ? (
-                <div className="card stock-intro">
-                  <div className="card__header">
-                    <h3 className="card__title">{t('stock.intro.title')}</h3>
-                  </div>
-                  <p>{stockOverview.introduction}</p>
-                </div>
-              ) : null}
             </div>
 
-            <Tabs
-              className="stock-page__tabs"
-              activeKey={activeTab}
-              onChange={setActiveTab}
-              items={[
-                {
-                  key: 'news',
-                  label: t('stock.tabs.news'),
-                  children: (
-                    <StockNewsPanel
-                      data={news}
-                      collecting={newsCollecting}
-                      onCollect={handleCollectNews}
-                      onReload={() => void reloadNews()}
-                    />
-                  ),
-                },
-                {
-                  key: 'fundFlow',
-                  label: t('stock.tabs.fundFlow'),
-                  children: <StockFundFlowPanel data={fundFlow} />,
-                },
-                {
-                  key: 'announcements',
-                  label: t('stock.tabs.announcements'),
-                  children: (
-                    <StockAnnouncementsPanel
-                      data={announcements}
-                      collecting={newsCollecting}
-                      onCollect={handleCollectNews}
-                      onReload={() => void reloadAnnouncements()}
-                    />
-                  ),
-                },
-                {
-                  key: 'financials',
-                  label: t('stock.tabs.financials'),
-                  children: <StockFinancialsPanel data={financials} />,
-                },
-                {
-                  key: 'diagnosis',
-                  label: t('stock.tabs.diagnosis'),
-                  children: (
-                    <StockDiagnosisPanel
-                      symbol={decodedSymbol}
-                      data={diagnosis}
-                      history={diagnosisHistory}
-                      loading={diagnosisLoading}
-                      historyLoading={diagnosisHistoryLoading}
-                      error={diagnosisError}
-                      onDeepAnalysis={() => triggerAnalysis('full')}
-                      onRefresh={handleDiagnosisRefresh}
-                      onSummaryRefresh={() => void reloadDiagnosis()}
-                      onRetry={() => void reloadDiagnosis()}
-                    />
-                  ),
-                },
-              ]}
-            />
-          </>
-        ) : null}
+            {hasOverview && stockOverview.introduction ? (
+              <div className="card stock-intro">
+                <div className="card__header">
+                  <h3 className="card__title">{t('stock.intro.title')}</h3>
+                </div>
+                <p>{stockOverview.introduction}</p>
+              </div>
+            ) : null}
+          </div>
+
+          <Tabs
+            className="stock-page__tabs"
+            activeKey={activeTab}
+            onChange={setActiveTab}
+            items={[
+              {
+                key: 'news',
+                label: t('stock.tabs.news'),
+                children: (
+                  <StockNewsPanel
+                    data={news}
+                    collecting={newsCollecting}
+                    loading={newsLoading}
+                    error={newsError}
+                    onCollect={handleCollectNews}
+                    onReload={() => void reloadNews()}
+                  />
+                ),
+              },
+              {
+                key: 'fundFlow',
+                label: t('stock.tabs.fundFlow'),
+                children: (
+                  <StockFundFlowPanel
+                    data={fundFlow}
+                    loading={fundFlowLoading}
+                    error={fundFlowError}
+                    onRetry={() => void reloadFundFlow()}
+                  />
+                ),
+              },
+              {
+                key: 'announcements',
+                label: t('stock.tabs.announcements'),
+                children: (
+                  <StockAnnouncementsPanel
+                    data={announcements}
+                    collecting={newsCollecting}
+                    loading={announcementsLoading}
+                    error={announcementsError}
+                    onCollect={handleCollectNews}
+                    onReload={() => void reloadAnnouncements()}
+                  />
+                ),
+              },
+              {
+                key: 'financials',
+                label: t('stock.tabs.financials'),
+                children: (
+                  <StockFinancialsPanel
+                    data={financials}
+                    loading={financialsLoading}
+                    error={financialsError}
+                    onRetry={() => void reloadFinancials()}
+                  />
+                ),
+              },
+              {
+                key: 'diagnosis',
+                label: t('stock.tabs.diagnosis'),
+                children: (
+                  <StockDiagnosisPanel
+                    symbol={decodedSymbol}
+                    data={diagnosis}
+                    history={diagnosisHistory}
+                    loading={diagnosisLoading}
+                    historyLoading={diagnosisHistoryLoading}
+                    error={diagnosisError}
+                    onDeepAnalysis={() => triggerAnalysis('full')}
+                    onRefresh={handleDiagnosisRefresh}
+                    onSummaryRefresh={() => void reloadDiagnosis()}
+                    onRetry={() => void reloadDiagnosis()}
+                  />
+                ),
+              },
+            ]}
+          />
+        </>
       </AsyncSection>
       <StockFactorDrawer
         open={factorDrawerOpen}

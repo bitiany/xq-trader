@@ -9,6 +9,7 @@ import {
 } from '@/api'
 import { AsyncSection } from '@/components/common/AsyncSection'
 import { useRequest } from '@/hooks/useRequest'
+import { useRequestErrorToast } from '@/hooks/useRequestErrorToast'
 import { FactorDashboard } from './components/FactorDashboard'
 import { FactorLibraryTab } from './components/FactorLibraryTab'
 import { CompositeTab } from './components/CompositeTab'
@@ -28,6 +29,8 @@ export function FactorWorkbenchPage() {
   const poolsReq = useRequest(() => fetchPools(true))
   const categoriesReq = useRequest(() => fetchFactorCategories())
   const factorsReq = useRequest(() => fetchAllFactors())
+  useRequestErrorToast(poolsReq.error, t('factor.pool'))
+  useRequestErrorToast(categoriesReq.error, t('factor.library.category'))
 
   const pools = useMemo(() => poolsReq.data ?? [], [poolsReq.data])
   const categories = useMemo(() => categoriesReq.data ?? [], [categoriesReq.data])

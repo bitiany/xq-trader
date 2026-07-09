@@ -419,6 +419,13 @@
   min-height: 240px;
 }
 
+.stock-panel--loading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 180px;
+}
+
 .stock-diagnosis__trend {
   width: 100%;
   height: 280px;

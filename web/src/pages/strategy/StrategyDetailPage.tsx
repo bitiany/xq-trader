@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
+  App,
   Button,
   Input,
   Modal,
@@ -10,7 +11,6 @@ import {
   Table,
   Tabs,
   Tag,
-  message,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { ArrowLeft, Pencil, Trash2 } from 'lucide-react'
@@ -35,6 +35,7 @@ export function StrategyDetailPage() {
   const decodedId = decodeURIComponent(strategyId)
   const navigate = useNavigate()
   const { t } = useTranslation()
+  const { message } = App.useApp()
 
   const { data: detail, loading, error, reload } = useRequest(
     () => fetchStrategyDetail(decodedId),

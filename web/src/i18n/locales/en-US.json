@@ -792,7 +792,9 @@
     "loadErrors": {
       "overview": "Overview",
       "diagnosis": "Diagnosis",
-      "diagnosisHistory": "Diagnosis history"
+      "diagnosisHistory": "Diagnosis history",
+      "kline": "K-line",
+      "chanlun": "Chanlun"
     },
     "news": {
       "empty": "No news",

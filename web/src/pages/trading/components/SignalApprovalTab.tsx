@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Tag, Button, Space, message, Modal, Form, InputNumber, Select, Input, Spin } from 'antd';
+import { App, Tag, Button, Space, Modal, Form, InputNumber, Select, Input, Spin } from 'antd';
 import { Zap, ArrowRight, History, AlertTriangle } from 'lucide-react';
 import { ApiError } from '@/api/types';
 import {
@@ -187,6 +187,7 @@ export function SignalApprovalTab({
   onInstanceChange,
   onOpenHistory,
 }: SignalApprovalTabProps) {
+  const { message } = App.useApp();
   const [preOrders, setPreOrders] = useState<PreOrder[]>([]);
   const [riskEvents, setRiskEvents] = useState<RiskEvent[]>([]);
   const [loading, setLoading] = useState(false);

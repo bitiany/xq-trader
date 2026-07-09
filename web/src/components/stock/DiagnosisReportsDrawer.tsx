@@ -84,7 +84,7 @@ export function DiagnosisReportsDrawer({
       destroyOnClose
     >
       {loading ? (
-        <Spin tip={t('common.loading')} />
+        <Spin description={t('common.loading')} />
       ) : items.length > 0 ? (
         <Table
           size="small"

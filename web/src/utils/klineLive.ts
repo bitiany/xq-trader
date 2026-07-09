@@ -1,4 +1,4 @@
-import type { KlineBarItem, StockQuoteSnapshot } from '@/api/stock'
+﻿import type { KlineBarItem, StockQuoteSnapshot } from '@/api/stock'
 
 export function mergeLiveQuoteIntoBars(
   bars: KlineBarItem[],

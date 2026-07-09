@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
   Alert,
+  App,
   Button,
   DatePicker,
   Empty,
@@ -14,7 +15,6 @@ import {
   Table,
   Tabs,
   Tag,
-  message,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs, { type Dayjs } from 'dayjs'
@@ -38,6 +38,7 @@ import {
 import { extractPageItems, isApiError } from '@/api/types'
 import { AsyncSection } from '@/components/common/AsyncSection'
 import { useRequest } from '@/hooks/useRequest'
+import { useRequestErrorToast } from '@/hooks/useRequestErrorToast'
 
 const DEFAULT_TOP_N = 50
 const SELECTION_WORKBENCH_STATE_KEY = 'xqtrader.selectionWorkbench.state'
@@ -452,6 +453,7 @@ function IndustryDistributionChart({ data, loading }: IndustryDistributionChartP
 
 export function SelectionWorkbenchPage() {
   const { t } = useTranslation()
+  const { message } = App.useApp()
   const restoredState = useMemo(() => loadSelectionWorkbenchState(), [])
   const [strategyId, setStrategyId] = useState<string | undefined>(restoredState?.strategyId)
   const [signalDate, setSignalDate] = useState<Dayjs>(restoredState?.signalDate ? dayjs(restoredState.signalDate) : dayjs())
@@ -464,10 +466,14 @@ export function SelectionWorkbenchPage() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const hasInitializedSignalDateRef = useRef(Boolean(restoredState?.signalDate))
 
-  const { data: latestTradeDate } = useRequest(() => fetchLatestTradeDate())
-  const { data: factorsPage } = useRequest(() => fetchFactors({ page_size: 200 }))
-  const { data: strategiesPage } = useRequest(() => fetchStrategies({ status: 'active', strategy_type: 'selection', page_size: 200 }))
-  const { data: poolsData } = useRequest(() => fetchPools(true))
+  const { data: latestTradeDate, error: latestTradeDateError } = useRequest(() => fetchLatestTradeDate())
+  const { data: factorsPage, error: factorsError } = useRequest(() => fetchFactors({ page_size: 200 }))
+  const { data: strategiesPage, error: strategiesError } = useRequest(() => fetchStrategies({ status: 'active', strategy_type: 'selection', page_size: 200 }))
+  const { data: poolsData, error: poolsError } = useRequest(() => fetchPools(true))
+  useRequestErrorToast(latestTradeDateError, t('strategy.signalDate'))
+  useRequestErrorToast(factorsError, t('strategy.factorValues'))
+  useRequestErrorToast(strategiesError, t('strategy.selectStrategy'))
+  useRequestErrorToast(poolsError, t('strategy.universe'))
 
   const strategies = useMemo(
     () => extractPageItems<Strategy>(strategiesPage),
@@ -792,7 +798,7 @@ export function SelectionWorkbenchPage() {
         )}
       </div>
 
-      {errorMsg && <Alert type="error" showIcon message={errorMsg} closable onClose={() => setErrorMsg(null)} />}
+      {errorMsg && <Alert type="error" showIcon title={errorMsg} closable onClose={() => setErrorMsg(null)} />}
 
       <AsyncSection loading={loading && !result}>
         {result ? (

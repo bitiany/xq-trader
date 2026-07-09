@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Button, Empty, Select, Space, Table, Tag, message } from 'antd'
+import { App, Button, Empty, Select, Space, Table, Tag } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { Play, Search } from 'lucide-react'
 
@@ -15,6 +15,7 @@ import {
 import { extractPageItems, isApiError } from '@/api/types'
 import { AsyncSection } from '@/components/common/AsyncSection'
 import { useRequest } from '@/hooks/useRequest'
+import { useRequestErrorToast } from '@/hooks/useRequestErrorToast'
 
 function getScoreColor(score: number, min: number, max: number): string {
   if (max <= min) return 'var(--text-secondary)'
@@ -26,6 +27,7 @@ function getScoreColor(score: number, min: number, max: number): string {
 
 export function SelectionHistoryPage() {
   const { t } = useTranslation()
+  const { message } = App.useApp()
   const navigate = useNavigate()
   const [strategyId, setStrategyId] = useState<string | undefined>(undefined)
   const [signalDate, setSignalDate] = useState<string | undefined>(undefined)
@@ -34,7 +36,8 @@ export function SelectionHistoryPage() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [dates, setDates] = useState<string[]>([])
 
-  const { data: strategiesPage } = useRequest(() => fetchStrategies({ page_size: 200 }))
+  const { data: strategiesPage, error: strategiesError } = useRequest(() => fetchStrategies({ page_size: 200 }))
+  useRequestErrorToast(strategiesError, t('strategy.selectStrategy'))
   const strategies = useMemo(() => extractPageItems<Strategy>(strategiesPage), [strategiesPage])
 
   useEffect(() => {

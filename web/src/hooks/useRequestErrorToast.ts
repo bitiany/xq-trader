@@ -1,8 +1,9 @@
-import { message } from 'antd'
+import { App } from 'antd'
 import { useEffect, useRef } from 'react'
 
 /** API 请求失败时用 message 提示，不阻断页面渲染 */
 export function useRequestErrorToast(error: string | null, label?: string) {
+  const { message } = App.useApp()
   const shownRef = useRef<string | null>(null)
 
   useEffect(() => {
@@ -15,5 +16,5 @@ export function useRequestErrorToast(error: string | null, label?: string) {
     }
     shownRef.current = error
     message.error(label ? `${label}: ${error}` : error)
-  }, [error, label])
+  }, [error, label, message])
 }

@@ -5,9 +5,13 @@ import * as echarts from 'echarts'
 import { useTranslation } from 'react-i18next'
 
 import type { StockFundFlowItem, StockFundFlowResponse } from '@/api/stock'
+import { StockPanelState } from '@/components/stock/StockPanelState'
 
 interface StockFundFlowPanelProps {
   data?: StockFundFlowResponse
+  loading?: boolean
+  error?: string | null
+  onRetry?: () => void
 }
 
 // 数据原始单位为万元（Tushare moneyflow 字段单位）
@@ -214,9 +218,17 @@ function FundFlowLineChart({ items }: { items: StockFundFlowItem[] }) {
   return <div ref={containerRef} style={{ width: '100%', height: 280 }} />
 }
 
-export function StockFundFlowPanel({ data }: StockFundFlowPanelProps) {
+export function StockFundFlowPanel({ data, loading, error, onRetry }: StockFundFlowPanelProps) {
   const { t } = useTranslation()
   const rows = data?.items ?? []
+
+  if (loading && !data) {
+    return <StockPanelState loading />
+  }
+
+  if (error && !data) {
+    return <StockPanelState error={error} onRetry={onRetry} />
+  }
 
   if (rows.length === 0) {
     return (

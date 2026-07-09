@@ -1,9 +1,10 @@
-import { Button, Empty, Tag } from 'antd'
+import { Alert, Button, Empty, Tag } from 'antd'
 import { RefreshCw } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import type { StockNewsItem, StockNewsResponse } from '@/api/stock'
+import { StockPanelState } from '@/components/stock/StockPanelState'
 import { formatDateTime } from '@/utils/format'
 
 interface StockNewsListProps {
@@ -12,6 +13,8 @@ interface StockNewsListProps {
   keywordLabelKey?: string
   collectLabelKey?: string
   collecting?: boolean
+  loading?: boolean
+  error?: string | null
   onCollect?: () => void | Promise<void>
   onReload?: () => void
 }
@@ -22,15 +25,41 @@ export function StockNewsList({
   keywordLabelKey,
   collectLabelKey = 'stock.news.collect',
   collecting,
+  loading,
+  error,
   onCollect,
   onReload,
 }: StockNewsListProps) {
   const { t } = useTranslation()
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
 
+  if (loading && !data) {
+    return <StockPanelState loading />
+  }
+
+  if (error && !data) {
+    return <StockPanelState error={error} onRetry={onReload} />
+  }
+
   if (!data || data.items.length === 0) {
     return (
       <div className="stock-panel card">
+        {error ? (
+          <Alert
+            type="error"
+            showIcon
+            title={t('common.loadFailed')}
+            description={error}
+            action={
+              onReload ? (
+                <Button size="small" onClick={onReload}>
+                  {t('common.retry')}
+                </Button>
+              ) : undefined
+            }
+            style={{ marginBottom: 12 }}
+          />
+        ) : null}
         <Empty description={t(emptyKey)} />
         <div className="stock-news__empty-actions">
           {onCollect ? (
@@ -50,9 +79,25 @@ export function StockNewsList({
 
   return (
     <div className="stock-panel card">
+      {error ? (
+        <Alert
+          type="error"
+          showIcon
+          title={t('common.loadFailed')}
+          description={error}
+          action={
+            onReload ? (
+              <Button size="small" onClick={onReload}>
+                {t('common.retry')}
+              </Button>
+            ) : undefined
+          }
+          style={{ marginBottom: 12 }}
+        />
+      ) : null}
       {onReload ? (
         <div className="stock-news__toolbar">
-          <Button size="small" icon={<RefreshCw size={14} />} onClick={onReload}>
+          <Button size="small" icon={<RefreshCw size={14} />} onClick={onReload} loading={loading}>
             {t('common.refresh')}
           </Button>
         </div>

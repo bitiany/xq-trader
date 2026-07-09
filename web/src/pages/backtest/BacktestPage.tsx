@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
-import { Alert, Button, Card, Input, Space, Spin, Tabs, message } from 'antd'
+import { Alert, App, Button, Card, Input, Space, Spin, Tabs } from 'antd'
 import { ArrowLeft, Play, TrendingUp, ListOrdered, Briefcase, ChevronLeft, ChevronRight } from 'lucide-react'
 import dayjs from 'dayjs'
 import {
@@ -135,6 +135,7 @@ function AttributionPanel({ metrics }: { metrics: BacktestSymbolMetrics }) {
 }
 
 export function BacktestPage() {
+  const { message } = App.useApp()
   const { symbol: urlSymbol = '' } = useParams()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -324,7 +325,7 @@ export function BacktestPage() {
         </button>
 
         <div className="backtest-page__main">
-          {errorMsg && <Alert type="error" showIcon message={errorMsg} closable onClose={() => setErrorMsg(null)} />}
+          {errorMsg && <Alert type="error" showIcon title={errorMsg} closable onClose={() => setErrorMsg(null)} />}
 
           {running && (
             <Card style={{ background: 'var(--bg-card)', textAlign: 'center', padding: 40 }}>

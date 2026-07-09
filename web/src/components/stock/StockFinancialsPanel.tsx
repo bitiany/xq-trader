@@ -1,9 +1,14 @@
+import { Empty } from 'antd'
 import { useTranslation } from 'react-i18next'
 
 import type { FinancialReportSummary, StockFinancialsResponse } from '@/api/stock'
+import { StockPanelState } from '@/components/stock/StockPanelState'
 
 interface StockFinancialsPanelProps {
   data?: StockFinancialsResponse
+  loading?: boolean
+  error?: string | null
+  onRetry?: () => void
 }
 
 const HIGHLIGHT_LABELS: Record<string, string> = {
@@ -65,11 +70,23 @@ function ReportBlock({
   )
 }
 
-export function StockFinancialsPanel({ data }: StockFinancialsPanelProps) {
+export function StockFinancialsPanel({ data, loading, error, onRetry }: StockFinancialsPanelProps) {
   const { t } = useTranslation()
 
+  if (loading && !data) {
+    return <StockPanelState loading />
+  }
+
+  if (error && !data) {
+    return <StockPanelState error={error} onRetry={onRetry} />
+  }
+
   if (!data) {
-    return null
+    return (
+      <div className="stock-panel card">
+        <Empty description={t('stock.financials.noData')} />
+      </div>
+    )
   }
 
   return (

@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
+  App,
   Button,
   Form,
   Input,
@@ -11,7 +12,6 @@ import {
   Space,
   Table,
   Tag,
-  message,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { Edit, Plus, Trash2 } from 'lucide-react'
@@ -46,6 +46,7 @@ interface StrategyFormValues {
 
 export function StrategyListPage() {
   const { t } = useTranslation()
+  const { message } = App.useApp()
   const navigate = useNavigate()
   const [keyword, setKeyword] = useState('')
   const [statusFilter, setStatusFilter] = useState<StrategyStatus | 'all'>('all')

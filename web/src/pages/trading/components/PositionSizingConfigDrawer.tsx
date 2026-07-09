@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Drawer, Select, InputNumber, Button, message } from 'antd';
+import { App, Drawer, Select, InputNumber, Button } from 'antd';
 import { Settings, Cpu, Star } from 'lucide-react';
 import { POSITION_SIZING_OPTIONS } from '../utils/trading';
 import { updateInstance } from '@/api/trading';
@@ -44,6 +44,7 @@ function extractParamsFromPositionSizing(ps: Record<string, unknown>): SizingPar
 }
 
 export function PositionSizingConfigDrawer({ open, onClose, onSaved, watchlist, instanceId, positionSizing }: PositionSizingConfigDrawerProps) {
+  const { message } = App.useApp();
   const [selectedSizing, setSelectedSizing] = useState<PositionSizingStrategy>(
     resolveSizingMode(positionSizing.mode),
   );

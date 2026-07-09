@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Button, message, Tag } from 'antd'
+import { App, Button, Tag } from 'antd'
 import { GitBranch, Play } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
@@ -39,6 +39,7 @@ const STEP_NAME_MAP: Record<string, string> = {
 
 export function PipelineCard({ pipeline, onRefresh }: PipelineCardProps) {
   const { t } = useTranslation()
+  const { message } = App.useApp()
   const [triggering, setTriggering] = useState(false)
 
   const handleTrigger = async () => {

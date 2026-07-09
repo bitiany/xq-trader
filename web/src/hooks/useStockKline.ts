@@ -17,6 +17,7 @@ export function useStockKline(symbol: string, mainIndicator: MainIndicator, _sub
   const [chanlunLoading, setChanlunLoading] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [chanlunError, setChanlunError] = useState<string | null>(null)
 
   const loadedSymbolRef = useRef<string>('')
   const chanlunLoadedRef = useRef<string>('')
@@ -50,6 +51,7 @@ export function useStockKline(symbol: string, mainIndicator: MainIndicator, _sub
       setApiOverlays({})
       setApiMaOverlays({})
       setChanlun(null)
+      setChanlunError(null)
       setLoading(false)
       return
     }
@@ -66,6 +68,7 @@ export function useStockKline(symbol: string, mainIndicator: MainIndicator, _sub
     }
     let cancelled = false
     setChanlunLoading(true)
+    setChanlunError(null)
     fetchStockChanlun(symbol)
       .then((data) => {
         if (!cancelled) {
@@ -75,8 +78,8 @@ export function useStockKline(symbol: string, mainIndicator: MainIndicator, _sub
       })
       .catch((err) => {
         if (!cancelled) {
-          console.error('[useStockKline] 缠论数据加载失败:', err)
           setChanlun(null)
+          setChanlunError(err instanceof Error ? err.message : '缠论数据加载失败')
         }
       })
       .finally(() => {
@@ -99,5 +102,15 @@ export function useStockKline(symbol: string, mainIndicator: MainIndicator, _sub
     )
   }, [apiOverlays, maOverlays])
 
-  return { bars, maOverlays, allOverlays, chanlun, chanlunLoading, loading, error, reload: () => void loadBars(symbol) }
+  return {
+    bars,
+    maOverlays,
+    allOverlays,
+    chanlun,
+    chanlunLoading,
+    loading,
+    error,
+    chanlunError,
+    reload: () => void loadBars(symbol),
+  }
 }

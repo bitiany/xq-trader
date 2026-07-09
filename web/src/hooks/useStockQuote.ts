@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+﻿import { useEffect, useMemo, useState } from 'react'
 
 import type { StockQuoteSnapshot } from '@/api/stock'
 import { buildStockQuoteTopic } from '@/api/stock'

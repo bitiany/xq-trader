@@ -6,6 +6,8 @@ export interface UseRequestOptions<T> {
   initialData?: T
   /** 依赖变化时重新请求（如路由 symbol） */
   deps?: readonly unknown[]
+  /** 重请求时保留上一次成功数据，避免闪 Empty；默认 true */
+  keepPreviousData?: boolean
 }
 
 export interface UseRequestResult<T> {
@@ -21,7 +23,7 @@ export function useRequest<T>(
   fetcher: () => Promise<T>,
   options: UseRequestOptions<T> = {},
 ): UseRequestResult<T> {
-  const { immediate = true, initialData, deps = [] } = options
+  const { immediate = true, initialData, deps = [], keepPreviousData = true } = options
   const [data, setData] = useState<T | undefined>(initialData)
   const [loading, setLoading] = useState(immediate)
   const [error, setError] = useState<string | null>(null)
@@ -73,7 +75,9 @@ export function useRequest<T>(
 
     queueMicrotask(() => {
       if (mounted) {
-        setData(undefined)
+        if (!keepPreviousData) {
+          setData(undefined)
+        }
         setLoading(true)
         void runFetch(isMounted)
       }
@@ -82,7 +86,7 @@ export function useRequest<T>(
     return () => {
       mounted = false
     }
-  }, [immediate, runFetch, depsKey])
+  }, [immediate, runFetch, depsKey, keepPreviousData])
 
   const mutate = useCallback((updater: T | ((prev: T | undefined) => T)) => {
     setData((prev) => (typeof updater === 'function' ? (updater as (p: T | undefined) => T)(prev) : updater))

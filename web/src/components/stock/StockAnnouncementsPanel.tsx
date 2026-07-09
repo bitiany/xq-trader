@@ -4,6 +4,8 @@ import { StockNewsList } from '@/components/stock/StockNewsList'
 interface StockAnnouncementsPanelProps {
   data?: StockAnnouncementsResponse
   collecting?: boolean
+  loading?: boolean
+  error?: string | null
   onCollect?: () => void
   onReload?: () => void
 }
@@ -11,6 +13,8 @@ interface StockAnnouncementsPanelProps {
 export function StockAnnouncementsPanel({
   data,
   collecting,
+  loading,
+  error,
   onCollect,
   onReload,
 }: StockAnnouncementsPanelProps) {
@@ -21,6 +25,8 @@ export function StockAnnouncementsPanel({
       keywordLabelKey="stock.announcements.type"
       collectLabelKey="stock.announcements.collect"
       collecting={collecting}
+      loading={loading}
+      error={error}
       onCollect={onCollect}
       onReload={onReload}
     />

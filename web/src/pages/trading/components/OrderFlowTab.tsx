@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Spin, Table, Tag, message } from 'antd';
+import { App, Spin, Table, Tag } from 'antd';
 import { fetchOrders, type TradingOrder } from '@/api/trading';
 import { STATUS_COLOR, STATUS_LABEL, SIDE_LABEL } from '../utils/trading';
 import type { OrderStatus } from '../types';
@@ -27,6 +27,7 @@ function formatPrice(order: TradingOrder) {
 }
 
 export function OrderFlowTab({ accountId }: OrderFlowTabProps) {
+  const { message } = App.useApp();
   const [orders, setOrders] = useState<TradingOrder[]>([]);
   const [loading, setLoading] = useState(false);
 

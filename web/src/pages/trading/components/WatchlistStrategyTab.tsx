@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
-import { Card, Table, Tag, Button, Space, message, Modal, Form, Input, InputNumber, Select, Spin } from 'antd';
+import { App, Card, Table, Tag, Button, Space, Modal, Form, Input, InputNumber, Select, Spin } from 'antd';
 import { Star, Search, Plus, Trash2, Cpu, Settings, X, Edit2 } from 'lucide-react';
 import { INSTANCE_STATUS_COLOR, INSTANCE_STATUS_LABEL, RUN_MODE_LABEL } from '../utils/trading';
 import { PositionSizingConfigDrawer } from './PositionSizingConfigDrawer';
@@ -26,6 +26,7 @@ interface WatchlistStrategyTabProps {
 }
 
 export function WatchlistStrategyTab({ accountId }: WatchlistStrategyTabProps) {
+  const { message } = App.useApp();
   const [watchlistItems, setWatchlistItems] = useState<ApiWatchlistItem[]>([]);
   const [instances, setInstances] = useState<StrategyInstance[]>([]);
   const [account, setAccount] = useState<TradingAccount | null>(null);

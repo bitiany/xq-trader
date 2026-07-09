@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { Table, Tag, Switch, Badge, Button, message, Modal, Input, Spin } from 'antd';
+import { App, Table, Tag, Switch, Badge, Button, Modal, Input, Spin } from 'antd';
 import { Shield, Flame, CheckCircle, ChevronDown, ChevronRight, History } from 'lucide-react';
 import {
   enableAccountKillSwitch,
@@ -27,6 +27,7 @@ function eventDetailText(event: RiskEvent) {
 }
 
 export function RiskSidePanel({ accountId, instanceId, onOpenHistory }: RiskSidePanelProps) {
+  const { message } = App.useApp();
   const [showRules, setShowRules] = useState(false);
   const [rules, setRules] = useState<RiskRule[]>([]);
   const [events, setEvents] = useState<RiskEvent[]>([]);

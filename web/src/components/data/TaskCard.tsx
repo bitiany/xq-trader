@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Button, DatePicker, Form, Modal, Switch, message } from 'antd'
+import { App, Button, DatePicker, Form, Modal, Switch } from 'antd'
 import dayjs from 'dayjs'
 import {
   BarChart3,
@@ -51,6 +51,7 @@ interface TriggerParamsFormValues {
 
 export function TaskCard({ task, onRefresh }: TaskCardProps) {
   const { t, i18n } = useTranslation()
+  const { message } = App.useApp()
   const isZh = i18n.language.startsWith('zh')
   const Icon = CATEGORY_ICONS[task.category as keyof typeof CATEGORY_ICONS] ?? Sparkles
 

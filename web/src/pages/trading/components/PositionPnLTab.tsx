@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Spin, Table, message } from 'antd';
+import { App, Spin, Table } from 'antd';
 import {
   fetchAccountSnapshots,
   fetchPositions,
@@ -19,6 +19,7 @@ function num(value: string | number | null) {
 }
 
 export function PositionPnLTab({ accountId }: PositionPnLTabProps) {
+  const { message } = App.useApp();
   const [positions, setPositions] = useState<PositionSnapshot[]>([]);
   const [snapshots, setSnapshots] = useState<AccountSnapshot[]>([]);
   const [loading, setLoading] = useState(false);
