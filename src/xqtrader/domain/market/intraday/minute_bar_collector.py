@@ -14,14 +14,15 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from framework.commons.redis_client import redis_client
-from xqtrader.broker.services.qmt_data_collector import convert_symbol_from_qmt
 from xqtrader.domain.market.models.candlestick import CandlestickMinute
 
 logger = logging.getLogger("INTRADAY.COLLECTOR")
+
+_CST = timezone(timedelta(hours=8))  # A股交易时区：Asia/Shanghai
 
 _BATCH_INTERVAL = 5  # 批量写入间隔（秒）
 _LAST_TS_KEY = "intraday:minute_bar:last_ts"  # Redis 缓存的最后处理时间戳
@@ -94,10 +95,10 @@ class MinuteBarCollector:
     def _parse_bar(stock_code: str, bar_data: dict[str, Any]) -> CandlestickMinute | None:
         """解析 QMT bar 数据为 CandlestickMinute 实例
 
-        QMT 时间戳为毫秒级 epoch，需转换为 UTC datetime
+        QMT 时间戳为毫秒级 epoch（UTC），转换为 A股交易时区 Asia/Shanghai
         """
-        # 证券代码转换：SH.600000 -> 600000.SH（复用 qmt_data_collector 的转换函数）
-        symbol = convert_symbol_from_qmt(stock_code)
+        # stock_code 为 Tushare 格式（如 600000.SH），直接使用
+        symbol = stock_code
         if "." not in symbol:
             logger.warning("无法解析证券代码: %s", stock_code)
             return None
@@ -107,12 +108,12 @@ class MinuteBarCollector:
         if timestamp is None:
             logger.warning("bar 数据缺少 time 字段: %s", stock_code)
             return None
-        # QMT 时间戳为本地时间（北京时间），需明确处理
         # timestamp 单位为秒（浮点）或毫秒（整数）
         if isinstance(timestamp, (int, float)):
             if timestamp > 1e12:  # 毫秒级
                 timestamp = timestamp / 1000.0
-            trade_time = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+            # 使用 Asia/Shanghai 时区，与本地时钟一致
+            trade_time = datetime.fromtimestamp(timestamp, tz=_CST)
         else:
             logger.warning("无法解析时间戳: %s, type=%s", timestamp, type(timestamp))
             return None

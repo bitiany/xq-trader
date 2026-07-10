@@ -16,30 +16,6 @@ from framework.commons.exceptions import DataCollectionError
 logger = logging.getLogger(__name__)
 
 
-def convert_symbol_to_qmt(symbol: str) -> str:
-    """将 Tushare 格式代码转为 QMT 格式。
-
-    Tushare: 000001.SH / 399006.SZ
-    QMT:     SH.000001 / SZ.399006
-    """
-    parts = symbol.split(".")
-    if len(parts) == 2:
-        return f"{parts[1]}.{parts[0]}"
-    return symbol
-
-
-def convert_symbol_from_qmt(qmt_code: str) -> str:
-    """将 QMT 格式代码转为 Tushare 格式。
-
-    QMT:     SH.000001 / SZ.399006
-    Tushare: 000001.SH / 399006.SZ
-    """
-    parts = qmt_code.split(".")
-    if len(parts) == 2:
-        return f"{parts[1]}.{parts[0]}"
-    return qmt_code
-
-
 class QmtDataCollector:
     """QMT 行情数据采集服务。
 
@@ -344,20 +320,22 @@ class QmtDataCollector:
         stock_codes: list[str],
         callback: Callable[[str, dict[str, Any]], None],
         period: str = "1m",
-    ) -> int:
+    ) -> list[int]:
         """订阅实时分钟K线（盘中用）。
+
+        xtdata.subscribe_quote 仅支持单个股票代码，本方法逐个订阅并返回全部 seq。
 
         回调在 QMT 内部线程中执行，如需访问 asyncio 资源（如 DB 写入），
         调用方需通过 asyncio.run_coroutine_threadsafe 桥接。
 
         Args:
-            stock_codes: 证券代码列表
+            stock_codes: 证券代码列表（Tushare 格式，如 ["600000.SH"]）
             callback: 收到新分钟线时的回调，签名 callback(stock_code, bar_data)
                       bar_data 包含 keys: time, open, high, low, close, volume, amount
             period: K线周期，默认 "1m"
 
         Returns:
-            订阅序号（用于 unsubscribe_quote 取消订阅）
+            订阅序号列表（用于 unsubscribe 取消订阅）
         """
         def _on_data(datas: dict[str, Any]) -> None:
             """xtdata 回调：{stock_code: [bar_dict, ...]}"""
@@ -367,15 +345,27 @@ class QmtDataCollector:
                 latest_bar = bars[-1]
                 callback(stock_code, latest_bar)
 
-        seq = cast(int, self._with_lock(
-            xtdata.subscribe_quote,
-            stock_codes,
-            period=period,
-            count=1,
-            callback=_on_data,
-        ))
-        logger.info("订阅分钟线: period=%s stocks=%d seq=%s", period, len(stock_codes), seq)
-        return seq
+        seqs: list[int] = []
+        try:
+            for code in stock_codes:
+                seq = cast(int, self._with_lock(
+                    xtdata.subscribe_quote,
+                    code,
+                    period=period,
+                    count=1,
+                    callback=_on_data,
+                ))
+                seqs.append(seq)
+        except Exception:
+            # 部分成功时回滚已订阅的
+            for seq in seqs:
+                try:
+                    self._with_lock(xtdata.unsubscribe_quote, seq)
+                except Exception:
+                    pass
+            raise
+        logger.info("订阅分钟线: period=%s stocks=%d seqs=%s", period, len(stock_codes), seqs)
+        return seqs
 
     def subscribe_whole_quote(
         self,

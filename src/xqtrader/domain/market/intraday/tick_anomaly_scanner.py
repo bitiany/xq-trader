@@ -15,8 +15,6 @@ from collections import deque
 from collections.abc import Callable
 from typing import Any
 
-from xqtrader.broker.services.qmt_data_collector import convert_symbol_from_qmt
-
 logger = logging.getLogger("INTRADAY.ANOMALY")
 
 # 异动检测阈值
@@ -61,7 +59,7 @@ class TickAnomalyScanner:
         """QMT subscribe_whole_quote 回调（在 QMT 内部线程中执行）
 
         Args:
-            datas: {qmt_symbol: {lastPrice, volume, amount, ...}}
+            datas: {symbol: {lastPrice, volume, amount, ...}}（Tushare 格式）
         """
         if not self._running:
             return
@@ -93,8 +91,8 @@ class TickAnomalyScanner:
 
     def _process_quote(self, qmt_symbol: str, quote: dict[str, Any], now: float) -> None:
         """处理单个标的快照"""
-        # 证券代码转换：SH.600000 -> 600000.SH（复用 qmt_data_collector 的转换函数）
-        symbol = convert_symbol_from_qmt(qmt_symbol)
+        # qmt_symbol 为 Tushare 格式（如 600000.SH），直接使用
+        symbol = qmt_symbol
         if "." not in symbol:
             return
 

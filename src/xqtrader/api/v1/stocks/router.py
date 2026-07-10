@@ -163,6 +163,25 @@ async def get_stock_diagnosis_history(
 
 
 @router.post(
+    "/{symbol}/diagnosis/refresh",
+    summary="异步重算个股诊股评分",
+    operation_id="trigger_stock_diagnosis_refresh",
+)
+async def trigger_stock_diagnosis_refresh(symbol: str) -> dict:
+    from worker.celery_app import celery_app
+
+    result = celery_app.send_task(
+        "market.stock_diagnosis_snapshot",
+        kwargs={"stock_codes": [symbol]},
+    )
+    return {
+        "symbol": symbol,
+        "task_id": result.id,
+        "status": "PENDING",
+    }
+
+
+@router.post(
     "/{symbol}/diagnosis/summary",
     summary="异步生成诊股 AI 解读",
     operation_id="trigger_stock_diagnosis_summary",

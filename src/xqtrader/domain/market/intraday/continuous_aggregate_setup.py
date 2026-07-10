@@ -28,8 +28,13 @@ async def setup_continuous_aggregates(engine: AsyncEngine) -> None:
     """创建 5m/15m/30m/1h Continuous Aggregate + 刷新策略 + retention policy
 
     幂等：所有操作均检查是否已存在，可重复执行。
-    在 FastAPI lifespan 中调用（表和 hypertable 已由 DatasourceManager 创建）。
+    前置条件：sdc_candlestick_1m 已通过 DatasourceManager 转为 hypertable。
     """
+    # 前置检查：base table 必须为 hypertable
+    if not await _is_hypertable(engine, "sdc_candlestick_1m"):
+        logger.warning("sdc_candlestick_1m 不是 hypertable，跳过 Continuous Aggregate 初始化")
+        return
+
     for suffix, bucket in _CAGG_DEFINITIONS:
         view_name = f"sdc_candlestick_{suffix}_cagg"
         await _create_continuous_aggregate(engine, view_name, bucket)
@@ -37,6 +42,17 @@ async def setup_continuous_aggregates(engine: AsyncEngine) -> None:
 
     await _add_retention_policy(engine)
     logger.info("Continuous Aggregate 初始化完成: 5m/15m/30m/1h + retention policy")
+
+
+async def _is_hypertable(engine: AsyncEngine, table_name: str) -> bool:
+    """检查表是否为 TimescaleDB hypertable"""
+    sql = text("""
+        SELECT 1 FROM timescaledb_information.hypertables
+        WHERE hypertable_name = :table_name
+    """)
+    async with engine.connect() as conn:
+        result = await conn.execute(sql, {"table_name": table_name})
+        return result.fetchone() is not None
 
 
 async def _create_continuous_aggregate(engine: AsyncEngine, view_name: str, bucket: str) -> None:

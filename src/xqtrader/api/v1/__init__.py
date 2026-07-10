@@ -9,6 +9,7 @@ from xqtrader.api.v1.broker import router as broker_router
 from xqtrader.api.v1.data import router as data_router
 from xqtrader.api.v1.factors import router as factors_router
 from xqtrader.api.v1.health import router as health_router
+from xqtrader.api.v1.intraday import router as intraday_router
 from xqtrader.api.v1.indices import router as indices_router
 from xqtrader.api.v1.investor_profile import router as investor_profile_router
 from xqtrader.api.v1.research import router as research_router
@@ -42,6 +43,7 @@ router.include_router(universe_router)
 router.include_router(selection_router)
 router.include_router(backtest_router)
 router.include_router(trading_router)
+router.include_router(intraday_router)
 router.include_router(stocks_router)
 router.include_router(indices_router)
 router.include_router(research_router)

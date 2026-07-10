@@ -88,7 +88,10 @@ class EnginesManager:
                 pool_pre_ping=True,
                 pool_recycle=3600,
                 connect_args={
-                    "server_settings": {"client_encoding": "utf8"},
+                    "server_settings": {
+                        "client_encoding": "utf8",
+                        "timezone": "Asia/Shanghai",
+                    },
                 },
             )
 
@@ -98,8 +101,15 @@ class EnginesManager:
                 def set_search_path(dbapi_connection: Any, connection_record: Any) -> None:
                     cursor = dbapi_connection.cursor()
                     cursor.execute(f'SET search_path TO "{config.db_schema}", "public"')
+                    cursor.execute("SET timezone TO 'Asia/Shanghai'")
                     cursor.close()
                 logger.debug(f"数据源 '{bind_key}' 的 schema '{config.db_schema}' 已设置")
+            else:
+                @event.listens_for(engine.sync_engine, "connect")
+                def set_timezone(dbapi_connection: Any, connection_record: Any) -> None:
+                    cursor = dbapi_connection.cursor()
+                    cursor.execute("SET timezone TO 'Asia/Shanghai'")
+                    cursor.close()
 
             self._engines[bind_key] = engine
             # 创建 session 工厂

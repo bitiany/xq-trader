@@ -1,6 +1,5 @@
 import { Button, Tag, Tooltip } from 'antd'
-import { ChevronDown, ChevronUp, FileText, RefreshCw, Sparkles } from 'lucide-react'
-import { useState } from 'react'
+import { FileText, RefreshCw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import type { StockDiagnosisHistoryResponse, StockDiagnosisResponse } from '@/api/stock'
@@ -14,7 +13,6 @@ interface DiagnosisHeroProps {
   history?: StockDiagnosisHistoryResponse
   historyLoading?: boolean
   loading?: boolean
-  onDeepAnalysis?: () => void
   onRefresh?: () => void
   onOpenReports?: () => void
 }
@@ -24,14 +22,11 @@ export function DiagnosisHero({
   history,
   historyLoading,
   loading,
-  onDeepAnalysis,
   onRefresh,
   onOpenReports,
 }: DiagnosisHeroProps) {
   const { t } = useTranslation()
   const trendItems = history?.items ?? []
-  const [trendOpen, setTrendOpen] = useState<boolean | null>(null)
-  const isTrendOpen = trendOpen ?? trendItems.length >= 2
 
   const hasScore = data.overall_score != null
   const scoreDelta =
@@ -87,16 +82,10 @@ export function DiagnosisHero({
       </div>
 
       <div className="diagnosis-hero__trend-block">
-        <button
-          type="button"
-          className="stock-diagnosis__trend-toggle"
-          onClick={() => setTrendOpen((value) => !(value ?? trendItems.length >= 2))}
-        >
-          {t('stock.diagnosis.scoreTrend')}
-          {isTrendOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-        </button>
-        {isTrendOpen && trendItems.length > 0 ? (
-          <DiagnosisTrendChart items={trendItems} compact />
+        <div className="diagnosis-hero__trend-title">{t('stock.diagnosis.scoreTrend')}</div>
+        {trendItems.length > 0 ? <DiagnosisTrendChart items={trendItems} compact /> : null}
+        {!historyLoading && trendItems.length === 0 ? (
+          <span className="diagnosis-hero__trend-empty">{t('stock.diagnosis.trendEmpty')}</span>
         ) : null}
         {historyLoading ? <span className="diagnosis-hero__trend-loading">{t('common.loading')}</span> : null}
       </div>
@@ -107,12 +96,11 @@ export function DiagnosisHero({
             {t('stock.diagnosis.viewAllReports', { count: data.reports_count })}
           </Button>
         ) : null}
-        <Button icon={<RefreshCw size={14} />} onClick={onRefresh} loading={loading}>
-          {t('common.refresh')}
-        </Button>
-        <Button type="primary" icon={<Sparkles size={14} />} onClick={onDeepAnalysis}>
-          {t('stock.diagnosis.deepAnalysis')}
-        </Button>
+        <Tooltip title={t('stock.diagnosis.refreshTooltip')}>
+          <Button icon={<RefreshCw size={14} />} onClick={onRefresh} loading={loading}>
+            {t('common.refresh')}
+          </Button>
+        </Tooltip>
       </div>
     </section>
   )

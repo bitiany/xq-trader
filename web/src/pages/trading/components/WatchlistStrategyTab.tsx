@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { App, Card, Table, Tag, Button, Space, Modal, Form, Input, InputNumber, Select, Spin } from 'antd';
 import { Star, Search, Plus, Trash2, Cpu, Settings, X, Edit2 } from 'lucide-react';
 import { INSTANCE_STATUS_COLOR, INSTANCE_STATUS_LABEL, RUN_MODE_LABEL } from '../utils/trading';
@@ -267,11 +268,19 @@ export function WatchlistStrategyTab({ accountId }: WatchlistStrategyTabProps) {
   const wlColumns = [
     {
       title: '代码', dataIndex: 'symbol', width: 90,
-      render: (v: string) => <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{v}</span>,
+      render: (v: string) => (
+        <Link to={`/stock/${encodeURIComponent(v)}`} style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }} onClick={(e) => e.stopPropagation()}>
+          {v}
+        </Link>
+      ),
     },
     {
       title: '名称', dataIndex: 'name', width: 80,
-      render: (v: string) => <span>{v || '—'}</span>,
+      render: (v: string, row: ApiWatchlistItem) => (
+        <Link to={`/stock/${encodeURIComponent(row.symbol)}`} onClick={(e) => e.stopPropagation()}>
+          {v || '—'}
+        </Link>
+      ),
     },
     {
       title: '最新价', dataIndex: 'last_price', width: 70,

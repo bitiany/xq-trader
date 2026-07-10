@@ -1,6 +1,6 @@
 import { App, Tabs, Button, Dropdown } from 'antd'
 import type { MenuProps } from 'antd'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { ArrowLeft, FlaskConical, Sparkles, Layers, LineChart, TrendingUp, Wallet } from 'lucide-react'
@@ -9,6 +9,8 @@ import {
   fetchStockAnnouncements,
   fetchStockDiagnosis,
   fetchStockDiagnosisHistory,
+  triggerStockDiagnosisRefresh,
+  waitForStockDiagnosisUpdate,
   fetchStockFinancials,
   fetchStockFundFlow,
   fetchStockNews,
@@ -98,8 +100,7 @@ export function StockDetailPage() {
   const diagnosisDeps = useMemo(() => (activeTab === 'diagnosis' ? requestDeps : ([] as const)), [activeTab, requestDeps])
   const newsDeps = useMemo(() => (activeTab === 'news' ? requestDeps : ([] as const)), [activeTab, requestDeps])
   const announcementsDeps = useMemo(() => (activeTab === 'announcements' ? requestDeps : ([] as const)), [activeTab, requestDeps])
-
-  const diagnosisRefreshRef = useRef(false)
+  const [diagnosisRefreshing, setDiagnosisRefreshing] = useState(false)
   const [newsCollecting, setNewsCollecting] = useState(false)
 
   const {
@@ -126,7 +127,7 @@ export function StockDetailPage() {
     error: diagnosisError,
     reload: reloadDiagnosis,
   } = useRequest(
-    () => fetchStockDiagnosis(decodedSymbol, diagnosisRefreshRef.current),
+    () => fetchStockDiagnosis(decodedSymbol, false),
     { deps: diagnosisDeps, immediate: activeTab === 'diagnosis' },
   )
   const {
@@ -159,13 +160,26 @@ export function StockDetailPage() {
       immediate: activeTab === 'announcements' },
   )
 
-  const handleDiagnosisRefresh = () => {
-    diagnosisRefreshRef.current = true
-    void reloadDiagnosis()
-      .then(() => reloadDiagnosisHistory())
-      .finally(() => {
-        diagnosisRefreshRef.current = false
+  const handleDiagnosisRefresh = async () => {
+    if (diagnosisRefreshing) return
+    const baseline = diagnosis ?? (await fetchStockDiagnosis(decodedSymbol, false))
+    setDiagnosisRefreshing(true)
+    try {
+      await triggerStockDiagnosisRefresh(decodedSymbol)
+      message.loading({ content: t('stock.diagnosis.refreshPending'), key: 'diagnosis-refresh', duration: 0 })
+      await waitForStockDiagnosisUpdate(decodedSymbol, baseline)
+      await reloadDiagnosis()
+      await reloadDiagnosisHistory()
+      message.success({ content: t('stock.diagnosis.refreshSuccess'), key: 'diagnosis-refresh' })
+    } catch (err) {
+      const isTimeout = err instanceof Error && err.message === 'diagnosis refresh timeout'
+      message.error({
+        content: isTimeout ? t('stock.diagnosis.refreshTimeout') : t('common.loadFailed'),
+        key: 'diagnosis-refresh',
       })
+    } finally {
+      setDiagnosisRefreshing(false)
+    }
   }
 
   const handleCollectNews = async () => {
@@ -410,11 +424,10 @@ export function StockDetailPage() {
                     symbol={decodedSymbol}
                     data={diagnosis}
                     history={diagnosisHistory}
-                    loading={diagnosisLoading}
+                    loading={diagnosisLoading || diagnosisRefreshing}
                     historyLoading={diagnosisHistoryLoading}
                     error={diagnosisError}
-                    onDeepAnalysis={() => triggerAnalysis('full')}
-                    onRefresh={handleDiagnosisRefresh}
+                    onRefresh={() => void handleDiagnosisRefresh()}
                     onSummaryRefresh={() => void reloadDiagnosis()}
                     onRetry={() => void reloadDiagnosis()}
                   />

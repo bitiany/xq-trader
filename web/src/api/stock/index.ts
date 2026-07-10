@@ -270,7 +270,45 @@ export async function fetchStockDiagnosis(
 ): Promise<StockDiagnosisResponse> {
   return request.get<StockDiagnosisResponse>(`/stocks/${encodeURIComponent(symbol)}/diagnosis`, {
     params: refresh ? { refresh: true } : undefined,
+    timeout: refresh ? 300_000 : undefined,
   })
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms)
+  })
+}
+
+export function hasStockDiagnosisUpdated(
+  baseline: StockDiagnosisResponse,
+  current: StockDiagnosisResponse,
+): boolean {
+  if (current.as_of > baseline.as_of) return true
+  if (current.reports_count > baseline.reports_count) return true
+  if (current.overall_score !== baseline.overall_score) return true
+  if (current.summary?.generated_at !== baseline.summary?.generated_at) return true
+  return false
+}
+
+export async function waitForStockDiagnosisUpdate(
+  symbol: string,
+  baseline: StockDiagnosisResponse,
+  options?: { timeoutMs?: number; intervalMs?: number },
+): Promise<StockDiagnosisResponse> {
+  const timeoutMs = options?.timeoutMs ?? 300_000
+  const intervalMs = options?.intervalMs ?? 3_000
+  const deadline = Date.now() + timeoutMs
+
+  while (Date.now() < deadline) {
+    await sleep(intervalMs)
+    const current = await fetchStockDiagnosis(symbol, false)
+    if (hasStockDiagnosisUpdated(baseline, current)) {
+      return current
+    }
+  }
+
+  throw new Error('diagnosis refresh timeout')
 }
 
 export async function fetchStockDiagnosisHistory(
@@ -287,6 +325,14 @@ export interface DiagnosisSummaryTriggerResponse {
   symbol: string
   task_id: string
   status: string
+}
+
+export async function triggerStockDiagnosisRefresh(
+  symbol: string,
+): Promise<DiagnosisSummaryTriggerResponse> {
+  return request.post<DiagnosisSummaryTriggerResponse>(
+    `/stocks/${encodeURIComponent(symbol)}/diagnosis/refresh`,
+  )
 }
 
 export async function triggerStockDiagnosisSummary(

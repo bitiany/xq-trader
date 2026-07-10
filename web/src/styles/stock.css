@@ -713,6 +713,19 @@
   min-width: 0;
 }
 
+.diagnosis-hero__trend-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.diagnosis-hero__trend-empty {
+  display: block;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 .diagnosis-hero__trend-chart {
   height: 120px;
   margin-top: 8px;

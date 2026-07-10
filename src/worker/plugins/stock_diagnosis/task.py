@@ -39,7 +39,7 @@ class StockDiagnosisSnapshotTask(BaseTask):
 
     task_name = "market.stock_diagnosis_snapshot"
 
-    async def run(
+    async def _run_impl(
         self,
         upstream: Any = None,
         stock_codes: list[str] | None = None,

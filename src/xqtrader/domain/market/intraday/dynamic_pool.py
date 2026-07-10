@@ -36,7 +36,7 @@ async def load_dynamic_stock_pool(reference_date: date | None = None) -> list[st
         is_enabled=1,
         limit=None,
     ) if watchlist_ids else []
-    watchlist_symbols = {item.symbol for item in items} if items else set()
+    watchlist_symbols = {item.symbol for item in items if item.symbol and item.symbol.strip()} if items else set()
 
     # 2. 持仓标的（按最新快照日期过滤，避免历史已清仓标的被错误纳入）
     if reference_date is None:
@@ -57,14 +57,17 @@ async def load_dynamic_stock_pool(reference_date: date | None = None) -> list[st
             snapshot_date=reference_date,
             limit=None,
         )
-    position_symbols = {p.symbol for p in positions if p.qty > 0} if positions else set()
+    position_symbols = (
+        {p.symbol for p in positions if p.qty > 0 and p.symbol and p.symbol.strip()}
+        if positions else set()
+    )
 
     # 3. 已审批 pre_order 标的（pending_approval 或 approved）
     pre_orders = await PreOrder.filter(
         status__in=["pending_approval", "approved"],
         limit=None,
     )
-    pre_order_symbols = {po.symbol for po in pre_orders} if pre_orders else set()
+    pre_order_symbols = {po.symbol for po in pre_orders if po.symbol and po.symbol.strip()} if pre_orders else set()
 
     # 合并去重
     dynamic_pool = sorted(watchlist_symbols | position_symbols | pre_order_symbols)

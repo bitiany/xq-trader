@@ -16,7 +16,7 @@ class StockDiagnosisSummaryTask(BaseTask):
 
     task_name = "market.stock_diagnosis_summary"
 
-    async def run(self, upstream: Any = None, symbol: str = "", **kwargs: Any) -> dict[str, Any]:
+    async def _run_impl(self, upstream: Any = None, symbol: str = "", **kwargs: Any) -> dict[str, Any]:
         _ = upstream
         _ = kwargs
         if not symbol:

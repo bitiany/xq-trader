@@ -50,8 +50,6 @@ interface StockDiagnosisPanelProps {
 
   error?: string | null
 
-  onDeepAnalysis?: () => void
-
   onRefresh?: () => void
 
   onSummaryRefresh?: () => void
@@ -85,8 +83,6 @@ export function StockDiagnosisPanel({
   historyLoading,
 
   error,
-
-  onDeepAnalysis,
 
   onRefresh,
 
@@ -261,8 +257,6 @@ export function StockDiagnosisPanel({
         historyLoading={historyLoading}
 
         loading={loading}
-
-        onDeepAnalysis={onDeepAnalysis}
 
         onRefresh={onRefresh}
 

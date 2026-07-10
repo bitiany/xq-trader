@@ -1,7 +1,9 @@
 """Redis Pub/Sub 事件发布 - 盘内监控事件总线
 
 封装 redis_client.publish，提供类型安全的发布接口。
-所有事件通过 Redis Pub/Sub 解耦，FastAPI 内的 WS SPI 监听并转发给前端。
+盘内事件同时发布到两个频道：
+1. intraday:* - 内部事件总线（服务间解耦）
+2. ws:topic:ws.intraday.* - WebSocket 推送频道（前端实时接收）
 """
 
 from __future__ import annotations
@@ -10,31 +12,39 @@ import logging
 from typing import Any
 
 from framework.commons.redis_client import redis_client
+from framework.ws.messages import CHANNEL_PREFIX
 
 logger = logging.getLogger("INTRADAY.PUBLISHER")
 
-# Redis Pub/Sub 频道定义
+# Redis Pub/Sub 频道定义（内部事件总线）
 CHANNEL_MINUTE_BAR_READY = "intraday:minute_bar.ready"  # 分钟线就绪事件
 CHANNEL_TICK_ANOMALY = "intraday:tick_anomaly"  # Tick 异动事件
 CHANNEL_CONTROL = "intraday.control"  # 控制信号（start/stop）
 CHANNEL_STATUS = "intraday.status"  # 监控任务状态变更
 
+# WebSocket 推送频道（前端订阅）
+WS_TOPIC_MINUTE_BAR = "ws.intraday.minute_bar"
+WS_TICK_ANOMALY = "ws.intraday.tick_anomaly"
+WS_STATUS = "ws.intraday.status"
+
 
 def publish_minute_bar_ready(symbol: str, trade_time: str, bar: dict[str, Any]) -> None:
     """发布分钟线就绪事件"""
-    redis_client.publish(CHANNEL_MINUTE_BAR_READY, {
-        "symbol": symbol,
-        "trade_time": trade_time,
-        "bar": bar,
+    payload = {"symbol": symbol, "trade_time": trade_time, "bar": bar}
+    redis_client.publish(CHANNEL_MINUTE_BAR_READY, payload)
+    redis_client.publish(f"{CHANNEL_PREFIX}{WS_TOPIC_MINUTE_BAR}", {
+        "type": "UPDATE",
+        "data": payload,
     })
 
 
 def publish_tick_anomaly(symbol: str, anomaly_type: str, detail: dict[str, Any]) -> None:
     """发布 Tick 异动事件"""
-    redis_client.publish(CHANNEL_TICK_ANOMALY, {
-        "symbol": symbol,
-        "anomaly_type": anomaly_type,
-        "detail": detail,
+    payload = {"symbol": symbol, "anomaly_type": anomaly_type, "detail": detail}
+    redis_client.publish(CHANNEL_TICK_ANOMALY, payload)
+    redis_client.publish(f"{CHANNEL_PREFIX}{WS_TICK_ANOMALY}", {
+        "type": "UPDATE",
+        "data": payload,
     })
 
 
@@ -63,4 +73,8 @@ def publish_status(status: str, detail: dict[str, Any] | None = None) -> None:
     if detail:
         message.update(detail)
     redis_client.publish(CHANNEL_STATUS, message)
+    redis_client.publish(f"{CHANNEL_PREFIX}{WS_STATUS}", {
+        "type": "UPDATE",
+        "data": message,
+    })
     logger.info("监控任务状态变更: status=%s", status)

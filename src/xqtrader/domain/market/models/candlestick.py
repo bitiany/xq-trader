@@ -1,10 +1,31 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 
-from sqlalchemy import Date, DateTime, Float, Integer, String
+from sqlalchemy import Date, DateTime, Float, Integer, String, TypeDecorator
 from sqlalchemy.orm import Mapped, mapped_column
 
 from framework.dal.base import Base
 from framework.dal.timescale import timescale
+
+# A股交易时区：Asia/Shanghai (UTC+8)
+_CST = timezone(timedelta(hours=8))
+
+
+class CSTDateTime(TypeDecorator):
+    """带时区的 DateTime，读取时自动转换为 Asia/Shanghai 时区
+
+    PostgreSQL timestamptz 内部以 UTC 存储，asyncpg 默认返回 UTC datetime。
+    本类型在 Python 端将 datetime 的 tzinfo 替换为 CST，使查询结果与本地时钟一致。
+    """
+
+    impl = DateTime(timezone=True)
+    cache_ok = True
+
+    def process_result_value(self, value: datetime | None, dialect: object) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=_CST)
+        return value.astimezone(_CST)
 
 
 @timescale(
@@ -53,7 +74,7 @@ class CandlestickMinute(Base):
 
     symbol: Mapped[str] = mapped_column(String(10), primary_key=True, nullable=False, comment="证券代码，如000001.SH")
     trade_time: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), primary_key=True, nullable=False, comment="分钟时间戳"
+        CSTDateTime, primary_key=True, nullable=False, comment="分钟时间戳"
     )
     open: Mapped[float] = mapped_column(Float, nullable=False, comment="开盘价")
     high: Mapped[float] = mapped_column(Float, nullable=False, comment="最高价")
