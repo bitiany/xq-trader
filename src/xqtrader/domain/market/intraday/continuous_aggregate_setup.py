@@ -59,7 +59,7 @@ async def _create_continuous_aggregate(engine: AsyncEngine, view_name: str, buck
     """创建单个 Continuous Aggregate（幂等，IF NOT EXISTS）"""
     sql = text(f"""
         CREATE MATERIALIZED VIEW IF NOT EXISTS {view_name}
-        WITH (timescaledb.continuous) AS
+        WITH (timescaledb.continuous, materialized_only=false) AS
         SELECT
             symbol,
             time_bucket('{bucket}', trade_time) AS trade_time,

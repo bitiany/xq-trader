@@ -1,6 +1,7 @@
 import {
   Bell,
   ChevronDown,
+  Monitor,
   Notebook,
   PanelLeftClose,
   PanelLeftOpen,
@@ -31,6 +32,10 @@ export function TopBar() {
     window.open(JUPYTER_URL, '_blank')
   }, [])
 
+  const handleOpenMonitor = useCallback(() => {
+    window.open('/monitor/screen', '_blank')
+  }, [])
+
   return (
     <header className="topbar">
       <div className="topbar__left">
@@ -53,6 +58,16 @@ export function TopBar() {
       </div>
 
       <div className="topbar__right">
+        <button
+          type="button"
+          className="topbar__icon-btn"
+          onClick={handleOpenMonitor}
+          title={t('topbar.openMonitor')}
+          aria-label={t('topbar.openMonitor')}
+        >
+          <Monitor size={15} />
+        </button>
+
         <button
           type="button"
           className="topbar__icon-btn"

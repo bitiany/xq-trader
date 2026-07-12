@@ -1,0 +1,12 @@
+name: intraday_monitor_stop
+description: "盘内监控停止：15:30 周一至周五发布 stop 控制信号"
+mode: canvas
+queue: market
+enabled: true
+cron: "30 15 * * 1-5"
+
+steps:
+  - name: publish_stop_signal
+    task: market.intraday_control
+    args:
+      action: stop

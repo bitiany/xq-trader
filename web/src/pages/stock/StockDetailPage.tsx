@@ -29,6 +29,7 @@ import { StockFundFlowPanel } from '@/components/stock/StockFundFlowPanel'
 import { StockKlineChart } from '@/components/stock/StockKlineChart'
 import { StockNewsPanel } from '@/components/stock/StockNewsPanel'
 import { StockQuoteHeader } from '@/components/stock/StockQuoteHeader'
+import { useWorkspaceActions } from '@/components/layout/Workspace'
 import { useRequest } from '@/hooks/useRequest'
 import { useRequestErrorToast } from '@/hooks/useRequestErrorToast'
 import { useStockKline } from '@/hooks/useStockKline'
@@ -207,6 +208,38 @@ export function StockDetailPage() {
   const stockOverview = overview as StockOverviewResponse | undefined
   const overviewReady = stockOverview?.symbol === decodedSymbol
 
+  const { setActions: setWorkspaceActions } = useWorkspaceActions()
+  useEffect(() => {
+    // 每次渲染重建 actions JSX，确保 triggerAnalysis 闭包捕获最新 stockOverview
+    setWorkspaceActions(
+      <div className="stock-page__actions">
+        <Button size="small" icon={<ArrowLeft size={14} />} onClick={() => navigate(-1)}>
+          {t('common.back')}
+        </Button>
+        <Dropdown
+          menu={{ items: analysisMenuItems, onClick: ({ key }) => triggerAnalysis(key) }}
+          trigger={['click']}
+        >
+          <Button size="small" type="primary" icon={<Sparkles size={14} />}>
+            {t('common.aiAnalysis')}
+          </Button>
+        </Dropdown>
+        <Button
+          size="small"
+          icon={<FlaskConical size={14} />}
+          onClick={() => navigate(`/backtest/${encodeURIComponent(decodedSymbol)}`)}
+        >
+          {t('common.backtest')}
+        </Button>
+        <Button size="small" icon={<Layers size={14} />} onClick={() => setFactorDrawerOpen(true)}>
+          截面因子
+        </Button>
+      </div>,
+    )
+    return () => setWorkspaceActions(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- triggerAnalysis/analysisMenuItems 每次渲染均为新引用，通过 stockOverview 依赖触发重建
+  }, [decodedSymbol, t, navigate, stockOverview, setWorkspaceActions])
+
   const {
     bars,
     maOverlays,
@@ -279,44 +312,6 @@ export function StockDetailPage() {
 
   return (
     <div key={decodedSymbol} className="page stock-page">
-      <div className="stock-page__topbar">
-        <div className="stock-page__actions">
-          <Button
-            size="small"
-            icon={<ArrowLeft size={14} />}
-            onClick={() => navigate(-1)}
-          >
-            {t('common.back')}
-          </Button>
-          <Dropdown
-            menu={{ items: analysisMenuItems, onClick: ({ key }) => triggerAnalysis(key) }}
-            trigger={['click']}
-          >
-            <Button
-              size="small"
-              type="primary"
-              icon={<Sparkles size={14} />}
-            >
-              {t('common.aiAnalysis')}
-            </Button>
-          </Dropdown>
-          <Button
-            size="small"
-            icon={<FlaskConical size={14} />}
-            onClick={() => navigate(`/backtest/${encodeURIComponent(decodedSymbol)}`)}
-          >
-            {t('common.backtest')}
-          </Button>
-          <Button
-            size="small"
-            icon={<Layers size={14} />}
-            onClick={() => setFactorDrawerOpen(true)}
-          >
-            截面因子
-          </Button>
-        </div>
-      </div>
-
       <AsyncSection loading={pageLoading} onRetry={() => void reload()}>
         <>
           {hasOverview ? (

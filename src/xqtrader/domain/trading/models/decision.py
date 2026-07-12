@@ -8,7 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from framework.dal.base import AuditedBase
 
-from ..enums import Direction
+from ..enums import Direction, SignalSource
 
 
 class SelectionResult(AuditedBase):
@@ -53,6 +53,10 @@ class TradingSignal(AuditedBase):
     )
     strength: Mapped[float | None] = mapped_column(Float, nullable=True, comment="信号强度 0-1")
     signal_type: Mapped[str | None] = mapped_column(String(32), nullable=True, comment="信号来源类型")
+    signal_source: Mapped[str] = mapped_column(
+        String(16), nullable=False, default=SignalSource.DAILY,
+        comment="信号来源: daily(日频决策)/intraday(盘内监控)",
+    )
     raw_values: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default={}, comment="原始因子值")
     selection_id: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="选股结果ID")
     node_id: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="工作流节点ID")

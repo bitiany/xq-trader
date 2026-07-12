@@ -3,7 +3,7 @@ import * as echarts from 'echarts'
 import { Checkbox, Popover, Segmented, Switch } from 'antd'
 import { useTranslation } from 'react-i18next'
 
-import type { ChanlunPivot, ChanlunResponse, ChanlunStroke, MainIndicator, SubIndicator, KlineBarItem, StockFundFlowItem } from '@/api/stock'
+import type { ChanlunBspPoint, ChanlunPivot, ChanlunResponse, ChanlunStroke, MainIndicator, SubIndicator, KlineBarItem, StockFundFlowItem } from '@/api/stock'
 
 export interface StockKlineTradeMarker {
   date: string
@@ -277,6 +277,56 @@ function buildPivotMarkAreas(
   } as echarts.SeriesOption
 }
 
+function buildBspMarkSeries(
+  bars: KlineBarItem[],
+  bsPoints: ChanlunBspPoint[],
+): echarts.SeriesOption | null {
+  if (bsPoints.length === 0) return null
+  const dateIndexMap = new Map<string, number>()
+  bars.forEach((b, i) => dateIndexMap.set(b.trade_date, i))
+  // 仅展示最近 20 个买卖点，避免历史数据过多导致图表拥挤
+  const recentPoints = bsPoints.slice(-20)
+  const data = recentPoints
+    .map((bsp) => {
+      const idx = dateIndexMap.get(bsp.trade_date)
+      if (idx == null) return null
+      const bar = bars[idx]
+      const typeLabel = bsp.types.join('/')
+      const isBuy = bsp.is_buy
+      return {
+        value: [bar.trade_date, bsp.price, isBuy ? `${typeLabel}买` : `${typeLabel}卖`],
+        symbol: 'triangle',
+        symbolRotate: isBuy ? 0 : 180,
+        symbolSize: 16,
+        symbolOffset: isBuy ? [0, 20] : [0, -20],
+        itemStyle: { color: isBuy ? '#22c55e' : '#ef4444' },
+        label: {
+          show: true,
+          formatter: `${typeLabel}${isBuy ? '买' : '卖'}`,
+          color: isBuy ? '#22c55e' : '#ef4444',
+          fontSize: 11,
+          fontWeight: 700,
+          position: isBuy ? 'bottom' : 'top',
+          distance: 8,
+        },
+        tooltip: {
+          formatter: () =>
+            `${isBuy ? '买点' : '卖点'}：${typeLabel}<br/>日期：${bsp.trade_date}<br/>价格：${bsp.price.toFixed(2)}<br/>${bsp.is_sure ? '已确认' : '未确认'}`,
+        },
+      }
+    })
+    .filter((item): item is NonNullable<typeof item> => item != null)
+  if (data.length === 0) return null
+  return {
+    name: '买卖点',
+    type: 'scatter',
+    xAxisIndex: 0,
+    yAxisIndex: 0,
+    data,
+    z: 9,
+  } as echarts.SeriesOption
+}
+
 function appendMacdSeries(
   series: echarts.SeriesOption[],
   overlays: Record<string, Array<number | null>>,
@@ -442,6 +492,10 @@ export function StockKlineChart({
     () => (chanlun && chanlun.pivots.length > 0 ? buildPivotMarkAreas(bars, chanlun.pivots) : null),
     [bars, chanlun],
   )
+  const bspSeries = useMemo(
+    () => (chanlun && chanlun.bs_points && chanlun.bs_points.length > 0 ? buildBspMarkSeries(bars, chanlun.bs_points) : null),
+    [bars, chanlun],
+  )
   const tradeMarkerSeries = useMemo(
     () => buildTradeMarkerSeries(bars, tradeMarkers),
     [bars, tradeMarkers],
@@ -544,9 +598,10 @@ export function StockKlineChart({
     const td9Series = showTd9 && td9Overlays ? buildTd9MarkSeries(bars, td9Overlays) : null
     if (td9Series) series.push(td9Series)
 
-    // 主图指标：缠论（笔和中枢）
+    // 主图指标：缠论（笔、中枢、买卖点）
     if (pivotSeries && mainIndicator === 'chanlun') series.push(pivotSeries)
     if (strokeSeries && mainIndicator === 'chanlun') series.push(strokeSeries)
+    if (bspSeries && mainIndicator === 'chanlun') series.push(bspSeries)
     if (tradeMarkerSeries) series.push(tradeMarkerSeries)
 
     // 成交量（始终在 grid[1]）

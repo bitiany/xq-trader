@@ -406,10 +406,20 @@ export interface ChanlunPivot {
   is_sure: boolean
 }
 
+export interface ChanlunBspPoint {
+  index: number
+  trade_date: string
+  price: number
+  is_buy: boolean
+  types: string[]
+  is_sure: boolean
+}
+
 export interface ChanlunResponse {
   fractals: ChanlunFractal[]
   strokes: ChanlunStroke[]
   pivots: ChanlunPivot[]
+  bs_points: ChanlunBspPoint[]
 }
 
 export async function fetchStockChanlun(symbol: string): Promise<ChanlunResponse> {

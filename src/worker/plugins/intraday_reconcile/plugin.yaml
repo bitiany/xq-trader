@@ -1,0 +1,43 @@
+name: intraday_reconcile
+celery_task_name: market.intraday_reconcile
+version: "1.0.0"
+task_name: 盘后数据补全与对账
+task_name_en: Intraday Reconcile
+description: 基于 QMT xtdata 回补动态股票池（自选+持仓+pre_order）的1分钟K线数据，写入 sdc_candlestick_1m 表。支持指定日期范围批量回补。对账功能在 Phase 1.1 实施。
+description_en: Backfill 1-minute kline data for dynamic stock pool via QMT xtdata into sdc_candlestick_1m table. Supports date range batch backfill. Reconciliation to be implemented in Phase 1.1.
+category: io
+task_type: on_demand
+queue: market
+timeout: 7200
+retry_config:
+  max_retries: 1
+  retry_backoff: true
+  retry_backoff_max: 300
+params_schema:
+  type: object
+  properties:
+    stock_codes:
+      type: array
+      title: 股票代码列表
+      description: 为空时自动加载动态股票池（自选+持仓+pre_order）
+      items:
+        type: string
+    trade_date:
+      type: string
+      format: date
+      title: 回补日期
+      description: 格式 YYYY-MM-DD，默认今天
+    end_date:
+      type: string
+      format: date
+      title: 结束日期
+      description: 格式 YYYY-MM-DD，为空时等于 trade_date（单日回补）
+    concurrency:
+      type: integer
+      title: 并发数
+      default: 5
+    max_count:
+      type: integer
+      title: 最大标的数量
+      description: 用于测试，0 表示不限
+      default: 0

@@ -48,6 +48,12 @@ class Direction:
     NEUTRAL = "neutral"
 
 
+class SignalSource:
+    """信号来源"""
+    DAILY = "daily"        # 日频决策流产出
+    INTRADAY = "intraday"  # 盘内监控产出
+
+
 class PreOrderSide:
     """预订单操作方向"""
     OPEN = "open"

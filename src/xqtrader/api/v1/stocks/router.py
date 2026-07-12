@@ -1,6 +1,6 @@
 """个股详情 API。"""
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Query
 
@@ -91,8 +91,11 @@ async def get_stock_technical(symbol: str) -> dict:
 
 
 @router.get("/{symbol}/chanlun", summary="查询缠论图形元素", operation_id="get_stock_chanlun")
-async def get_stock_chanlun(symbol: str) -> dict:
-    return await _chanlun_service.get_chanlun(symbol)
+async def get_stock_chanlun(
+    symbol: str,
+    period: Literal["daily", "5m", "15m"] = Query(default="daily", description="周期: daily/5m/15m"),
+) -> dict:
+    return await _chanlun_service.get_chanlun(symbol, period=period)
 
 
 @router.get("/{symbol}/trend", summary="查询个股趋势诊断", operation_id="get_stock_trend")

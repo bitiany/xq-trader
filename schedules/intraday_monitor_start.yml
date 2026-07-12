@@ -1,0 +1,12 @@
+name: intraday_monitor_start
+description: "盘内监控启动：09:15 周一至周五发布 start 控制信号"
+mode: canvas
+queue: market
+enabled: true
+cron: "15 9 * * 1-5"
+
+steps:
+  - name: publish_start_signal
+    task: market.intraday_control
+    args:
+      action: start

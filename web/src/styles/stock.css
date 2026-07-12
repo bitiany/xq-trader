@@ -7,15 +7,6 @@
   position: relative;
 }
 
-.stock-page__topbar {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  height: 36px;
-  padding: 0 4px;
-  flex-shrink: 0;
-}
-
 .stock-page__actions {
   display: flex;
   gap: 8px;

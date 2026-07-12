@@ -1,0 +1,25 @@
+name: intraday_control
+celery_task_name: market.intraday_control
+version: "1.0.0"
+task_name: 盘内监控控制信号
+task_name_en: Intraday Monitor Control
+description: 通过 Redis Pub/Sub 发布盘内监控 start/stop 控制信号，由 FastAPI IntradayMonitorTask 监听执行。
+description_en: Publish intraday monitor start/stop control signals via Redis Pub/Sub, listened by FastAPI IntradayMonitorTask.
+category: io
+task_type: on_demand
+queue: market
+timeout: 60
+retry_config:
+  max_retries: 2
+  retry_backoff: true
+  retry_backoff_max: 60
+params_schema:
+  type: object
+  properties:
+    action:
+      type: string
+      title: 控制动作
+      description: "start: 启动盘内监控; stop: 停止盘内监控"
+      enum: ["start", "stop"]
+  required:
+    - action

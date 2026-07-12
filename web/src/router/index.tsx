@@ -1,5 +1,4 @@
-import { createBrowserRouter } from 'react-router-dom'
-import { Navigate } from 'react-router-dom'
+import { createBrowserRouter, Navigate } from 'react-router-dom'
 import { AppLayout } from '@/layouts/AppLayout'
 import { DataLayout } from '@/pages/data/DataLayout'
 import { DataOverviewPage } from '@/pages/data/DataOverviewPage'
@@ -7,7 +6,6 @@ import { DataTasksPage } from '@/pages/data/DataTasksPage'
 import { NotFoundPage } from '@/pages/errors/NotFoundPage'
 import { ServerErrorPage } from '@/pages/errors/ServerErrorPage'
 import { BacktestPage } from '@/pages/backtest/BacktestPage'
-import { RoutePlaceholder } from '@/pages/RoutePlaceholder'
 import { StockDetailPage } from '@/pages/stock/StockDetailPage'
 import { ApiTestPage } from '@/pages/settings/ApiTestPage'
 import { ModelMarketplacePage } from '@/pages/settings/models/ModelMarketplacePage'
@@ -20,9 +18,9 @@ import { StrategyDetailPage } from '@/pages/strategy/StrategyDetailPage'
 import { SelectionHistoryPage } from '@/pages/strategy/SelectionHistoryPage'
 import { AuthGuard } from '@/router/AuthGuard'
 import { RouteErrorBoundary } from '@/router/RouteErrorBoundary'
-import { Activity } from 'lucide-react'
 import { LiveCockpitPage } from '@/pages/trading/LiveCockpitPage'
 import { FactorWorkbenchPage } from '@/pages/factor/FactorWorkbenchPage'
+import { MonitorDashboardPage, MonitorOverviewPage } from '@/pages/monitor'
 
 export const router = createBrowserRouter([
   {
@@ -56,7 +54,7 @@ export const router = createBrowserRouter([
       ] },
       { path: 'factors', element: <FactorWorkbenchPage /> },
       { path: 'trading', element: <LiveCockpitPage /> },
-      { path: 'monitor', element: <RoutePlaceholder pageKey="monitor" icon={Activity} /> },
+      { path: 'monitor', element: <MonitorOverviewPage /> },
       {
         path: 'settings',
         element: <SettingsLayout />,
@@ -67,6 +65,18 @@ export const router = createBrowserRouter([
         ],
       },
     ],
+  },
+  // 独立大屏路由，不套 AppLayout，可 window.open 新窗口全屏打开
+  {
+    path: '/monitor/screen',
+    element: (
+      <AuthGuard>
+        <RouteErrorBoundary>
+          <MonitorDashboardPage />
+        </RouteErrorBoundary>
+      </AuthGuard>
+    ),
+    errorElement: <ServerErrorPage />,
   },
   { path: '/500', element: <ServerErrorPage /> },
   { path: '/404', element: <NotFoundPage /> },

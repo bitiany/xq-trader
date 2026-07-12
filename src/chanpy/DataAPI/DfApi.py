@@ -18,8 +18,11 @@ class DfApi(CCommonStockApi):
         for i in range(len(df)):
             row = df.iloc[i]
             dt = df.index[i]
+            # 支持 datetime 索引（分钟级，含时分）和 date 索引（日线）
+            hour = getattr(dt, 'hour', 0)
+            minute = getattr(dt, 'minute', 0)
             kl_dict = {
-                DATA_FIELD.FIELD_TIME: CTime(dt.year, dt.month, dt.day, 0, 0),
+                DATA_FIELD.FIELD_TIME: CTime(dt.year, dt.month, dt.day, hour, minute),
                 DATA_FIELD.FIELD_OPEN: float(row["open"]),
                 DATA_FIELD.FIELD_HIGH: float(row["high"]),
                 DATA_FIELD.FIELD_LOW: float(row["low"]),

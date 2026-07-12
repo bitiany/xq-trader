@@ -111,7 +111,7 @@ xqtrader 当前交易闭环为「**日频决策 + 事件驱动执行 + 紧急 Ki
 Celery Beat（独立进程，仅定时控制信号）：
 - 09:15 publish intraday.start -> 唤醒 FastAPI 内监控任务
 - 15:30 publish intraday.stop  -> 优雅停止
-- 15:30 盘后全量补全 + 对账 + 因子重算
+- 盘后全量补全 + 对账 + 因子重算（手动触发）
 - 龙虎榜/北向资金定时抓取
 ```
 
@@ -120,9 +120,11 @@ Celery Beat（独立进程，仅定时控制信号）：
 | 进程 | 职责 | 启停 |
 |---|---|---|
 | **FastAPI** | API 编排、监控查询、手动干预、**盘中监控 asyncio 任务** | 长驻 |
-| Celery Beat | 定时调度（09:15/15:30 发控制信号、盘后批处理） | 长驻 |
+| Celery Beat | 定时调度（09:15/15:30 发控制信号） | 长驻 |
 | Celery Worker | 盘后批处理、数据补全、因子重算 | 长驻 |
 | Redis | Pub/Sub 事件解耦 + 控制信号 + 缓存 | 长驻 |
+
+> **启动策略**：监控控制信号（09:15/15:30）由 Celery Beat 自动触发；盘后回补（`intraday_reconcile`）属采集任务，遵循手动启动约束（`enabled: false`），需用户手动触发。
 
 **关键约束**：FastAPI 不在请求线程内做长耗时计算（监控任务在独立 asyncio task）；监控任务不嵌套 `asyncio.run()`（[开发测试规范.md](.trae/rules/开发测试规范.md)）；Celery 不跑毫秒级实时（Beat tick 轮询 + broker 投递开销不适合）。
 
@@ -421,32 +423,56 @@ ws/spi/impl/
 
 ### 6.5 Celery 调度
 
-新增 `schedules/intraday_pipeline.yml`（仅定时控制信号，不拉起独立进程）：
+> **框架约束**：当前 scheduler 框架（[celery_app.py](../src/worker/celery_app.py) `_load_beat_schedule()`）仅支持 yml 顶层 `cron` 字段，不支持 canvas 模式下的 step 级 `schedule`。因此拆分为 3 个独立 yml 文件，每个文件一个 cron。
+
+新增 3 个调度文件（仅定时控制信号，不拉起独立进程）：
+
+**`schedules/intraday_monitor_start.yml`**（09:15 自动启动监控）：
 
 ```yaml
-name: intraday_pipeline
+name: intraday_monitor_start
 mode: canvas
+queue: market
 enabled: true
+cron: "15 9 * * 1-5"
 steps:
-  - name: start_intraday_monitor
-    task_type: scheduled
-    schedule: "15 9 * * 1-5"   # 09:15 周一至周五
-    action: publish_redis
-    channel: "intraday.control"
-    message: '{"action":"start"}'
-  - name: stop_intraday_monitor
-    task_type: scheduled
-    schedule: "30 15 * * 1-5"  # 15:30 周一至周五
-    action: publish_redis
-    channel: "intraday.control"
-    message: '{"action":"stop"}'
-  - name: intraday_reconcile   # 盘后全量补全 + 对账
-    task_type: scheduled
-    schedule: "35 15 * * 1-5"
-    action: reconcile_intraday_data
+  - name: publish_start_signal
+    task: market.intraday_control
+    args:
+      action: start
+```
+
+**`schedules/intraday_monitor_stop.yml`**（15:30 自动停止监控）：
+
+```yaml
+name: intraday_monitor_stop
+mode: canvas
+queue: market
+enabled: true
+cron: "30 15 * * 1-5"
+steps:
+  - name: publish_stop_signal
+    task: market.intraday_control
+    args:
+      action: stop
+```
+
+**`schedules/intraday_reconcile.yml`**（盘后回补，**手动触发**）：
+
+```yaml
+name: intraday_reconcile
+mode: canvas
+queue: market
+enabled: false   # 采集任务仅允许手动启动，禁止自动调度
+steps:
+  - name: intraday_reconcile
+    task: market.intraday_reconcile
+    args: {}
 ```
 
 **控制流程**：Celery Beat 在 09:15 / 15:30 发 Redis `publish intraday.control` 消息 -> FastAPI 内的 `IntradayMonitorTask` 监听该频道被唤醒/休眠。**Celery 不拉起独立进程，不跑实时行情**。
+
+**启动策略**：监控控制信号（start/stop）由 Celery Beat 自动触发；盘后回补（`intraday_reconcile`）属采集任务，遵循手动启动约束，`enabled: false`，需用户通过 API 或管理界面手动触发。
 
 ## 七、实施计划（Phase 1.0-1.1）
 
@@ -470,7 +496,7 @@ steps:
 | 1.0.5 | 实现 `TickAnomalyScanner` 全推快照异动扫描（内存，不落库） | `src/xqtrader/domain/market/intraday/tick_anomaly_scanner.py` | 1.0.3 |
 | 1.0.6 | 实现 `IntradayMonitorTask` asyncio 后台任务（FastAPI lifespan 注册，订阅+合成+落库+发布事件，监听 Redis intraday.control 启停） | `src/xqtrader/domain/market/intraday/intraday_monitor_task.py` | 1.0.4, 1.0.5 |
 | 1.0.7 | 实现 `Publishers` Redis Pub/Sub 事件发布 | `src/xqtrader/domain/market/intraday/publishers.py` | 无 |
-| 1.0.8 | 新增 Celery Beat schedule：09:15/15:30 发控制信号 + 15:35 盘后全量补全 | `schedules/intraday_pipeline.yml` + `src/worker/` | 1.0.6 |
+| 1.0.8 | 新增 Celery Beat schedule：09:15/15:30 发控制信号（自动）+ 盘后回补（手动） | `schedules/intraday_monitor_start.yml` + `schedules/intraday_monitor_stop.yml` + `schedules/intraday_reconcile.yml` + `src/worker/` | 1.0.6 |
 | 1.0.9 | 黑盒测试：动态股票池 1m OHLCV 入库 + Continuous Aggregate 自动刷新 + 按日/分钟查询 | `tests/market/test_intraday_monitor.py` | 全部 |
 
 #### Phase 1.1：成交确认 + 持仓同步
@@ -493,7 +519,7 @@ steps:
 4. `add_retention_policy` 2 年自动 drop 生效（可模拟旧数据验证）
 5. `add_compression_policy` 3 月压缩生效（可模拟旧数据验证）
 6. db-tools 可按日/分钟查询验证数据完整性
-7. 盘后 15:35 `fetch_kline_minute` 全量补全当日数据，缺口已补齐
+7. 盘后手动触发 `fetch_kline_minute` 全量补全当日数据，缺口已补齐
 
 **Phase 1.1 验收**：
 1. 模拟账户下单后，30s 内 `td_order.status` 推进、`td_trade` 写入
@@ -518,7 +544,7 @@ steps:
 
 | 风险 | 影响 | 对策 |
 |---|---|---|
-| QMT `subscribe_quote` 回调延迟或丢包 | 分钟线缺失 | 30s 缺口检测 + 盘后 15:35 `fetch_kline_minute` 全量补全 |
+| QMT `subscribe_quote` 回调延迟或丢包 | 分钟线缺失 | 30s 缺口检测 + 盘后手动触发 `fetch_kline_minute` 全量补全 |
 | FastAPI 重启导致监控中断 | 监控中断 | 任务幂等可重入，重启后从 Redis 缓存读最后时间戳恢复 |
 | TimescaleDB 写入压力（动态股票池扩大） | 落库延迟 | 批量写入（每 5s 聚合一批）+ `compress_segmentby='symbol'` 优化 |
 | QMT 连接断开 | 无法获取行情 | 复用 `BrokerStatusSpi` 监控连接状态，断开时告警并暂停落库 |
@@ -548,7 +574,8 @@ steps:
 - `src/xqtrader/domain/market/intraday/`：数据接入层（`MinuteBarCollector`/`TickAnomalyScanner`/`IntradayMonitorTask`/`Publishers`）
 - `src/xqtrader/domain/trading/monitor/`：监控服务层
 - `src/xqtrader/domain/trading/backtest/plugins/intraday/`：盘中信号策略（Phase 2）
-- `schedules/intraday_pipeline.yml`：Celery Beat 调度（仅控制信号 + 盘后补全）
+- `schedules/intraday_monitor_start.yml` / `intraday_monitor_stop.yml`：Celery Beat 调度（09:15/15:30 自动控制信号）
+- `schedules/intraday_reconcile.yml`：盘后回补调度（`enabled: false`，手动触发）
 
 ## 十、决策确认与实施
 
@@ -565,7 +592,7 @@ steps:
 | 分表方案 | 不分表，单 hypertable + compression/retention policy + Continuous Aggregate |
 | 盘中信号策略 | 多周期组合：1m VWAP/集合竞价/涨跌停 + 5m MACD/布林/双均线/动量 + 15m 唐奇安/ATR + 30m/1h 缠论（Phase 3 改造） |
 | Level-2 替代 | 量价异动用 Level-1 快照，资金流用 Tushare moneyflow_dc 日级 |
-| 分钟线补全 | 盘后 15:35 `fetch_kline_minute` 全量拉取补全 |
+| 分钟线补全 | 盘后手动触发 `fetch_kline_minute` 全量拉取补全 |
 | 实施范围 | Phase 1.0 基础设施 + Phase 1.1 成交确认与持仓同步 |
 
 ### 10.1 实施前需进一步确认
@@ -591,3 +618,514 @@ steps:
 - 内存：48GB - 充足（TimescaleDB 缓存 + Continuous Aggregate 物化视图占用极小）
 - 显卡：RTX 5060Ti - **本场景无用**（TimescaleDB 不支持 GPU 加速）
 - 存储：建议 SSD，分钟线写入频繁，HDD 会成为瓶颈
+
+---
+
+## 十一、行情监控大屏驾驶舱
+
+> 版本：v1.0  日期：2026-07-10
+> 状态：设计中，待评审
+
+### 11.1 背景与定位
+
+#### 11.1.1 现状缺口
+
+| 维度 | 现状 | 缺口 |
+|------|------|------|
+| 交易视角 | [LiveCockpitPage](../web/src/pages/trading/LiveCockpitPage.tsx) `/trading` — 账户资产/信号审批/持仓/订单流/Kill Switch | 已有，聚焦"执行" |
+| 行情视角 | `/monitor` 路由是 `RoutePlaceholder` 占位 | **空白，未实现** |
+| 单标的 K 线 | [StockKlineChart.tsx](../web/src/components/stock/StockKlineChart.tsx) 840 行，支持 MA/布林/TD9/缠论 + MACD/KDJ/RSI 副图 | 单标的详情视角，不支持多标的同屏 |
+| 盘内数据 | 本文档 §一至 §十已设计分钟线采集/落库/信号计算 | 数据层+计算层已设计，**缺可视化层** |
+| WS 推送 | [constants.py](../src/xqtrader/ws/constants.py) 已定义 `ws.intraday.minute_bar` / `ws.intraday.tick_anomaly` / `ws.intraday.status` 三个 topic | 前端无消费方 |
+| 信号查询 | `td_trading_signal` 表存在，但**无独立 API**（仅通过 pre_order 的 signal_detail 间接暴露） | 缺 `GET /intraday/signals` 端点 |
+
+#### 11.1.2 设计目标
+
+构建「**行情监控大屏驾驶舱**」——类似视频监控的多标的同屏行情观察面板，作为盘内监控可视化层的最终消费方，补齐盘内闭环最后一环。
+
+与现有 `/trading` 交易驾驶舱互补并列：
+- `/trading`：交易视角（管执行：审批/持仓/订单流/Kill Switch）
+- `/monitor/screen`：行情视角（看市场：多标的监控/信号流/快速下单）
+
+#### 11.1.3 设计原则
+
+1. **独立大屏**：可脱离框架布局（TopBar/SideNav/StatusBar）独立全屏打开，适合投屏/副屏场景
+2. **深色主题统一**：复用 [themes.css](../web/src/styles/themes.css) 全局 CSS 变量，不引入新色板
+3. **视频监控式交互**：标的可拖拽、排序、缩放、放大全屏，类似监控墙
+4. **高复用低新增**：ECharts/WS 框架/intraday API/自选池 API 均已有，大屏是"组装"非"从零搭建"；唯一新增前端依赖 `react-grid-layout`
+5. **信号可快速下单**：保留审计与风控前提下，支持从信号一键下单
+
+### 11.2 独立窗口支持
+
+#### 11.2.1 路由设计
+
+当前路由全部嵌套在 `AppLayout`（TopBar + SideNav + StatusBar）下（[router/index.tsx](../web/src/router/index.tsx)）。大屏需脱离框架布局独立全屏展示。
+
+在 `createBrowserRouter` 顶层新增一条**平级路由**，不经过 `AppLayout`：
+
+```typescript
+// web/src/router/index.tsx
+export const router = createBrowserRouter([
+  {
+    path: '/',
+    element: <AuthGuard><RouteErrorBoundary><AppLayout /></RouteErrorBoundary></AuthGuard>,
+    errorElement: <ServerErrorPage />,
+    children: [
+      // ... 现有子路由 ...
+      { path: 'monitor', element: <MonitorOverviewPage /> },  // 框架内概览页
+    ],
+  },
+  // ↓ 新增：独立大屏路由，不套 AppLayout
+  {
+    path: '/monitor/screen',
+    element: <AuthGuard><RouteErrorBoundary><MonitorDashboardPage /></RouteErrorBoundary></AuthGuard>,
+    errorElement: <ServerErrorPage />,
+  },
+  { path: '/500', element: <ServerErrorPage /> },
+  { path: '/404', element: <NotFoundPage /> },
+  { path: '*', element: <NotFoundPage /> },
+])
+```
+
+- **框架内入口**：`/monitor` 作为大屏概览页（含"打开大屏"按钮 + 布局预览）
+- **独立窗口入口**：`/monitor/screen` 通过 `window.open` 在新浏览器窗口打开，无 TopBar/SideNav/StatusBar，全屏可用
+- **鉴权**：`AuthGuard` 当前 `canActivate()` 恒返回 `true`（[auth.ts](../web/src/router/auth.ts) 预留），独立窗口同样经过 AuthGuard，无额外处理
+
+#### 11.2.2 打开方式
+
+在 `/monitor` 概览页放"打开大屏"按钮：
+
+```typescript
+window.open('/monitor/screen', '_blank', 'popup,width=1920,height=1080')
+```
+
+生产环境同域部署时直接可用；开发环境 Vite proxy 已转发 `/api` 和 `/ws`（[vite.config.ts](../web/vite.config.ts)）。
+
+### 11.3 大屏 UI 布局
+
+采用**三区布局**：顶部状态栏 + 左侧标的池 + 主监控网格 + 底部信号流。
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│  ScreenHeader (32px)                                                 │
+│  ● 监控中 09:30-15:00 | 池: 38只 | 布局: 3×2 | 主题: 深色 | [全屏F11] │
+├──────────┬───────────────────────────────────────────────────────────┤
+│          │                                                           │
+│ StockPool│              MonitorGrid                                  │
+│ Sidebar  │   ┌────────────┐ ┌────────────┐ ┌────────────┐           │
+│ (180px)  │   │ 000001.SZ  │ │ 600519.SH  │ │ 300750.SZ  │           │
+│          │   │ 10.52 +1.2%│ │ 1689.0 -0.3│ │ 215.5 +2.1%│           │
+│ [搜索框]  │   │ ┌────────┐ │ │ ┌────────┐ │ │ ┌────────┐ │           │
+│          │   │ │1m+VWAP │ │ │ │1m+MACD │ │ │ │ 日K+布林│ │           │
+│ 自选池    │   │ │ K线图  │ │ │ │ K线图  │ │ │ │ K线图  │ │           │
+│ ┌──────┐ │   │ └────────┘ │ │ └────────┘ │ │ └────────┘ │           │
+│ │000001│ │   │ ⤢放大 ✕移除│ │ ⤢放大 ✕移除│ │ ⤢放大 ✕移除│           │
+│ │600519│ │   └────────────┘ └────────────┘ └────────────┘           │
+│ │300750│ │   ┌────────────┐ ┌────────────┐ ┌────────────┐           │
+│ │...   │ │   │ 002594.SZ  │ │  (空槽)    │ │  (空槽)    │           │
+│ └──────┘ │   │ 1m+动量    │ │  拖入标的  │ │  拖入标的  │           │
+│          │   └────────────┘ └────────────┘ └────────────┘           │
+│ 持仓标的  │                                                           │
+│ ┌──────┐ │                                                           │
+│ │...   │ │                                                           │
+│ └──────┘ │                                                           │
+├──────────┴───────────────────────────────────────────────────────────┤
+│  SignalStreamPanel (160px, 可折叠至 32px)                             │
+│  ┌────────────────────────────────────────────────────────────────┐  │
+│  │ ⚡ 10:32:15  000001.SZ  VWAP上穿   ▲ long  0.72  [⚡快速下单]  │  │
+│  │ ⚡ 10:31:48  600519.SH  量价异动   — —     0.85  [⚡快速下单]  │  │
+│  │ ⚡ 10:30:00  300750.SZ  MACD金叉   ▲ long  0.65  [⚡快速下单]  │  │
+│  └────────────────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+**各区域职责**：
+
+| 区域 | 尺寸 | 职责 |
+|------|------|------|
+| ScreenHeader | 32px 固定高 | 监控状态/股票池统计/布局切换/全屏按钮 |
+| StockPoolSidebar | 180px 固定宽，可折叠 | 拖拽源：自选池+持仓标的列表，支持搜索 |
+| MonitorGrid | flex: 1 自适应 | 拖拽目标：react-grid-layout 网格，N×M 布局 |
+| SignalStreamPanel | 160px，可折叠至 32px | 信号流：时间倒序，支持过滤/快速下单 |
+
+### 11.4 配色方案（深色主题统一）
+
+复用 [themes.css](../web/src/styles/themes.css) 全局 CSS 变量，不引入新色板：
+
+| 区域 | CSS 变量 | 色值 | 用途 |
+|------|----------|------|------|
+| 大屏背景 | `--bg-root` | `#0a0c10` | 全屏底色 |
+| 顶栏 | `--bg-statusbar` | `#080a0e` | ScreenHeader 背景 |
+| 侧栏 | `--bg-sidenav` | `#0c0f14` | StockPool 背景 |
+| 网格区 | `--bg-workspace` | `#0f1218` | MonitorGrid 背景 |
+| 标的卡片 | `--bg-card` | `#131820` | MonitorCell 背景 |
+| 卡片边框 | `--border-default` | `rgba(255,255,255,0.11)` | Cell 边框 |
+| 悬浮高亮 | `--border-focus` | `rgba(22,119,255,0.55)` | 拖拽悬停/选中 |
+| 主文字 | `--text-primary` | `#eef2f8` | 标的代码/价格 |
+| 次文字 | `--text-secondary` | `#9aaabe` | 标签/时间 |
+| 品牌色 | `--accent-primary` | `#1677ff` | 按钮/链接/选中态 |
+| 涨色 | `--color-rise` | `#e03e3e` | A 股红涨 |
+| 跌色 | `--color-fall` | `#2eaa67` | A 股绿跌 |
+| 警告 | `--color-warning` | `#faad14` | 异动告警 |
+| 卡片阴影 | `--shadow-card` | `0 1px 3px rgba(0,0,0,0.45)` | Cell 投影 |
+
+**交互态增强**（新增少量局部样式）：
+- 卡片选中态：`border-color: var(--accent-primary)` + `box-shadow: 0 0 0 1px var(--accent-primary)`
+- 拖拽悬停态：空槽 `border: 1px dashed var(--accent-muted)` + `background: var(--accent-muted)`
+- 信号行 hover：`background: var(--bg-hover)`
+
+所有颜色通过 CSS 变量引用，切换 light 主题时自动适配（大屏默认深色）。
+
+### 11.5 MonitorCell 组件设计（视频监控式交互）
+
+#### 11.5.1 拖拽与排序
+
+使用 `react-grid-layout`（React 生态标准网格拖拽库）：
+
+| 能力 | 实现 |
+|------|------|
+| 拖拽排序 | `react-grid-layout` 的 `onDragStop` 重新排列 cells |
+| 从侧栏拖入 | 侧栏标的为 HTML5 `draggable`，拖入网格区 `onDrop` 创建新 cell |
+| 缩放尺寸 | 拖拽 cell 右下角 resize handle，支持 1×1 / 2×1 / 2×2 / 3×2 等尺寸 |
+| 放大全屏 | cell 内 `⤢` 按钮 → layout 中该 cell 设为 `w=cols, h=maxRows`，其余隐藏 |
+| 移除 | cell 内 `✕` 按钮 → 从 cells 列表删除 |
+| 布局持久化 | layout 配置存 `localStorage`，key 为 `monitor:layout:{accountId}` |
+
+#### 11.5.2 Cell 内部结构
+
+```
+MonitorCell
+├── CellHeader (28px)
+│   ├── 左：标的代码 + 名称 + 实时价格 + 涨跌幅(红/绿)
+│   └── 右：周期切换(1m/日K) + 指标切换(▾) + 放大(⤢) + 关闭(✕)
+├── ChartBody (flex: 1)
+│   └── MiniKlineChart (ECharts)
+│       ├── 主图：candlestick + 叠加指标
+│       └── 副图：技术指标 (可选)
+└── CellFooter (20px, 可选)
+    └── 最新信号 badge (如 "⚡VWAP上穿 10:32")
+```
+
+#### 11.5.3 MiniKlineChart 设计
+
+基于现有 [StockKlineChart.tsx](../web/src/components/stock/StockKlineChart.tsx) 的 ECharts 配置精简：
+
+**分钟模式（默认）**：
+- 数据：`GET /intraday/minute-bars?symbol={symbol}&trade_date={today}`
+- 主图叠加指标（单选）：VWAP / MA5&MA20 / 布林带 / 唐奇安通道
+- 副图指标（单选）：成交量 / MACD / RSI
+- 实时更新：WS 订阅 `ws.intraday.minute_bar`，按 symbol 过滤，增量更新最后一根 K 线
+
+**日 K 模式**：
+- 数据：`GET /stocks/{symbol}/kline?limit=120`
+- 主图叠加：MA / 布林 / TD9 / 缠论
+- 副图：MACD / KDJ / RSI / 成交量
+- 实时更新：WS 订阅 `ws.market.stock_quotes.{symbol}`，复用 [klineLive.ts](../web/src/utils/klineLive.ts) `mergeLiveQuoteIntoBars`
+
+**精简策略**（与 StockKlineChart 的区别）：
+- 无 dataZoom 滚动条（cell 空间小，固定显示最近 N 根）
+- 无十字光标 tooltip（可选开启）
+- 轴标签极简（仅显示首尾时间）
+- 放大态时恢复完整交互（dataZoom + tooltip）
+
+#### 11.5.4 指标切换 UI
+
+CellHeader 右侧指标切换用 Ant Design `Dropdown`：
+
+```
+周期: [1m] [日K]     指标: [主图▾] [副图▾]    ⤢  ✕
+                      ├─ VWAP         ├─ 成交量
+                      ├─ MA5/MA20     ├─ MACD
+                      ├─ 布林带       └─ RSI
+                      └─ 唐奇安
+```
+
+### 11.6 SignalStreamPanel 信号区设计
+
+#### 11.6.1 数据来源
+
+| 来源 | 方式 | 说明 |
+|------|------|------|
+| 初始加载 | `GET /intraday/signals?trade_date={today}` | 需新增 API，查 `td_trading_signal` 当日记录 |
+| 实时异动 | WS `ws.intraday.tick_anomaly` | 急涨急跌/量脉冲 |
+| 实时策略信号 | WS `ws.trading.signals`（规划中） | VWAP突破/MACD金叉等 |
+
+#### 11.6.2 信号行结构
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│ ⚡ 10:32:15 │ 000001.SZ 平安银行 │ VWAP上穿 │ ▲ long │ 0.72 │ [⚡下单] │
+├──────────────────────────────────────────────────────────────────────┤
+│ ⚡ 10:31:48 │ 600519.SH 贵州茅台 │ 量价异动 │  —    │ 0.85 │ [⚡下单] │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+- 按时间倒序，最新在顶部，自动滚动
+- 支持按标的/信号类型/方向过滤
+- 点击信号行 → 高亮对应 MonitorCell（边框闪烁 2s）
+- 信号方向颜色：long → `--color-rise`(红)，short → `--color-fall`(绿)，neutral → `--text-muted`
+
+### 11.7 信号快速下单分析与设计
+
+#### 11.7.1 现有下单链路
+
+```
+信号(TradingSignal)
+  → PositionSizingResult(配仓)
+  → PreOrder创建(status=pending_approval)
+  → 人工审批(POST /trading/approval/{id})
+  → submit(POST /trading/pre-orders/{id}/submit)
+  → 执行流 → Order → QMT/模拟撮合
+```
+
+**关键约束**（[router.py](../src/xqtrader/api/v1/trading/router.py) L1313-1337, [schemas.py](../src/xqtrader/api/v1/trading/schemas.py) L119-156）：
+1. PreOrder 必须经过 `approval_status: pending → approved` 才能 submit
+2. `submit_pre_order` 要求 `approval_status == APPROVED`
+3. 审批和下单是**两个独立 API 调用**，需人工确认
+4. `operator` 字段必填，禁止 `system`（`validate_operator_not_system`）
+5. PreOrder 需要 `instance_id`（策略实例），信号本身不直接产出 PreOrder
+
+#### 11.7.2 快速下单可行性分析
+
+| 场景 | 可行性 | 说明 |
+|------|--------|------|
+| 信号已有对应 PreOrder | ✅ 可行 | 信号已走完决策流产出 PreOrder，快速下单 = 审批 + submit 两步合并 |
+| 信号无 PreOrder（纯盘中信号） | ⚠️ 需新建 | 盘中信号(VWAP/异动)目前不产出 PreOrder，需新增"从信号创建 PreOrder"的 API |
+| 绕过审批直接下单 | ❌ 不建议 | 破坏现有审批风控体系，与 `live_manual` 模式冲突 |
+
+#### 11.7.3 推荐方案：两步合一的"快速审批下单"
+
+**不绕过审批**，而是将"审批 + 下单"合并为一次交互：
+
+**场景 A：信号已有 PreOrder**
+
+```
+用户点击 [⚡下单]
+  → 弹出 QuickOrderModal（预填信号信息）
+  → 用户确认方向/数量/价格/操作人
+  → 前端连续调用：
+    1. POST /trading/approval/{pre_order_id}  (approved=true)
+    2. POST /trading/pre-orders/{pre_order_id}/submit
+  → 展示下单结果
+```
+
+**场景 B：盘中信号无 PreOrder**
+
+后端新增 API：
+
+```
+POST /intraday/signals/{signal_id}/quick-order
+Body: {
+  account_id: int,
+  side: "open" | "add" | "reduce" | "close",
+  target_qty: int,
+  order_type: "limit" | "market",
+  limit_price: float | null,
+  operator: str  (禁止 system)
+}
+→ 后端创建 PreOrder(approval_status=approved, status=approved)
+→ 自动触发 submit
+→ 返回 order 信息
+```
+
+该 API **内部完成"创建+审批+下单"三步**，但仍保留：
+- `operator` 审计字段
+- PreOrder 记录可追溯
+- 风控预检（`risk_check_passed`）
+- Kill Switch 仍可拦截
+
+#### 11.7.4 QuickOrderModal 交互设计
+
+```
+┌─────────────────────────────────────────────┐
+│  快速下单 — 000001.SZ 平安银行              │
+├─────────────────────────────────────────────┤
+│  信号: VWAP上穿  方向: ▲ long  强度: 0.72   │
+│  现价: 10.52  涨幅: +1.2%                   │
+│                                             │
+│  账户:    [模拟盘 ▾]                        │
+│  操作:    [开仓 ▾]  (open/add/reduce/close) │
+│  数量:    [100    ] 股                      │
+│  类型:    [限价 ▾]  (limit/market)          │
+│  价格:    [10.52  ] 元  (market时禁用)      │
+│  操作人:  [trader ]                         │
+│                                             │
+│  ⚠ 此操作将跳过人工审批直接提交订单         │
+│                                             │
+│              [取消]    [确认下单]           │
+└─────────────────────────────────────────────┘
+```
+
+- Modal 打开时根据信号方向预填 side（long→open/buy，short→reduce/sell）
+- 价格默认填现价（从 WS 实时行情获取）
+- 操作人默认填 `DEFAULT_OPERATOR`（[trading/utils.ts](../web/src/pages/trading/utils/trading.ts) 已有此常量）
+- 确认按钮需二次确认（Ant Design `Modal.confirm`）
+
+#### 11.7.5 安全约束
+
+| 约束 | 实现 |
+|------|------|
+| 仅模拟盘默认开启快速下单 | 实盘账户需在设置中显式开启"快速下单"开关 |
+| Kill Switch 激活时禁用 | 前端检查 `riskEvents` 中是否有未解决的 `kill_switch` 事件 |
+| 单笔金额上限 | 可配置（如模拟盘 50 万、实盘 10 万），超限需走正常审批 |
+| 操作人审计 | `operator` 必填，写入 PreOrder.approved_by + Order 审计字段 |
+| 风控预检不跳过 | 后端 `quick-order` API 仍执行 `risk_check_passed` 逻辑 |
+
+### 11.8 前端文件结构
+
+```
+web/src/pages/monitor/
+├── index.tsx                          # 路由导出
+├── MonitorDashboardPage.tsx           # 大屏主页面（独立路由 /monitor/screen）
+├── MonitorOverviewPage.tsx            # /monitor 概览页（框架内，含"打开大屏"按钮）
+├── components/
+│   ├── ScreenHeader.tsx               # 顶部状态栏
+│   ├── StockPoolSidebar.tsx           # 左侧标的池（拖拽源）
+│   ├── MonitorGrid.tsx                # 网格容器（react-grid-layout）
+│   ├── MonitorCell.tsx                # 单个标的监控格子
+│   ├── MiniKlineChart.tsx             # 迷你K线图
+│   ├── SignalStreamPanel.tsx          # 底部信号流
+│   └── QuickOrderModal.tsx            # 快速下单弹窗
+├── stores/
+│   └── monitorStore.ts                # Zustand：cells列表/布局配置/信号列表/选中态
+├── hooks/
+│   ├── useMonitorWebSocket.ts         # 盘内WS订阅封装
+│   └── useMonitorLayout.ts            # 布局持久化(localStorage)
+└── styles/
+    └── monitor.css                    # 大屏局部样式（引用全局CSS变量）
+```
+
+### 11.9 后端配套改动
+
+| 改动 | 说明 | 优先级 |
+|------|------|--------|
+| 新增 `GET /intraday/signals` | 查询当日盘中信号列表，支持 symbol/signal_type/direction 过滤 | P0 |
+| `td_trading_signal` 新增 `signal_source` 字段 | `String(16)`，区分 `daily`/`intraday`（本文档 §5.4 已规划） | P0 |
+| 新增 `POST /intraday/signals/{id}/quick-order` | 从盘中信号快速创建 PreOrder + 审批 + 下单（三步合一） | P1 |
+| 新增 `ws.trading.signals` SPI | 盘中策略信号事件推送（本文档 §6.4 已规划） | P1 |
+| 监控布局 API（可选） | `GET/POST /intraday/monitor-layout` 服务端持久化布局 | P2 |
+
+#### 11.9.1 `GET /intraday/signals` API 设计
+
+```
+GET /api/v1/intraday/signals?trade_date={YYYY-MM-DD}&symbol={symbol}&signal_type={type}&direction={dir}&page=1&page_size=50
+
+Response:
+{
+  "items": [
+    {
+      "id": 123,
+      "instance_id": 1,
+      "signal_date": "2026-07-10",
+      "symbol": "000001.SZ",
+      "direction": "long",
+      "strength": 0.72,
+      "signal_type": "vwap_breakout",
+      "signal_source": "intraday",   // 新增字段
+      "raw_values": { "vwap": 10.48, "close": 10.52, ... },
+      "created_at": "2026-07-10T10:32:15+08:00"
+    }
+  ],
+  "total": 38,
+  "page": 1,
+  "page_size": 50
+}
+```
+
+#### 11.9.2 `POST /intraday/signals/{id}/quick-order` API 设计
+
+```
+POST /api/v1/intraday/signals/{signal_id}/quick-order
+Body:
+{
+  "account_id": 1,
+  "side": "open",
+  "target_qty": 100,
+  "order_type": "limit",
+  "limit_price": 10.52,
+  "operator": "trader"
+}
+
+Response:
+{
+  "pre_order": { ... },
+  "order": { ... },
+  "broker_order_id": "..."
+}
+```
+
+后端流程：
+1. 查 `TradingSignal` 获取 symbol/direction/instance_id
+2. 创建 `PreOrder`（approval_status=approved, status=approved, operator 审计）
+3. 执行风控预检（`risk_check_passed`）
+4. 调用 `_run_pre_order_execution_workflow` 提交订单
+5. 返回 pre_order + order 信息
+
+### 11.10 技术选型
+
+| 依赖 | 版本 | 用途 | 是否新增 |
+|------|------|------|----------|
+| `react-grid-layout` | ^2.x | 拖拽网格布局 | **是**（唯一新增前端依赖） |
+| ECharts | 6.1.0 | K线图渲染 | 否（已有） |
+| Zustand | 5.x | 状态管理 | 否（已有） |
+| Ant Design | 6.x | Modal/Dropdown/Segmented | 否（已有） |
+| dayjs | 1.11.x | 时间格式化 | 否（已有） |
+
+### 11.11 数据流全景
+
+```
+                    ┌─────────────────────────────────────┐
+                    │           后端数据层                 │
+                    │  sdc_candlestick_1m (分钟K线)        │
+                    │  sdc_candlestick_5m_cagg (5m聚合)     │
+                    │  sdc_candlestick_daily (日K线)       │
+                    │  td_trading_signal (信号)            │
+                    └──────────┬──────────┬─────────────────┘
+                               │          │
+                    ┌──────────▼──┐  ┌────▼──────────────┐
+                    │  REST API   │  │  WebSocket 推送    │
+                    │  /intraday/ │  │  ws.intraday.*     │
+                    │  /stocks/   │  │  ws.market.stock_* │
+                    │  /trading/  │  │  ws.trading.signals│
+                    └──────┬──────┘  └────┬──────────────┘
+                           │              │
+            ┌──────────────▼──────────────▼──────────────┐
+            │          MonitorDashboardPage              │
+            │  ┌─────────┐  ┌──────────────────────────┐ │
+            │  │Sidebar  │  │  MonitorGrid             │ │
+            │  │(拖拽源) │  │  Cell1  Cell2  Cell3     │ │
+            │  │         │  │  Cell4  Cell5(放大全屏)  │ │
+            │  └─────────┘  └──────────────────────────┘ │
+            │  ┌──────────────────────────────────────┐  │
+            │  │  SignalStreamPanel（WS信号流）        │  │
+            │  │  → [⚡快速下单] → QuickOrderModal     │  │
+            │  └──────────────────────────────────────┘  │
+            └────────────────────────────────────────────┘
+```
+
+### 11.12 实施计划
+
+| 期次 | 范围 | 前端 | 后端 |
+|------|------|------|------|
+| **P0 基础大屏** | 独立窗口 + 拖拽网格 + 迷你K线(分钟/日切换) + 布局持久化 + 信号区(REST) | 全部前端文件骨架 | `GET /intraday/signals` + `signal_source` 字段 |
+| **P1 实时+快速下单** | WS 实时分钟线更新 + WS 异动信号流 + 指标叠加 + QuickOrderModal | WS hook + 指标 + Modal | `POST /intraday/signals/{id}/quick-order` + `ws.trading.signals` SPI |
+| **P2 增强** | 服务端布局同步 + 信号过滤 + 信号回放 | 布局 API | `GET/POST /intraday/monitor-layout` |
+
+#### P0 验收口径
+
+1. `/monitor` 概览页可点击"打开大屏"按钮，在新窗口打开 `/monitor/screen`
+2. 大屏页面无 TopBar/SideNav/StatusBar，全屏可用，深色主题
+3. 左侧标的池从自选池 API 加载，可拖拽到网格区创建 MonitorCell
+4. 每个 Cell 支持周期切换（1m/日K）、指标切换、放大全屏、移除
+5. 布局配置存 localStorage，刷新后恢复
+6. 底部信号区从 `GET /intraday/signals` 加载当日信号，按时间倒序展示
+7. 点击信号行可高亮对应 MonitorCell
+
+#### P1 验收口径
+
+1. WS 订阅 `ws.intraday.minute_bar`，分钟K线实时更新最后一根
+2. WS 订阅 `ws.intraday.tick_anomaly`，异动信号实时推入信号区
+3. 指标叠加（VWAP/MACD/布林/唐奇安）正确渲染
+4. 信号行 [⚡下单] 按钮可弹出 QuickOrderModal
+5. QuickOrderModal 提交后，PreOrder 创建 + 审批 + 下单三步合一，订单可见
+6. Kill Switch 激活时，快速下单按钮禁用

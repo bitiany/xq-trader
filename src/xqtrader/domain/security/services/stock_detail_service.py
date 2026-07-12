@@ -1,5 +1,6 @@
 """个股详情服务。"""
 
+# ruff: noqa: I001 — chanpy 需先 import 以修改 sys.path，裸模块导入顺序不可调整
 from __future__ import annotations
 
 from collections.abc import Generator
@@ -8,15 +9,20 @@ from datetime import date
 from typing import Any
 from uuid import uuid4
 
+import chanpy  # noqa: F401, I001 — 触发 sys.path 修改，使 chanpy 子模块可被裸导入
 import numpy as np
 import pandas as pd
 import talib  # type: ignore[import-not-found]
+from Chan import CChan  # type: ignore[import-not-found]  # noqa: I001
+from ChanConfig import CChanConfig  # type: ignore[import-not-found]  # noqa: I001
+from Common.CEnum import AUTYPE, FX_TYPE, KL_TYPE  # type: ignore[import-not-found]  # noqa: I001
+from DataAPI.DfApi import _DF_CACHE  # type: ignore[import-not-found]  # noqa: I001
 
-from framework.commons.exceptions import NotFoundException
+from framework.commons.exceptions import BusinessException, NotFoundException
 from framework.commons.logger import get_logger
 from framework.commons.pagination import build_paginated_response, paginate
 from xqtrader.domain.market.models.balance_sheet import BalanceSheet
-from xqtrader.domain.market.models.candlestick import CandlestickDaily
+from xqtrader.domain.market.models.candlestick import CandlestickDaily, CandlestickMinute
 from xqtrader.domain.market.models.cash_flow import CashFlowStatement
 from xqtrader.domain.market.models.daily_indicator import DailyIndicator
 from xqtrader.domain.market.models.financial_indicator import FinancialIndicator
@@ -107,8 +113,6 @@ class StockApiFormatter:
 @contextmanager
 def chanlun_cache(df: pd.DataFrame) -> Generator[str, None, None]:
     """封装第三方库缓存操作，隔离 _DF_CACHE 实现细节。"""
-    from DataAPI.DfApi import _DF_CACHE  # type: ignore[import-not-found]
-
     cache_key = f"_stock_detail_chan_{uuid4().hex}"
     _DF_CACHE[cache_key] = df
     try:
@@ -547,34 +551,124 @@ class StockFundFlowService(SecurityMixin):
 
 
 class StockChanlunService(SecurityMixin):
-    """个股缠论图形元素服务。"""
+    """个股缠论图形元素服务。
 
-    async def get_chanlun(self, symbol: str) -> dict[str, Any]:
+    支持日线和分钟级（5m/15m）缠论计算，底层统一调用 chanpy。
+    """
+
+    _VALID_PERIODS = frozenset({"daily", "5m", "15m"})
+
+    async def get_chanlun(self, symbol: str, period: str = "daily") -> dict[str, Any]:
         await self._ensure_security(symbol)
-        rows = await CandlestickDaily.filter(symbol=symbol, order_by=CandlestickDaily.trade_date.asc(), limit=12000)
-        if len(rows) < 5:
-            return {"fractals": [], "strokes": [], "pivots": []}
-        return self._chanlun_visuals(rows)
+        if period not in self._VALID_PERIODS:
+            raise BusinessException(
+                message=f"不支持的缠论周期: {period}，仅支持 {sorted(self._VALID_PERIODS)}"
+            )
+        bars: list[dict[str, Any]]
+        kl_type = self._kl_type(period)
 
-    def _chanlun_visuals(self, rows: list[CandlestickDaily]) -> dict[str, list[dict[str, Any]]]:
-        import chanpy  # noqa: F401, I001 — 顶级模块导入，触发 __init__.py 将包目录加入 sys.path
-        from Chan import CChan  # type: ignore[import-not-found]  # noqa: I001
-        from ChanConfig import CChanConfig  # type: ignore[import-not-found]  # noqa: I001
-        from Common.CEnum import AUTYPE, KL_TYPE  # type: ignore[import-not-found]  # noqa: I001
+        if period == "daily":
+            rows = await CandlestickDaily.filter(
+                symbol=symbol, order_by=CandlestickDaily.trade_date.asc(), limit=12000
+            )
+            if len(rows) < 5:
+                return {"fractals": [], "strokes": [], "pivots": [], "bs_points": []}
+            bars = [StockApiFormatter.bar_item(row) for row in rows]
+        else:
+            # 分钟级：5m / 15m，从 1m 聚合
+            minutes = int(period.rstrip("m"))
+            raw_bars = await self._fetch_minute_bars(symbol, limit=2000)
+            if len(raw_bars) < 5:
+                return {"fractals": [], "strokes": [], "pivots": [], "bs_points": []}
+            bars = self._aggregate_minute_bars(raw_bars, minutes)
 
-        bars = [StockApiFormatter.bar_item(row) for row in rows]
+        return self._chanlun_visuals(bars, kl_type)
+
+    @staticmethod
+    def _kl_type(period: str) -> Any:
+        """根据周期返回对应的 KL_TYPE。"""
+        if period == "daily":
+            return KL_TYPE.K_DAY
+        if period == "5m":
+            return KL_TYPE.K_5M
+        return KL_TYPE.K_15M
+
+    async def _fetch_minute_bars(self, symbol: str, limit: int = 2000) -> list[dict[str, Any]]:
+        """查询最新 1m K线（正序）。"""
+        rows = await CandlestickMinute.filter(
+            symbol=symbol,
+            order_by=CandlestickMinute.trade_time.desc(),
+            limit=limit,
+        )
+        return [
+            {
+                "trade_date": r.trade_time.isoformat(),
+                "open": r.open,
+                "close": r.close,
+                "high": r.high,
+                "low": r.low,
+                "volume": r.volume,
+                "amount": r.amount,
+            }
+            for r in reversed(rows)
+        ]
+
+    @staticmethod
+    def _aggregate_minute_bars(bars: list[dict[str, Any]], minutes: int) -> list[dict[str, Any]]:
+        """将 1m bar 列表聚合为 N 分钟 bar 列表。"""
+        if not bars or minutes <= 1:
+            return bars
+        result: list[dict[str, Any]] = []
+        bucket: list[dict[str, Any]] = []
+        bucket_key = -1
+        for bar in bars:
+            trade_time = pd.to_datetime(bar["trade_date"])
+            total_min = trade_time.hour * 60 + trade_time.minute
+            key = total_min // minutes
+            if bucket_key == -1:
+                bucket_key = key
+            if key != bucket_key:
+                if bucket:
+                    result.append(StockChanlunService._merge_bars(bucket, bucket_key, minutes))
+                bucket = []
+                bucket_key = key
+            bucket.append(bar)
+        if bucket:
+            result.append(StockChanlunService._merge_bars(bucket, bucket_key, minutes))
+        return result
+
+    @staticmethod
+    def _merge_bars(bucket: list[dict[str, Any]], bucket_key: int, minutes: int) -> dict[str, Any]:
+        first = bucket[0]
+        last = bucket[-1]
+        start_min = bucket_key * minutes
+        h, m = divmod(start_min, 60)
+        time_str = f"{first['trade_date'][:10]}T{h:02d}:{m:02d}:00"
+        return {
+            "trade_date": time_str,
+            "open": first["open"],
+            "close": last["close"],
+            "high": max(b["high"] for b in bucket),
+            "low": min(b["low"] for b in bucket),
+            "volume": sum(b["volume"] for b in bucket),
+            "amount": sum(b["amount"] for b in bucket),
+        }
+
+    def _chanlun_visuals(self, bars: list[dict[str, Any]], kl_type: Any) -> dict[str, list[dict[str, Any]]]:
         df = pd.DataFrame(bars)
         open_arr = df["open"].to_numpy(dtype=float)
         high_arr = df["high"].to_numpy(dtype=float)
         low_arr = df["low"].to_numpy(dtype=float)
         close_arr = df["close"].to_numpy(dtype=float)
+        # 历史数据可能存在 high < open 或 low > close 的异常，需强制 high/low 为 OHLC 极值，
+        # 否则 chanpy 会抛出 KL_DATA_INVALID 异常
         ohlc_max = np.maximum.reduce([open_arr, high_arr, low_arr, close_arr])
         ohlc_min = np.minimum.reduce([open_arr, high_arr, low_arr, close_arr])
         chan_df = pd.DataFrame(
             {
                 "open": open_arr,
-                "high": np.maximum(high_arr, ohlc_max),
-                "low": np.minimum(low_arr, ohlc_min),
+                "high": ohlc_max,
+                "low": ohlc_min,
                 "close": close_arr,
                 "volume": df["volume"].to_numpy(dtype=float),
             },
@@ -596,7 +690,7 @@ class StockChanlunService(SecurityMixin):
                 chan = CChan(
                     code=cache_key,
                     data_src="custom:DfApi.DfApi",
-                    lv_list=[KL_TYPE.K_DAY],
+                    lv_list=[kl_type],
                     autype=AUTYPE.NONE,
                     config=config,
                 )
@@ -605,14 +699,13 @@ class StockChanlunService(SecurityMixin):
                     "fractals": self._chanlun_fractals(kl_list, bars),
                     "strokes": self._chanlun_strokes(kl_list, bars),
                     "pivots": self._chanlun_pivots(kl_list, bars),
+                    "bs_points": self._chanlun_bsp(kl_list, bars),
                 }
         except Exception as exc:
             logger.error("缠论图形元素计算失败: %s", exc, exc_info=True)
             raise
 
     def _chanlun_fractals(self, kl_list: Any, bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        from Common.CEnum import FX_TYPE  # type: ignore[import-not-found]  # noqa: I001
-
         fractals: list[dict[str, Any]] = []
         for klc in kl_list.lst:
             if klc.fx == FX_TYPE.UNKNOWN:
@@ -671,3 +764,29 @@ class StockChanlunService(SecurityMixin):
                 }
             )
         return pivots
+
+    def _chanlun_bsp(self, kl_list: Any, bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """提取缠论买卖点。
+
+        买卖点位于笔的终点：
+        - 买点（is_buy=True）：向下笔终点（底部）
+        - 卖点（is_buy=False）：向上笔终点（顶部）
+        """
+        bs_points: list[dict[str, Any]] = []
+        bsp_list = kl_list.bs_point_lst.getSortedBspList()
+        for bsp in bsp_list:
+            klu = bsp.klu
+            if klu.idx < 0 or klu.idx >= len(bars):
+                continue
+            is_buy: bool = bsp.is_buy
+            bs_points.append(
+                {
+                    "index": klu.idx,
+                    "trade_date": bars[klu.idx]["trade_date"],
+                    "price": klu.low if is_buy else klu.high,
+                    "is_buy": is_buy,
+                    "types": bsp.type2str().split(","),
+                    "is_sure": bsp.bi.is_sure,
+                }
+            )
+        return bs_points

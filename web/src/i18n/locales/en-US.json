@@ -27,6 +27,7 @@
     "openAgent": "Open AI assistant",
     "closeAgent": "Close AI assistant",
     "openNotebook": "Open Notebook",
+    "openMonitor": "Open Monitor Screen",
     "userMenu": "User menu",
     "theme": "Theme",
     "language": "Language"

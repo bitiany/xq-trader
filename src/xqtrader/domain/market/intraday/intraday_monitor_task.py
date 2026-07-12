@@ -19,8 +19,12 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
+import pandas as pd
+
+from framework.commons.concurrent import ConcurrentRunner
 from framework.commons.logger import get_logger
 from framework.commons.redis_client import redis_client
 from framework.dal.enginee import engines_manager
@@ -35,10 +39,21 @@ from xqtrader.domain.market.intraday.publishers import (
 from xqtrader.domain.market.intraday.signal_generator import IntradaySignalGenerator
 from xqtrader.domain.market.intraday.subscription_manager import IntradaySubscriptionManager
 from xqtrader.domain.market.intraday.tick_anomaly_scanner import TickAnomalyScanner
+from xqtrader.domain.market.models.candlestick import CandlestickMinute
 
 logger = get_logger("INTRADAY.TASK")
 
 _RESTART_DELAY = 5  # 异常重启延迟（秒）
+_CST = timezone(timedelta(hours=8))  # A股交易时区：Asia/Shanghai
+
+# A股交易时段
+_MORNING_START = time(9, 30)
+_MORNING_END = time(11, 30)
+_AFTERNOON_START = time(13, 0)
+_AFTERNOON_END = time(15, 0)
+
+# 回补并发数（避免过多并发拖慢 QMT）
+_BACKFILL_CONCURRENCY = 5
 
 
 class IntradayMonitorTask:
@@ -221,6 +236,9 @@ class IntradayMonitorTask:
             logger.warning("动态股票池为空，跳过监控启动")
             return
 
+        # 1.5 回补今日缺失的分钟数据（盘前/盘中启动时补全早盘缺口）
+        await self._backfill_today_minutes(symbols)
+
         # 2. 启动 Collector（批量落库循环）
         await self._collector.start()
 
@@ -265,3 +283,155 @@ class IntradayMonitorTask:
 
         publish_status("stopped")
         logger.info("盘内监控已停止")
+
+    # ── 今日分钟线回补 ──────────────────────────────────────
+
+    async def _backfill_today_minutes(self, symbols: list[str]) -> None:
+        """回补今日缺失的分钟线数据。
+
+        监控启动时调用，从 QMT 拉取当日 09:30 至当前时间的 1m K 线，
+        填补实时订阅启动前的数据缺口（如盘中启动时缺早盘数据）。
+
+        非交易日/非交易时段跳过；回补失败不阻塞监控启动。
+        """
+        now = datetime.now(_CST)
+        today = now.date()
+
+        # 非交易日（周末）跳过
+        if today.weekday() >= 5:
+            logger.info("[backfill] 周末，跳过回补: %s", today)
+            return
+
+        now_time = now.time()
+
+        # 确定回补结束时间：当前时间 vs 交易时段
+        if now_time < _MORNING_START:
+            # 盘前启动，无需回补
+            logger.info("[backfill] 盘前启动，跳过回补: now=%s", now_time)
+            return
+        elif now_time > _AFTERNOON_END:
+            # 盘后启动，回补到 15:00
+            backfill_end = datetime.combine(today, _AFTERNOON_END, tzinfo=_CST)
+        else:
+            # 盘中启动，回补到当前时间
+            backfill_end = now
+
+        # 确定回补起始时间：09:30
+        backfill_start = datetime.combine(today, _MORNING_START, tzinfo=_CST)
+
+        start_str = backfill_start.strftime("%Y%m%d%H%M%S")
+        end_str = backfill_end.strftime("%Y%m%d%H%M%S")
+
+        logger.info(
+            "[backfill] 开始回补今日分钟线: symbols=%d range=%s~%s",
+            len(symbols), start_str, end_str,
+        )
+
+        runner = ConcurrentRunner[str, int](
+            concurrency=_BACKFILL_CONCURRENCY,
+            queue_maxsize=_BACKFILL_CONCURRENCY * 2,
+            log_name="intraday.backfill",
+        )
+
+        async def process_symbol(sym: str) -> int:
+            return await self._fetch_and_persist_minute(sym, start_str, end_str, today)
+
+        try:
+            result = await runner.run_items(symbols, processor=process_symbol)
+            total_rows = sum(r for r in result.succeeded if r is not None)
+            logger.info(
+                "[backfill] 回补完成: symbols=%d succeeded=%d failed=%d rows=%d duration_ms=%d",
+                len(symbols), result.success_count, result.failure_count,
+                total_rows, result.duration_ms,
+            )
+        except Exception as e:
+            logger.error("[backfill] 回补异常: %s", e, exc_info=True)
+
+    async def _fetch_and_persist_minute(
+        self,
+        symbol: str,
+        start_str: str,
+        end_str: str,
+        trade_date: date,
+    ) -> int:
+        """拉取单标的今日分钟数据并持久化。
+
+        Returns:
+            写入的记录数
+        """
+        try:
+            result = await self._qmt.fetch_kline_minute(
+                stock_list=[symbol],
+                period="1m",
+                start_time=start_str,
+                end_time=end_str,
+            )
+        except Exception as e:
+            logger.error("[backfill] 拉取失败: symbol=%s error=%s", symbol, e, exc_info=True)
+            return 0
+
+        df = result.get(symbol)
+        if df is None or df.empty:
+            return 0
+
+        instances = dataframe_to_minute_models(df, symbol, trade_date)
+        if not instances:
+            return 0
+
+        try:
+            count = await CandlestickMinute.bulk_create_or_update(
+                instances,
+                on_conflict=["symbol", "trade_time"],
+                update_fields=["open", "high", "low", "close", "volume", "amount",
+                               "trade_date", "data_source"],
+                batch_size=500,
+            )
+            return count
+        except Exception as e:
+            logger.error("[backfill] 持久化失败: symbol=%s error=%s", symbol, e, exc_info=True)
+            return 0
+
+
+def dataframe_to_minute_models(
+    df: pd.DataFrame,
+    symbol: str,
+    trade_date: date | None = None,
+) -> list[CandlestickMinute]:
+    """将 DataFrame 转换为 CandlestickMinute 实例列表。
+
+    Args:
+        df: QMT 返回的分钟 K 线 DataFrame
+        symbol: 证券代码
+        trade_date: 交易日期，提供时仅保留该日数据（QMT 可能返回昨日尾盘数据）
+    """
+    instances: list[CandlestickMinute] = []
+    for _, row in df.iterrows():
+        trade_time = row.get("trade_time")
+        if trade_time is None:
+            continue
+
+        if isinstance(trade_time, str):
+            trade_time = pd.to_datetime(trade_time)
+        if hasattr(trade_time, "to_pydatetime"):
+            trade_time = trade_time.to_pydatetime()
+        if trade_time.tzinfo is None:
+            trade_time = trade_time.replace(tzinfo=_CST)
+        else:
+            trade_time = trade_time.astimezone(_CST)
+
+        if trade_date is not None and trade_time.date() != trade_date:
+            continue
+
+        instances.append(CandlestickMinute(
+            symbol=symbol,
+            trade_time=trade_time,
+            open=float(row["open"]),
+            high=float(row["high"]),
+            low=float(row["low"]),
+            close=float(row["close"]),
+            volume=int(row["volume"]),
+            amount=float(row["amount"]) if "amount" in row else 0.0,
+            trade_date=trade_time.date(),
+            data_source="qmt",
+        ))
+    return instances

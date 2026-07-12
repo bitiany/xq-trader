@@ -1,0 +1,10 @@
+name: intraday_reconcile
+description: "盘后数据补全与对账：手动触发回补动态股票池1m K线"
+mode: canvas
+queue: market
+enabled: false
+
+steps:
+  - name: intraday_reconcile
+    task: market.intraday_reconcile
+    args: {}
