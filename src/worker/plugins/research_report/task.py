@@ -63,6 +63,9 @@ _collector: AkshareDataCollector | None = None
 
 _DATA_TYPE = "research_report"
 
+# 东财研报 API 最早可用数据日期（水位为空时的默认起始日期，避免从 1990 年全量采集）
+_DEFAULT_START_DATE = date_type(2017, 1, 1)
+
 # PDF 存储相对路径前缀
 _PDF_RELATIVE_PREFIX = "report"
 
@@ -452,7 +455,7 @@ class ResearchReportCollectTask(BaseTask):
         pipeline = Pipeline(
             name=_DATA_TYPE,
             stages=[DownloadStage(), PersistStage()],
-            aspects=[WatermarkAspect(data_type=_DATA_TYPE)],
+            aspects=[WatermarkAspect(data_type=_DATA_TYPE, default_start_date=_DEFAULT_START_DATE)],
         )
 
         # 执行管道引擎

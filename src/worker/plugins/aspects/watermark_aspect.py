@@ -28,8 +28,13 @@ logger = get_logger(__name__)
 class WatermarkAspect(Aspect):
     """水位切面 — 前切获取水位日期作为增量起始时间，后切更新水位。"""
 
-    def __init__(self, data_type: str = "daily_kline") -> None:
+    def __init__(
+        self,
+        data_type: str = "daily_kline",
+        default_start_date: date | None = None,
+    ) -> None:
         self._data_type = data_type
+        self._default_start_date = default_start_date
         self._watermark_service = WatermarkService()
         self._latest_trade_date: date | None = None
 
@@ -68,6 +73,7 @@ class WatermarkAspect(Aspect):
         start_date = await self._watermark_service.get_incremental_start_date(
             data_type=self._data_type,
             watermark_code=stock_code,
+            default_start_date=self._default_start_date,
         )
         if start_date is None:
             ctx.set("start_date", "")

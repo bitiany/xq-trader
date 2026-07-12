@@ -28,12 +28,14 @@ class WatermarkService:
         self,
         data_type: str,
         watermark_code: str,
+        default_start_date: date | None = None,
     ) -> date | None:
         """计算增量采集的起始日期。
 
         Args:
             data_type: 数据类型，如 "daily_kline"
             watermark_code: 水位标识代码，如 "000001.SZ"
+            default_start_date: 水位为空时的默认起始日期，None 则使用 1990-01-01
 
         Returns:
             - None: 水位已是最新，无需增量采集
@@ -56,11 +58,12 @@ class WatermarkService:
         watermark_date = watermark.watermark_date if watermark else None
 
         if watermark_date is None:
+            fallback = default_start_date or date(1990, 1, 1)
             logger.debug(
-                "水位为空，需全量采集: data_type=%s code=%s",
-                data_type, watermark_code,
+                "水位为空，需全量采集: data_type=%s code=%s start=%s",
+                data_type, watermark_code, fallback,
             )
-            return date(1990, 1, 1)
+            return fallback
 
         if watermark_date >= latest_trade_date:
             logger.debug(
