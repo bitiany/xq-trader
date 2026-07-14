@@ -1,0 +1,35 @@
+name: event_scan
+celery_task_name: event.scan
+version: "1.0.0"
+task_name: 事件扫描与论点卡失效触发
+task_name_en: Event Scan & Thesis Invalidation Trigger
+description: 定时扫描近期新闻/公告的事件信号（关键词 + LLM 两层识别），对持仓股的论点卡评估事件影响。利空命中证伪条件 → mark_thesis_stale；利好事件 → 建议更新催化剂；无影响 → 无操作。
+description_en: "Periodic scan of recent news/announcements for event signals (two-layer: keyword + LLM), evaluate impact on active theses. Bearish events triggering falsification → mark_thesis_stale."
+category: compute
+task_type: scheduled
+queue: celery
+timeout: 1800
+schedule: "30 18 * * 1-5"  # 每个交易日 18:30 扫描一次
+retry_config:
+  max_retries: 2
+  retry_backoff: true
+  retry_backoff_max: 300
+params_schema:
+  type: object
+  properties:
+    days:
+      type: integer
+      title: 回溯天数
+      description: 事件检测回溯的最近 N 天（默认 1，仅扫描昨今两天的新事件）
+      default: 1
+    symbols:
+      type: array
+      title: 标的列表
+      description: 显式指定扫描的标的列表，留空时自动加载全部 status=active 的论点卡标的
+      items:
+        type: string
+    skip_llm:
+      type: boolean
+      title: 跳过 LLM 二次识别
+      description: 仅运行 Layer 1 关键词检测，跳过 Layer 2 LLM 识别（用于快速扫描或 LLM 不可用时）
+      default: false

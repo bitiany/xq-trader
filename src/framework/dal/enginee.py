@@ -2,7 +2,6 @@ import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
-from typing import Any
 
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
@@ -77,6 +76,15 @@ class EnginesManager:
             config: DatasourceConfig 对象
         """
         try:
+            # 构建 server_settings：由 asyncpg 在连接协商阶段直接设置，
+            # 比 connect 事件监听器更可靠（避免连接池复用时 search_path 丢失）
+            server_settings: dict[str, str] = {
+                "client_encoding": "utf8",
+                "timezone": "Asia/Shanghai",
+            }
+            if config.db_schema and config.db_schema != "public":
+                server_settings["search_path"] = f"{config.db_schema}, public"
+
             # 创建引擎
             engine = create_async_engine(
                 config.url,
@@ -88,28 +96,12 @@ class EnginesManager:
                 pool_pre_ping=True,
                 pool_recycle=3600,
                 connect_args={
-                    "server_settings": {
-                        "client_encoding": "utf8",
-                        "timezone": "Asia/Shanghai",
-                    },
+                    "server_settings": server_settings,
                 },
             )
 
-            # 如果配置了非 public schema，添加事件监听器
-            if config.db_schema and config.db_schema != 'public':
-                @event.listens_for(engine.sync_engine, "connect")
-                def set_search_path(dbapi_connection: Any, connection_record: Any) -> None:
-                    cursor = dbapi_connection.cursor()
-                    cursor.execute(f'SET search_path TO "{config.db_schema}", "public"')
-                    cursor.execute("SET timezone TO 'Asia/Shanghai'")
-                    cursor.close()
-                logger.debug(f"数据源 '{bind_key}' 的 schema '{config.db_schema}' 已设置")
-            else:
-                @event.listens_for(engine.sync_engine, "connect")
-                def set_timezone(dbapi_connection: Any, connection_record: Any) -> None:
-                    cursor = dbapi_connection.cursor()
-                    cursor.execute("SET timezone TO 'Asia/Shanghai'")
-                    cursor.close()
+            if config.db_schema and config.db_schema != "public":
+                logger.debug(f"数据源 '{bind_key}' 的 schema '{config.db_schema}' 已通过 server_settings 设置")
 
             self._engines[bind_key] = engine
             # 创建 session 工厂

@@ -20,19 +20,19 @@ class ConfigSync:
         tasks = self._config.get("tasks", {})
 
         for task_id, task_def in tasks.items():
+            data = {
+                "description": task_def.get("description", ""),
+                "config": json.dumps(task_def, ensure_ascii=False),
+                "mode": task_def.get("mode", "barrier"),
+                "cron": task_def.get("schedule"),
+                "queue": task_def.get("queue", "celery"),
+                "is_active": True,
+            }
             existing = await PipelineDef.get_one_or_none(name=task_id)
             if existing is not None:
-                continue
-
-            await PipelineDef.create(
-                name=task_id,
-                description=task_def.get("description", ""),
-                config=json.dumps(task_def, ensure_ascii=False),
-                mode=task_def.get("mode", "barrier"),
-                cron=task_def.get("schedule"),
-                queue=task_def.get("queue", "celery"),
-                is_active=True,
-            )
+                await existing.update(data)
+            else:
+                await PipelineDef.create(name=task_id, **data)
             synced.append(task_id)
 
         logger.info("Synced %d orchestrations to db: %s", len(synced), synced)

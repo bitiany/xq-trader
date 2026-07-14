@@ -225,6 +225,14 @@ class SwDailyCollectTask(BaseTask):
         )
         result = await engine.execute(ts_codes)
 
+        if result.failed > 0:
+            failed_codes = [e.item for e in result.errors[:10]]
+            raise SwDailyError(
+                f"申万行业日线采集部分失败: "
+                f"total={result.total} succeeded={result.succeeded} failed={result.failed}, "
+                f"失败标的(前10): {failed_codes}"
+            )
+
         return result.to_dict()
 
     @staticmethod

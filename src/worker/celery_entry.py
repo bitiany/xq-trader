@@ -285,8 +285,24 @@ def run_worker() -> None:
     )
 
 
+def _purge_stale_beat_schedule() -> None:
+    """清理 celerybeat 持久化调度文件，移除已删除的 stale 调度条目。
+
+    Celery PersistentScheduler 的 update_from_dict() 只增改条目、不删除，
+    导致 YAML 中已移除的 cron 调度仍残留在 celerybeat-schedule 文件中，
+    Beat 启动后仍按旧 cron 自动触发不存在的编排。
+    每次 Beat 启动前删除持久化文件，强制从当前 beat_schedule 配置重建。
+    """
+    for suffix in ["", ".bak", ".dir", ".dat"]:
+        path = Path(f"celerybeat-schedule{suffix}")
+        if path.exists():
+            path.unlink()
+            logger.info("已清理 stale Beat 调度文件: %s", path)
+
+
 def run_beat() -> None:
     """启动 Celery Beat。"""
+    _purge_stale_beat_schedule()
     celery_app.start(argv=["beat", "--loglevel=info"])
 
 

@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
 from framework.commons.logger import get_logger
@@ -113,11 +113,12 @@ class WatermarkAspect(Aspect):
                 watermark_date=watermark_date,
                 record_count=0,
                 status="active",
+                updated_at=datetime.now(),
             )
             await CollectWatermark.bulk_create_or_update(
                 [instance],
                 on_conflict=["data_type", "watermark_code"],
-                update_fields=["watermark_date", "status"],
+                update_fields=["watermark_date", "status", "updated_at"],
             )
             logger.debug("水位更新: %s → %s", stock_code, watermark_date)
         except Exception as e:
