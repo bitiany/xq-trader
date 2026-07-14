@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import dataclass, field
 from collections import Counter
+from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
 
@@ -427,7 +427,9 @@ async def _print_analysis_report() -> None:
             "initial_capital": initial,
             "total_assets": round(float(last_snap.total_assets), 2) if last_snap else None,
             "cumulative_pnl": round(float(last_snap.cumulative_pnl), 2) if last_snap else None,
-            "cumulative_return_pct": round(float(last_snap.cumulative_pnl) / initial * 100, 4) if last_snap and initial else None,
+            "cumulative_return_pct": (
+                round(float(last_snap.cumulative_pnl) / initial * 100, 4) if last_snap and initial else None
+            ),
             "available_cash": round(float(last_snap.available_cash), 2) if last_snap else None,
             "market_value": round(float(last_snap.market_value), 2) if last_snap else None,
             "position_count": len(latest_by_symbol),
@@ -442,7 +444,9 @@ async def _print_analysis_report() -> None:
             "t_plus_one_consistent": t_plus_one_ok,
             "time_issues_count": len(time_issues),
             "time_issues_sample": time_issues[:10],
-            "pre_order_weight_deviation_avg_pct": round(sum(weight_deviations) / len(weight_deviations) * 100, 2) if weight_deviations else 0,
+            "pre_order_weight_deviation_avg_pct": (
+                round(sum(weight_deviations) / len(weight_deviations) * 100, 2) if weight_deviations else 0
+            ),
             "pre_order_weight_deviation_below_1pct": round(
                 sum(1 for d in weight_deviations if d < 0.01) / len(weight_deviations) * 100, 1,
             ) if weight_deviations else 0,

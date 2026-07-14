@@ -10,7 +10,8 @@ export interface MonitorCellConfig {
   symbol: string
   name: string
   period: ChartPeriod
-  mainIndicator: MainIndicator
+  /** 主图指标（多选，支持缠论+神奇九转叠加） */
+  mainIndicators: MainIndicator[]
   subIndicator: SubIndicator
   /** react-grid-layout item */
   layout: { x: number; y: number; w: number; h: number }
@@ -25,6 +26,28 @@ export interface SignalItem {
   signal_type: string | null
   signal_source: string
   created_at: string
+  /** 信号触发的 1m bar 时间（ISO 字符串，Shanghai 时区，如 "2026-07-13T10:32:00+08:00"），用于分时图 markPoint 定位 */
+  trade_time?: string | null
+  /** 原始因子值（RSI值、偏离度等），用于构建专业信号说明 */
+  raw_values?: Record<string, unknown> | null
+  /** 共振信号：同一根 bar 同时触发多个指标时的组合信号标记 */
+  resonance?: string[] | null
+}
+
+/** WS minute_bar 推送的最新 bar（页面级统一订阅，分发给各 cell） */
+export interface MinuteBarUpdate {
+  symbol: string
+  trade_time: string
+  bar: {
+    open: number
+    high: number
+    low: number
+    close: number
+    volume: number
+    amount: number
+  }
+  /** 收到时间戳，用于 cell 判断是否已处理 */
+  ts: number
 }
 
 interface MonitorState {
@@ -42,6 +65,8 @@ interface MonitorState {
   cols: number
   /** 行高(px) */
   rowHeight: number
+  /** 最新 minute_bar 推送（页面级统一订阅，cell 通过 symbol 过滤消费） */
+  latestMinuteBar: MinuteBarUpdate | null
 
   addCell: (symbol: string, name: string) => void
   removeCell: (id: string) => void
@@ -53,6 +78,7 @@ interface MonitorState {
   setSignals: (signals: SignalItem[]) => void
   addSignal: (signal: SignalItem) => void
   setSignalPanelCollapsed: (collapsed: boolean) => void
+  setLatestMinuteBar: (update: MinuteBarUpdate) => void
 }
 
 let cellIdCounter = 0
@@ -69,6 +95,7 @@ export const useMonitorStore = create<MonitorState>((set) => ({
   signalPanelCollapsed: false,
   cols: 6,
   rowHeight: 100,
+  latestMinuteBar: null,
 
   addCell: (symbol, name) =>
     set((state) => {
@@ -88,7 +115,7 @@ export const useMonitorStore = create<MonitorState>((set) => ({
         symbol,
         name,
         period: '1m',
-        mainIndicator: 'vwap',
+        mainIndicators: ['vwap'],
         subIndicator: 'volume',
         layout: { x, y, w, h },
       }
@@ -96,11 +123,27 @@ export const useMonitorStore = create<MonitorState>((set) => ({
     }),
 
   removeCell: (id) =>
-    set((state) => ({
-      cells: state.cells.filter((c) => c.id !== id),
-      maximizedCellId: state.maximizedCellId === id ? null : state.maximizedCellId,
-      selectedCellId: state.selectedCellId === id ? null : state.selectedCellId,
-    })),
+    set((state) => {
+      const remaining = state.cells.filter((c) => c.id !== id)
+      // 重置坐标，让 RGL compactType="vertical" 重新紧凑排列
+      const w = 2
+      const h = 3
+      const cols = state.cols
+      const reflowed = remaining.map((c, i) => ({
+        ...c,
+        layout: {
+          x: (i * w) % cols,
+          y: Math.floor((i * w) / cols) * h,
+          w,
+          h,
+        },
+      }))
+      return {
+        cells: reflowed,
+        maximizedCellId: state.maximizedCellId === id ? null : state.maximizedCellId,
+        selectedCellId: state.selectedCellId === id ? null : state.selectedCellId,
+      }
+    }),
 
   updateCell: (id, patch) =>
     set((state) => ({
@@ -121,9 +164,15 @@ export const useMonitorStore = create<MonitorState>((set) => ({
   setSignals: (signals) => set({ signals }),
 
   addSignal: (signal) =>
-    set((state) => ({
-      signals: [signal, ...state.signals].slice(0, 200),
-    })),
+    set((state) => {
+      // 基于 id 去重，避免 WS 实时推送与 30s 轮询重复
+      if (state.signals.some((s) => s.id === signal.id)) {
+        return state
+      }
+      return { signals: [signal, ...state.signals].slice(0, 200) }
+    }),
 
   setSignalPanelCollapsed: (collapsed) => set({ signalPanelCollapsed: collapsed }),
+
+  setLatestMinuteBar: (update) => set({ latestMinuteBar: update }),
 }))

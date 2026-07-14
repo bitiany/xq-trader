@@ -29,21 +29,21 @@ export function DiagnosisReportsDrawer({
   onClose,
 }: DiagnosisReportsDrawerProps) {
   const { t } = useTranslation()
-  const [loading, setLoading] = useState(false)
-  const [items, setItems] = useState<StockDiagnosisHistoryItem[]>([])
+  const [result, setResult] = useState<{ symbol: string; items: StockDiagnosisHistoryItem[] } | null>(null)
+
+  // loading 由当前 symbol 与已加载 result 的差异派生，避免在 effect 内同步 setState
+  const items = result?.symbol === symbol ? result.items : []
+  const loading = open && !!symbol && result?.symbol !== symbol
 
   useEffect(() => {
     if (!open || !symbol) return
     let cancelled = false
-    setLoading(true)
     void fetchStockDiagnosisHistory(symbol, 365)
       .then((response) => {
-        if (!cancelled) {
-          setItems([...response.items].reverse())
-        }
+        if (!cancelled) setResult({ symbol, items: [...response.items].reverse() })
       })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
+      .catch(() => {
+        if (!cancelled) setResult({ symbol, items: [] })
       })
     return () => {
       cancelled = true

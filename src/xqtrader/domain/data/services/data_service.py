@@ -6,7 +6,7 @@ import json
 from collections import defaultdict
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 from sqlalchemy import text
@@ -352,7 +352,9 @@ class DataService:
             from worker.celery_app import celery_app
 
             inspect = celery_app.control.inspect(timeout=3.0)
-            stats = await asyncio.to_thread(inspect.stats)
+            # celery inspect.stats() 的 stubs 返回类型为 object，实际返回 dict[str, dict]，
+            # 用 cast 断言真实类型以支持后续 .items() / .get() 调用
+            stats = cast(dict[str, dict[str, Any]], await asyncio.to_thread(inspect.stats))
             if not stats:
                 return []
 

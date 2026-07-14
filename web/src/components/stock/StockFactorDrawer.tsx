@@ -268,27 +268,28 @@ function FactorTable({ rows }: { rows: FactorRow[] }) {
 }
 
 export function StockFactorDrawer({ open, symbol, stockName, onClose }: StockFactorDrawerProps) {
-  const [loading, setLoading] = useState(false)
-  const [data, setData] = useState<FactorSeriesResponse | null>(null)
+  const [result, setResult] = useState<{ symbol: string; data: FactorSeriesResponse | null } | null>(null)
   const [activeCategory, setActiveCategory] = useState<string>('')
+
+  // data 与 loading 由当前 symbol 与已加载 result 的差异派生，避免在 effect 内同步 setState
+  const data = result?.symbol === symbol ? result.data : null
+  const loading = open && !!symbol && result?.symbol !== symbol
 
   useEffect(() => {
     if (!open || !symbol) return
     let cancelled = false
-    setLoading(true)
-    setData(null)
     fetchStockFactorSeries(symbol, 10)
       .then((resp) => {
         if (cancelled) return
-        setData(resp)
+        setResult({ symbol, data: resp })
         // 默认选中第一个 category
         const categories = groupByCategory(resp.factors)
         if (categories.length > 0) {
           setActiveCategory(categories[0].category)
         }
       })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
+      .catch(() => {
+        if (!cancelled) setResult({ symbol, data: null })
       })
     return () => {
       cancelled = true

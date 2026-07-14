@@ -28,7 +28,7 @@
 import json
 import os
 import re
-from typing import Any
+from typing import Any, cast
 from urllib.parse import quote_plus
 
 from jsonpath_ng import parse  # type: ignore[import-untyped]
@@ -125,7 +125,9 @@ class PlaceholderResolver:
 
         enc_result = self._try_decrypt(var_path, default_value)
         if enc_result is not None:
-            return enc_result
+            # _try_decrypt 返回 Any（CryptoUtils.decrypt + default_value 均为 Any），
+            # 此处已排除 None，解密结果为字符串，用 cast 断言为 str
+            return cast(str, enc_result)
 
         data_source = context if context is not None else self.env_dict
         value = self._lookup_value(var_path, data_source)

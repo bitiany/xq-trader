@@ -54,7 +54,7 @@ class MACDHistRatioFactor(FactorPlugin):
         self.params = {"fast": fast, "slow": slow, "signal": signal}
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
-        close = df["close"].values.astype(float)
+        close = df["close"].to_numpy(dtype=np.float64)
         _, _, hist = talib.MACD(
             close, fastperiod=self.fast, slowperiod=self.slow, signalperiod=self.signal_period,
         )
@@ -89,7 +89,7 @@ class MACDHistDeltaFactor(FactorPlugin):
         self.params = {"fast": fast, "slow": slow, "signal": signal}
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
-        close = df["close"].values.astype(float)
+        close = df["close"].to_numpy(dtype=np.float64)
         _, _, hist = talib.MACD(
             close, fastperiod=self.fast, slowperiod=self.slow, signalperiod=self.signal_period,
         )
@@ -129,9 +129,9 @@ class ADXFactor(FactorPlugin):
         self.params = {"period": period}
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
-        high = df["high"].values.astype(float)
-        low = df["low"].values.astype(float)
-        close = df["close"].values.astype(float)
+        high = df["high"].to_numpy(dtype=np.float64)
+        low = df["low"].to_numpy(dtype=np.float64)
+        close = df["close"].to_numpy(dtype=np.float64)
         adx = talib.ADX(high, low, close, timeperiod=self.period)
         plus_di = talib.PLUS_DI(high, low, close, timeperiod=self.period)
         minus_di = talib.MINUS_DI(high, low, close, timeperiod=self.period)
@@ -164,9 +164,9 @@ class ADXDeltaFactor(FactorPlugin):
         self.params = {"period": period}
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
-        high = df["high"].values.astype(float)
-        low = df["low"].values.astype(float)
-        close = df["close"].values.astype(float)
+        high = df["high"].to_numpy(dtype=np.float64)
+        low = df["low"].to_numpy(dtype=np.float64)
+        close = df["close"].to_numpy(dtype=np.float64)
         adx = talib.ADX(high, low, close, timeperiod=self.period)
         delta = pd.Series(adx).diff().values
         return pd.DataFrame({self.factor_id: delta}, index=df.index)
@@ -205,7 +205,7 @@ class BOLLPositionFactor(FactorPlugin):
         self.params = {"period": period, "nbdev": nbdev}
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
-        close = df["close"].values.astype(float)
+        close = df["close"].to_numpy(dtype=np.float64)
         upper, mid, lower = talib.BBANDS(
             close, timeperiod=self.period, nbdevup=self.nbdev, nbdevdn=self.nbdev,
         )
@@ -249,9 +249,9 @@ class SARDeviationFactor(FactorPlugin):
         self.params = {"acceleration": acceleration, "maximum": maximum}
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
-        high = df["high"].values.astype(float)
-        low = df["low"].values.astype(float)
-        close = df["close"].values.astype(float)
+        high = df["high"].to_numpy(dtype=np.float64)
+        low = df["low"].to_numpy(dtype=np.float64)
+        close = df["close"].to_numpy(dtype=np.float64)
         sar = talib.SAR(high, low, acceleration=self.acceleration, maximum=self.maximum)
         deviation = np.where(close != 0, sar / close, np.nan)
         delta = pd.Series(deviation).diff().values

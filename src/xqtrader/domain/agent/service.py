@@ -7,8 +7,9 @@ from collections.abc import AsyncIterator
 
 from fastapi import HTTPException, Request
 
+from framework.commons.logger import get_logger
 from framework.config.settings import settings
-from xqtrader.domain.agent.intent_router import IntentRouter, WorkflowRoute
+from xqtrader.domain.agent.intent_router import CoachRoute, IntentRouter, WorkflowRoute
 from xqtrader.domain.agent.models.session import AgentMessage
 from xqtrader.domain.agent.protocol import MetaField, RunStatus, sse_event_name
 from xqtrader.domain.agent.redis_bus import AgentRedisBus
@@ -30,10 +31,16 @@ from xqtrader.domain.workflow.dispatch import (
     execute_workflow,
 )
 
+logger = get_logger("AGENT.SERVICE")
+
 
 class AgentService:
     def __init__(self) -> None:
         self._bus = AgentRedisBus()
+
+    async def close(self) -> None:
+        """关闭底层 Redis bus 连接（供应用 shutdown 调用，避免外部直接访问 _bus 私有属性）。"""
+        await self._bus.close()
 
     @staticmethod
     def _user_context(request: Request) -> tuple[str, str]:
@@ -128,6 +135,26 @@ class AgentService:
         run_id = new_id("run")
         model = body.model or session.model or settings.AGENT.AGENT_DEFAULT_MODEL or None
         trace_id = request.headers.get("X-Trace-Id")
+
+        # CoachRoute 走 Agent Worker（同 AgentRoute），但记录场景信息并写入 context
+        # 供下游 Hook / 遥测读取。人格层激活仍由 EmotionDetectHook 在 Worker 内执行。
+        task_context = body.context
+        if isinstance(route, CoachRoute):
+            logger.info(
+                "心理教练优先模式触发: session_id=%s scenario=%s intensity=%d "
+                "keywords=%s",
+                session_id,
+                route.scenario_name,
+                route.intensity,
+                list(route.matched_keywords),
+            )
+            task_context = dict(body.context or {})
+            task_context["coach_scenario"] = {
+                "name": route.scenario_name,
+                "intensity": route.intensity,
+                "matched_keywords": list(route.matched_keywords),
+            }
+
         task = RunTask(
             run_id=run_id,
             session_id=session_id,
@@ -137,7 +164,7 @@ class AgentService:
             message=body.content,
             model=model,
             trace_id=trace_id,
-            context=body.context,
+            context=task_context,
         )
         await self._bus.enqueue_run(task)
         return SubmitMessageResponse(

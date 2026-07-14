@@ -10,7 +10,6 @@ from xqtrader.domain.factor.services.layered_backtest import (
     _symmetric_diff_ratio,
 )
 
-
 # ==================== _symmetric_diff_ratio 单测 ====================
 
 

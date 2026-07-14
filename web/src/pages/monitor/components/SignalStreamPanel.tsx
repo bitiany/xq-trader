@@ -1,13 +1,8 @@
 import { useMemo } from 'react'
 import { ChevronDown, ChevronUp, Zap } from 'lucide-react'
 import { useMonitorStore } from '../stores/monitorStore'
+import { buildSignalDesc, SIGNAL_TYPE_LABELS, DIRECTION_LABELS, toShanghaiTime } from '../utils/signalDesc'
 import '@/pages/monitor/styles/monitor.css'
-
-const DIRECTION_LABELS: Record<string, string> = {
-  long: '▲ long',
-  short: '▼ short',
-  neutral: '—',
-}
 
 export function SignalStreamPanel() {
   const signals = useMonitorStore((s) => s.signals)
@@ -16,11 +11,14 @@ export function SignalStreamPanel() {
   const setSelectedCellId = useMonitorStore((s) => s.setSelectedCellId)
   const cells = useMonitorStore((s) => s.cells)
 
+  // 仅显示监控区域标的的信号
+  const monitorSymbols = useMemo(() => new Set(cells.map((c) => c.symbol)), [cells])
+
   const sortedSignals = useMemo(() => {
-    return [...signals].sort((a, b) =>
-      b.created_at.localeCompare(a.created_at),
-    )
-  }, [signals])
+    return signals
+      .filter((s) => monitorSymbols.has(s.symbol))
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+  }, [signals, monitorSymbols])
 
   const handleRowClick = (symbol: string) => {
     const cell = cells.find((c) => c.symbol === symbol)
@@ -37,7 +35,7 @@ export function SignalStreamPanel() {
       >
         <Zap size={14} style={{ color: 'var(--color-warning)' }} />
         <span className="monitor-signals__title">信号流</span>
-        <span className="monitor-signals__count">{signals.length}</span>
+        <span className="monitor-signals__count">{sortedSignals.length}</span>
         <div style={{ flex: 1 }} />
         {collapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
       </div>
@@ -54,7 +52,7 @@ export function SignalStreamPanel() {
                 fontSize: 12,
               }}
             >
-              暂无信号
+              {cells.length === 0 ? '请拖拽标的到监控区域' : '暂无信号'}
             </div>
           ) : (
             sortedSignals.map((signal) => (
@@ -62,13 +60,20 @@ export function SignalStreamPanel() {
                 key={signal.id}
                 className="monitor-signals__row"
                 onClick={() => handleRowClick(signal.symbol)}
+                title={buildSignalDesc(signal)}
               >
                 <span className="monitor-signals__time">
-                  {signal.created_at.substring(11, 19)}
+                  {toShanghaiTime(signal.created_at)}
                 </span>
-                <span className="monitor-signals__symbol">{signal.symbol}</span>
+                <span className="monitor-signals__symbol" title={signal.name ?? signal.symbol}>
+                  {signal.name ?? signal.symbol}
+                </span>
+                <span className="monitor-signals__code">{signal.symbol}</span>
                 <span className="monitor-signals__type">
-                  {signal.signal_type ?? signal.signal_source}
+                  {SIGNAL_TYPE_LABELS[signal.signal_type ?? ''] ?? signal.signal_type}
+                </span>
+                <span className="monitor-signals__desc">
+                  {buildSignalDesc(signal)}
                 </span>
                 <span
                   className={`monitor-signals__direction monitor-signals__direction--${signal.direction}`}
@@ -76,7 +81,7 @@ export function SignalStreamPanel() {
                   {DIRECTION_LABELS[signal.direction] ?? signal.direction}
                 </span>
                 <span className="monitor-signals__strength">
-                  {signal.strength !== null ? signal.strength.toFixed(2) : '—'}
+                  {signal.strength !== null ? signal.strength.toFixed(2) : '-'}
                 </span>
               </div>
             ))

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import talib  # type: ignore[import-not-found]
 
@@ -143,6 +144,6 @@ class RocFactor(FactorPlugin):
         self.params = {"period": period}
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
-        close = df["close"].values.astype(float)
+        close = df["close"].to_numpy(dtype=np.float64)
         roc = talib.ROC(close, timeperiod=self.period)
         return pd.DataFrame({self.factor_id: roc}, index=df.index)

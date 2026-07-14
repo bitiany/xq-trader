@@ -26,6 +26,9 @@ _CST = timezone(timedelta(hours=8))  # A股交易时区：Asia/Shanghai
 
 _BATCH_INTERVAL = 5  # 批量写入间隔（秒）
 _LAST_TS_KEY = "intraday:minute_bar:last_ts"  # Redis 缓存的最后处理时间戳
+# 缓冲区容量上限：DB 持续不可用时避免内存无限增长
+# 单日全市场监控下，5s 间隔 + 5000 标的，单批约 5000 条；上限设为单批的 6 倍（30s 积压量）
+_BUFFER_MAX_SIZE = 30000
 
 
 class MinuteBarCollector:
@@ -87,6 +90,13 @@ class MinuteBarCollector:
             # 写入缓冲区（threading.Lock 保护跨线程写操作）
             key = f"{bar.symbol}_{bar.trade_time.isoformat()}"
             with self._buffer_lock:
+                # 容量上限保护：DB 持续不可用时缓冲区满则丢弃新数据并告警
+                if len(self._buffer) >= _BUFFER_MAX_SIZE:
+                    logger.error(
+                        "分钟线缓冲区已满(%d)，丢弃新数据: %s %s",
+                        _BUFFER_MAX_SIZE, bar.symbol, bar.trade_time.isoformat(),
+                    )
+                    return
                 self._buffer[key] = bar
         except Exception as e:
             logger.error("解析分钟线失败: %s, bar=%s, error=%s", stock_code, bar_data, e, exc_info=True)
@@ -162,9 +172,10 @@ class MinuteBarCollector:
             return 0
 
         # 按最后一条的 trade_time 更新 Redis 缓存（断点续传）
+        # 使用 asyncio.to_thread 包装同步 Redis 操作，避免阻塞事件循环
         last_ts = max(inst.trade_time for inst in instances)
         try:
-            redis_client.set(_LAST_TS_KEY, last_ts.isoformat())
+            await asyncio.to_thread(redis_client.set, _LAST_TS_KEY, last_ts.isoformat())
         except Exception as e:
             logger.warning("更新 Redis 缓存时间戳失败: %s", e)
 
@@ -180,20 +191,17 @@ class MinuteBarCollector:
             return count
         except Exception as e:
             logger.error("分钟线批量写入失败: count=%d, error=%s", len(instances), e, exc_info=True)
-            # 失败时回填缓冲区（保留数据，下次重试）
+            # 失败时回填缓冲区（保留数据，下次重试），但不超过容量上限
+            processed = 0
             with self._buffer_lock:
                 for inst in instances:
+                    if len(self._buffer) >= _BUFFER_MAX_SIZE:
+                        logger.error(
+                            "分钟线缓冲区回填已满(%d)，丢弃剩余数据: %d 条",
+                            _BUFFER_MAX_SIZE, len(instances) - processed,
+                        )
+                        break
                     key = f"{inst.symbol}_{inst.trade_time.isoformat()}"
                     self._buffer[key] = inst
+                    processed += 1
             return 0
-
-    @staticmethod
-    def get_last_timestamp() -> datetime | None:
-        """获取最后处理的分钟时间戳（断点续传用）"""
-        try:
-            ts_str = redis_client.get(_LAST_TS_KEY)
-            if ts_str:
-                return datetime.fromisoformat(ts_str)
-        except Exception as e:
-            logger.warning("读取 Redis 缓存时间戳失败: %s", e)
-        return None

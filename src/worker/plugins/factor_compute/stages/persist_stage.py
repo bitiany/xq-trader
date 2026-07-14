@@ -90,7 +90,7 @@ class FactorPersistStage(Stage):
             return StageResult.ok(data={"symbol": symbol, "persisted": 0})
 
         # 向量化构建窄表行
-        trade_dates = pd.to_datetime(df_filtered["trade_date"]).dt.date.values
+        trade_dates = pd.to_datetime(df_filtered["trade_date"]).dt.date.to_numpy()
         rows = self._build_rows_vectorized(symbol, trade_dates, df_filtered[factor_cols])
 
         if not rows:

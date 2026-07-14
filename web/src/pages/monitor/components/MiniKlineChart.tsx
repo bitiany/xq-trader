@@ -1,20 +1,23 @@
 import { useEffect, useRef, useMemo, useState, useCallback } from 'react'
 import * as echarts from 'echarts'
-import type { MainIndicator, SubIndicator, ChartPeriod } from '../stores/monitorStore'
-import type { KlineBar, ChanlunData } from '../utils/klineHelpers'
-import { calcTD9 } from '../utils/klineHelpers'
+import type { MainIndicator, ChartPeriod, SignalItem } from '../stores/monitorStore'
+import type { KlineBar, ChanlunData, Td9Data } from '../utils/klineHelpers'
+import type { IndicatorData } from '../utils/indicators'
 
 interface MiniKlineChartProps {
   symbol: string
   bars: KlineBar[]
-  mainIndicator: MainIndicator
-  subIndicator: SubIndicator
+  mainIndicators: MainIndicator[]
   isMaximized: boolean
   period: ChartPeriod
   chanlunData: ChanlunData | null
+  td9Data: Td9Data | null
+  /** 后端统一计算的技术指标数据 */
+  indicatorData: IndicatorData | null
+  signals: SignalItem[]
 }
 
-// 副图指标计算结果类型
+// 副图指标类型
 interface SubIndicatorData {
   macd?: (number | null)[]
   dif?: (number | null)[]
@@ -22,80 +25,90 @@ interface SubIndicatorData {
   rsi?: (number | null)[]
 }
 
+// 信号类型 -> 颜色 + 标签映射
+const SIGNAL_STYLE_MAP: Record<string, { color: string; label: string }> = {
+  vwap_breakthrough: { color: '#faad14', label: 'VWAP突破' },
+  twap_deviation: { color: '#b37feb', label: 'TWAP偏离' },
+  macd_cross: { color: '#1677ff', label: 'MACD叉' },
+  rsi_extreme: { color: '#ff4d4f', label: 'RSI' },
+  volume_price_divergence: { color: '#13c2c2', label: '量价' },
+}
+
 export function MiniKlineChart({
   symbol,
   bars,
-  mainIndicator,
-  subIndicator,
+  mainIndicators,
   isMaximized,
   period,
   chanlunData,
+  td9Data,
+  indicatorData,
+  signals,
 }: MiniKlineChartProps) {
   const chartRef = useRef<HTMLDivElement>(null)
   const chartInstance = useRef<echarts.ECharts | null>(null)
   const zoomStateRef = useRef<{ start: number; end: number } | null>(null)
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
 
-  // ==================== 指标计算 ====================
+  // ==================== 指标数据（后端统一计算） ====================
 
-  // 分时图模式标记：1m 渲染为分时图（价格线+均价线），其他周期为蜡烛图
   const isTimesharing = period === '1m'
 
-  // 计算分时均线（VWAP）：使用真实成交额
-  // amount 单位为元，volume 单位为手(1手=100股)，需将 volume 转为股
-  // 分时图模式下始终计算；蜡烛图模式仅在选中 vwap 时计算
-  const vwapData = useMemo(() => {
-    if (bars.length === 0) return []
-    if (!isTimesharing && mainIndicator !== 'vwap') return []
-    let cumAmount = 0
-    let cumVolume = 0
-    return bars.map((bar) => {
-      cumAmount += bar.amount
-      cumVolume += bar.volume * 100
-      return cumVolume > 0 ? cumAmount / cumVolume : bar.close
-    })
-  }, [bars, mainIndicator, isTimesharing])
+  // 分时图完整交易时段时间点（9:30-11:30 + 13:00-15:00，共 240 分钟）
+  // 固定不变，用 useMemo 缓存避免每次 renderChart 重复生成
+  const fullTimesharingTimes = useMemo(() => {
+    if (!isTimesharing) return []
+    const times: string[] = []
+    for (let h = 9, m = 30; h < 15; ) {
+      // 跳过 11:30-13:00 午休时段
+      if (h === 11 && m >= 30) {
+        h = 13; m = 0
+        continue
+      }
+      times.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`)
+      m += 1
+      if (m >= 60) { h += 1; m = 0 }
+    }
+    return times
+  }, [isTimesharing])
 
-  // 计算 MA5/MA20
-  const ma5Data = useMemo(() => {
-    if (mainIndicator !== 'ma') return []
-    return calcMA(bars, 5)
-  }, [bars, mainIndicator])
+  // 指标数组对齐：后端返回的指标数组可能短于前端实时增长的 bars 数组
+  // （WS minute_bar 推送新 bar 后，bars 立即增长，但 indicatorData 60s 节流重拉）
+  // 不足部分用 null 填充，保证 ECharts 按 category 索引对齐时指标线不会错位
+  const alignToBars = useCallback(<T,>(arr: T[] | undefined): (T | null)[] => {
+    if (!arr || arr.length === 0) return []
+    if (arr.length >= bars.length) return arr.slice(0, bars.length)
+    const padding: (T | null)[] = new Array(bars.length - arr.length).fill(null)
+    return [...arr, ...padding]
+  }, [bars.length])
 
-  const ma20Data = useMemo(() => {
-    if (mainIndicator !== 'ma') return []
-    return calcMA(bars, 20)
-  }, [bars, mainIndicator])
-
-  // 计算布林带
+  // 所有指标从后端 props 获取，前端不再实现 calcXXX
+  // 使用 alignToBars 确保长度与 bars 一致，避免 ECharts 索引错位
+  const vwapData = useMemo(() => alignToBars(indicatorData?.vwap), [indicatorData, alignToBars])
+  const twapData = useMemo(() => alignToBars(indicatorData?.twap), [indicatorData, alignToBars])
+  const ma5Data = useMemo(() => mainIndicators.includes('ma') ? alignToBars(indicatorData?.ma5) : [], [mainIndicators, indicatorData, alignToBars])
+  const ma20Data = useMemo(() => mainIndicators.includes('ma') ? alignToBars(indicatorData?.ma20) : [], [mainIndicators, indicatorData, alignToBars])
   const bollData = useMemo(() => {
-    if (mainIndicator !== 'boll') return null
-    return calcBoll(bars, 20, 2)
-  }, [bars, mainIndicator])
-
-  // 计算唐奇安通道
+    if (!mainIndicators.includes('boll') || !indicatorData?.boll) return null
+    return {
+      upper: alignToBars(indicatorData.boll.upper),
+      mid: alignToBars(indicatorData.boll.mid),
+      lower: alignToBars(indicatorData.boll.lower),
+    }
+  }, [mainIndicators, indicatorData, alignToBars])
   const donchianData = useMemo(() => {
-    if (mainIndicator !== 'donchian') return null
-    return calcDonchian(bars, 20)
-  }, [bars, mainIndicator])
-
-  // 计算神奇九转
-  const td9Data = useMemo(() => {
-    if (mainIndicator !== 'td9' || bars.length === 0) return null
-    return calcTD9(bars)
-  }, [bars, mainIndicator])
-
-  // 计算副图指标（MACD / RSI）
-  const subIndicatorData = useMemo<SubIndicatorData>(() => {
-    if (bars.length === 0) return {}
-    if (subIndicator === 'macd') {
-      return calcMACD(bars, 12, 26, 9)
+    if (!mainIndicators.includes('donchian') || !indicatorData?.donchian) return null
+    return {
+      upper: alignToBars(indicatorData.donchian.upper),
+      lower: alignToBars(indicatorData.donchian.lower),
     }
-    if (subIndicator === 'rsi') {
-      return { rsi: calcRSI(bars, 14) }
-    }
-    return {}
-  }, [bars, subIndicator])
+  }, [mainIndicators, indicatorData, alignToBars])
+  const subIndicatorData = useMemo<SubIndicatorData>(() => ({
+    macd: alignToBars(indicatorData?.macd?.macd),
+    dif: alignToBars(indicatorData?.macd?.dif),
+    dea: alignToBars(indicatorData?.macd?.dea),
+    rsi: alignToBars(indicatorData?.rsi),
+  }), [indicatorData, alignToBars])
 
   // ==================== 当前 bar 信息（放大模式十字星） ====================
 
@@ -151,31 +164,35 @@ export function MiniKlineChart({
       const volumes = bars.map((b) => b.volume)
       const volColors = bars.map((b) => (b.close >= b.open ? '#e03e3e' : '#2eaa67'))
 
-      // 判断是否有副图指标（MACD/RSI）；分时图模式不显示副图指标
-      const hasSubIndicator = !isTimesharing && (subIndicator === 'macd' || subIndicator === 'rsi')
+      // 统一收集所有主图 markPoint data（信号+TD9+缠论分型），最后一次性设置到 series[0]
+      // 避免多处分别设置 markPoint 导致后者覆盖前者
+      type MarkPointItem = NonNullable<echarts.MarkPointComponentOption['data']>[number]
+      const mainMarkPoints: MarkPointItem[] = []
 
-      // ── 三 grid 布局：主图 + 成交量 + 副图指标 ──
-      const grids: echarts.GridComponentOption[] = hasSubIndicator
-        ? isMaximized
-          ? [
-              { left: 60, right: 50, top: 32, height: '52%' },
-              { left: 60, right: 50, top: '68%', height: '12%' },
-              { left: 60, right: 50, top: '84%', height: '12%' },
-            ]
-          : [
-              { left: '8%', right: '4%', top: '4%', height: '52%' },
-              { left: '8%', right: '4%', top: '68%', height: '12%' },
-              { left: '8%', right: '4%', top: '84%', height: '12%' },
-            ]
-        : isMaximized
-          ? [
-              { left: 60, right: 50, top: 32, height: '62%' },
-              { left: 60, right: 50, top: '70%', height: '22%' },
-            ]
-          : [
-              { left: '8%', right: '4%', top: '4%', height: '62%' },
-              { left: '8%', right: '4%', top: '70%', height: '22%' },
-            ]
+      // 分时图模式：x 轴扩展为完整 9:30-15:00 交易时段（240 分钟）
+      // 未产生的数据点用 null 填充，参考东方财富分时图交互：始终展示完整交易日窗口
+      // fullTimesharingTimes 已用 useMemo 缓存（组件级）
+      const xAxisTimes = isTimesharing ? fullTimesharingTimes : times
+      const padCount = isTimesharing ? Math.max(0, fullTimesharingTimes.length - bars.length) : 0
+      const padNulls = new Array(padCount).fill(null)
+      const padZeros = new Array(padCount).fill(0)
+
+      // ── 四 grid 布局：主图 + 成交量 + MACD + RSI（始终全部展示） ──
+      const legendTop = isTimesharing ? (isMaximized ? 28 : 18) : (isMaximized ? 32 : 4)
+      const legendTopPct = isTimesharing ? '6%' : '4%'
+      const grids: echarts.GridComponentOption[] = isMaximized
+        ? [
+            { left: 60, right: 50, top: legendTop, height: '46%' },
+            { left: 60, right: 50, top: '58%', height: '12%' },
+            { left: 60, right: 50, top: '74%', height: '12%' },
+            { left: 60, right: 50, top: '90%', height: '8%' },
+          ]
+        : [
+            { left: '8%', right: '4%', top: legendTopPct, height: '46%' },
+            { left: '8%', right: '4%', top: '58%', height: '12%' },
+            { left: '8%', right: '4%', top: '74%', height: '12%' },
+            { left: '8%', right: '4%', top: '90%', height: '8%' },
+          ]
 
       const gridCount = grids.length
       const xAxisIndexAll = Array.from({ length: gridCount }, (_, i) => i)
@@ -183,7 +200,7 @@ export function MiniKlineChart({
       // ── X 轴 ──
       const xAxes = grids.map((_, i) => ({
         type: 'category' as const,
-        data: times,
+        data: xAxisTimes,
         gridIndex: i,
         boundaryGap: i > 0,
         axisLine: { lineStyle: { color: 'rgba(255,255,255,0.07)' } },
@@ -191,30 +208,43 @@ export function MiniKlineChart({
           show: i === gridCount - 1,
           fontSize: isMaximized ? 11 : 9,
           color: '#5f6f85',
-          interval: Math.max(0, Math.floor(times.length / (isMaximized ? 8 : 4)) - 1),
+          // 分时图模式下显示关键时间点（9:30/11:30/13:00/15:00 等）
+          // 蜡烛图模式按数据量自适应
+          interval: isTimesharing
+            ? (idx: number) => {
+                const t = xAxisTimes[idx]
+                // 显示整点、半点、9:30 和 15:00
+                return t.endsWith(':00') || t.endsWith(':30')
+              }
+            : Math.max(0, Math.floor(times.length / (isMaximized ? 8 : 4)) - 1),
         },
       }))
 
-      // ── Y 轴 ──
+      // ── Y 轴（4 个：主图 + 成交量 + MACD + RSI） ──
       const yAxes = grids.map((_, i) => {
         const isVolAxis = i === 1
+        const isRsiAxis = i === 3
+        const isMainAxis = i === 0
         return {
-          scale: !isVolAxis,
+          scale: isMainAxis,
           gridIndex: i,
           splitLine: {
-            show: i === 0,
-            lineStyle: { color: 'rgba(255,255,255,0.05)' },
+            show: isMainAxis,
+            lineStyle: { color: 'rgba(255,255,255,0.12)' },
           },
           axisLabel: {
-            show: isMaximized || i === 0,
+            show: isMaximized || isMainAxis,
             fontSize: isMaximized ? 11 : 9,
             color: '#5f6f85',
             formatter: isVolAxis
               ? (v: number) => (v >= 1e4 ? `${(v / 1e4).toFixed(0)}万` : v.toFixed(0))
-              : undefined,
+              : isRsiAxis
+                ? '{value}'
+                : undefined,
           },
           splitNumber: isVolAxis ? 2 : undefined,
-          min: isVolAxis ? 0 : undefined,
+          min: isVolAxis ? 0 : isRsiAxis ? 0 : undefined,
+          max: isRsiAxis ? 100 : undefined,
         }
       })
 
@@ -222,8 +252,9 @@ export function MiniKlineChart({
       const series: echarts.SeriesOption[] = []
 
       if (isTimesharing) {
-        // 分时图模式：价格折线 + 均价线 + 渐变面积（东财分时图风格）
-        const closes = bars.map((b) => b.close)
+        // 分时图模式：价格折线 + VWAP + TWAP + 昨收虚线 + 渐变面积
+        // 数据末尾补 null 对齐到完整 9:30-15:00 时间窗口
+        const closes = [...bars.map((b) => b.close), ...padNulls]
         const refPrice = bars.length > 0 ? bars[0].open : 0
         series.push({
           name: '价格',
@@ -237,21 +268,39 @@ export function MiniKlineChart({
           markLine: {
             symbol: 'none',
             silent: true,
-            lineStyle: { color: 'rgba(154,170,190,0.4)', width: 1, type: 'dashed' },
-            label: { show: false },
+            lineStyle: { color: 'rgba(154,170,190,0.5)', width: 1, type: 'dotted' },
+            label: {
+              show: isMaximized,
+              position: 'end',
+              formatter: '昨收',
+              color: 'rgba(154,170,190,0.8)',
+              fontSize: 9,
+            },
             data: [{ yAxis: refPrice }],
           },
         })
-        // 均价线（VWAP）：始终显示
+        // VWAP 均价线（橙色实线）- 末尾补 null
         if (vwapData.length > 0) {
           series.push({
-            name: '均价',
+            name: 'VWAP',
             type: 'line',
-            data: vwapData,
+            data: [...vwapData, ...padNulls],
             xAxisIndex: 0,
             yAxisIndex: 0,
             symbol: 'none',
-            lineStyle: { color: '#faad14', width: 1.2 },
+            lineStyle: { color: '#faad14', width: 1.5 },
+          })
+        }
+        // TWAP 线（紫色长虚线）- 末尾补 null
+        if (twapData.length > 0) {
+          series.push({
+            name: 'TWAP',
+            type: 'line',
+            data: [...twapData, ...padNulls],
+            xAxisIndex: 0,
+            yAxisIndex: 0,
+            symbol: 'none',
+            lineStyle: { color: '#b37feb', width: 1.2, type: [6, 4] },
           })
         }
       } else {
@@ -271,8 +320,66 @@ export function MiniKlineChart({
         })
       }
 
-      // 主图指标：分时均线（VWAP）— 仅蜡烛图模式
-      if (!isTimesharing && mainIndicator === 'vwap' && vwapData.length > 0) {
+      // 信号 markPoint：5 类核心信号触发位置标记在主图上
+      // trade_time 为后端 signal_engine 推送的 ISO 字符串（Shanghai 时区，如 "2026-07-13T10:32:00+08:00"）
+      // 1m 周期：精确匹配 bar.time === HH:MM
+      // 5m/15m 周期：信号触发于 1m bar，但图表 bar 为聚合后的 N 分钟 bar，
+      //   需将信号时间映射到包含该时刻的 N 分钟 bar（bar.time <= 信号时间 < bar.time + N 分钟）
+      if (signals.length > 0 && series.length > 0) {
+        const periodMinutes = period === '1m' ? 1 : period === '5m' ? 5 : period === '15m' ? 15 : 0
+        // MarkPointDataItemOption 未在 echarts 命名空间导出，使用类型推导
+        const signalMarks: NonNullable<echarts.MarkPointComponentOption['data']>[number][] = []
+        for (const sig of signals) {
+          // 从 ISO 字符串提取 HH:MM（无论 REST 还是 WS 来源）
+          const isoTime = sig.trade_time ?? null
+          if (!isoTime) continue
+          const m = isoTime.match(/T(\d{2}):(\d{2})/)
+          if (!m) continue
+          const sigMinutes = parseInt(m[1], 10) * 60 + parseInt(m[2], 10)
+
+          // 查找匹配的 bar 索引
+          let idx = -1
+          if (periodMinutes === 1) {
+            // 1m：精确匹配 HH:MM
+            const hhmm = `${m[1]}:${m[2]}`
+            idx = bars.findIndex((b) => b.time === hhmm)
+          } else if (periodMinutes > 0) {
+            // 5m/15m：时间范围匹配
+            idx = bars.findIndex((b) => {
+              const [bh, bm] = b.time.split(':').map((x) => parseInt(x, 10))
+              if (Number.isNaN(bh) || Number.isNaN(bm)) return false
+              const barMinutes = bh * 60 + bm
+              return sigMinutes >= barMinutes && sigMinutes < barMinutes + periodMinutes
+            })
+          }
+          if (idx === -1) continue
+
+          const style = SIGNAL_STYLE_MAP[sig.signal_type ?? '']
+          const color = style?.color ?? '#999'
+          const label = style?.label ?? sig.signal_type ?? '信号'
+          const isLong = sig.direction === 'long'
+          signalMarks.push({
+            name: label,
+            coord: [idx, bars[idx].close],
+            symbol: isLong ? 'triangle' : 'pin',
+            symbolSize: isMaximized ? 14 : 10,
+            itemStyle: { color },
+            label: {
+              show: isMaximized,
+              formatter: label,
+              color: '#fff',
+              fontSize: 9,
+              position: isLong ? 'bottom' : 'top',
+            },
+          })
+        }
+        if (signalMarks.length > 0) {
+          mainMarkPoints.push(...signalMarks)
+        }
+      }
+
+      // 主图指标：分时均线（VWAP）- 仅蜡烛图模式
+      if (!isTimesharing && mainIndicators.includes('vwap') && vwapData.length > 0) {
         series.push({
           name: '分时均线',
           type: 'line',
@@ -288,7 +395,7 @@ export function MiniKlineChart({
       // 以下主图指标仅蜡烛图模式生效（分时图模式固定为价格线+均价线）
       if (!isTimesharing) {
       // 主图指标：MA5/MA20
-      if (mainIndicator === 'ma') {
+      if (mainIndicators.includes('ma')) {
         if (ma5Data.length > 0) {
           series.push({
             name: 'MA5',
@@ -314,7 +421,7 @@ export function MiniKlineChart({
       }
 
       // 主图指标：布林带
-      if (mainIndicator === 'boll' && bollData) {
+      if (mainIndicators.includes('boll') && bollData) {
         series.push(
           {
             name: 'BOLL Upper',
@@ -347,7 +454,7 @@ export function MiniKlineChart({
       }
 
       // 主图指标：唐奇安通道
-      if (mainIndicator === 'donchian' && donchianData) {
+      if (mainIndicators.includes('donchian') && donchianData) {
         series.push(
           {
             name: 'DC Upper',
@@ -371,11 +478,11 @@ export function MiniKlineChart({
       }
 
       // 主图指标：神奇九转（用 markPoint 标注 1-9 数字）
-      if (mainIndicator === 'td9' && td9Data) {
-        const td9MarkPoints: echarts.MarkPointComponentOption[] = []
-        for (let i = 0; i < td9Data.buySetup.length; i++) {
-          const buyVal = td9Data.buySetup[i]
-          const sellVal = td9Data.sellSetup[i]
+      if (mainIndicators.includes('td9') && td9Data) {
+        const td9MarkPoints: MarkPointItem[] = []
+        for (let i = 0; i < td9Data.buy_setup.length; i++) {
+          const buyVal = td9Data.buy_setup[i]
+          const sellVal = td9Data.sell_setup[i]
           if (buyVal !== null) {
             // 买入计数：在 low 下方显示数字
             td9MarkPoints.push({
@@ -407,16 +514,14 @@ export function MiniKlineChart({
             })
           }
         }
-        // 将 markPoint 附加到 candlestick series
-        if (td9MarkPoints.length > 0 && series[0]) {
-          (series[0] as echarts.SeriesCandlestickOption).markPoint = {
-            data: td9MarkPoints,
-          }
+        // 收集到 mainMarkPoints，统一设置避免覆盖信号 markPoint
+        if (td9MarkPoints.length > 0) {
+          mainMarkPoints.push(...td9MarkPoints)
         }
       }
 
       // 主图指标：缠论（笔用 markLine，中枢用矩形 markArea，分型用 markPoint）
-      if (mainIndicator === 'chanlun' && chanlunData) {
+      if (mainIndicators.includes('chanlun') && chanlunData) {
         // 1. 笔：用 markLine 绘制分型连线
         if (chanlunData.strokes.length > 0 && series[0]) {
           const strokeLines = chanlunData.strokes.map((s) => ([
@@ -461,9 +566,9 @@ export function MiniKlineChart({
             candleSeries.markLine = existingMarkLine
           }
         }
-        // 3. 分型：用 markPoint 标注顶底分型
-        if (chanlunData.fractals.length > 0 && series[0]) {
-          const fractalPoints = chanlunData.fractals.map((f) => ({
+        // 3. 分型：用 markPoint 标注顶底分型（收集到 mainMarkPoints，最后统一设置避免覆盖信号/TD9）
+        if (chanlunData.fractals.length > 0) {
+          const fractalPoints: MarkPointItem[] = chanlunData.fractals.map((f) => ({
             coord: [f.index, f.price],
             symbol: f.direction === 'top' ? 'triangle' : 'pin',
             symbolSize: isMaximized ? 10 : 7,
@@ -474,10 +579,7 @@ export function MiniKlineChart({
             },
             label: { show: false },
           }))
-          const candleSeries = series[0] as echarts.SeriesCandlestickOption
-          candleSeries.markPoint = {
-            data: fractalPoints,
-          }
+          mainMarkPoints.push(...fractalPoints)
         }
         // 4. 买卖点：用 scatter 标注一买/二买/三买/一卖/二卖/三卖
         if (chanlunData.bs_points && chanlunData.bs_points.length > 0) {
@@ -511,28 +613,40 @@ export function MiniKlineChart({
       }
       } // end if (!isTimesharing)
 
+      // 统一设置主图 markPoint：将信号 + TD9 + 缠论分型的 markPoint 合并到 series[0]
+      // 避免各部分分别设置 markPoint 导致后者覆盖前者
+      if (mainMarkPoints.length > 0 && series[0]) {
+        const mainSeries = series[0] as { markPoint?: echarts.MarkPointComponentOption }
+        mainSeries.markPoint = {
+          data: mainMarkPoints,
+          animation: false,
+        }
+      }
+
       // 成交量（始终在 grid[1]）
+      // 分时图模式下末尾补 0 对齐到完整时间窗口
       series.push({
         name: 'Volume',
         type: 'bar',
-        data: volumes.map((v, i) => ({
+        data: [...volumes.map((v, i) => ({
           value: v,
           itemStyle: { color: volColors[i] },
-        })),
+        })), ...(isTimesharing ? padZeros.map(() => ({ value: 0, itemStyle: { color: '#2eaa67' } })) : [])],
         xAxisIndex: 1,
         yAxisIndex: 1,
         barMaxWidth: isMaximized ? 8 : 4,
       })
 
       // 副图指标：MACD（grid[2]）— 仅蜡烛图模式且有副图指标时
-      if (hasSubIndicator && subIndicator === 'macd' && subIndicatorData.macd) {
-        const subAxis = 2
+      // 副图指标：MACD（grid[2]，始终展示）
+      if (subIndicatorData.macd) {
+        const macdAxis = 2
         series.push({
           name: 'MACD',
           type: 'bar',
-          data: subIndicatorData.macd.map((v) => v ?? 0),
-          xAxisIndex: subAxis,
-          yAxisIndex: subAxis,
+          data: [...subIndicatorData.macd.map((v) => v ?? 0), ...(isTimesharing ? padZeros : [])],
+          xAxisIndex: macdAxis,
+          yAxisIndex: macdAxis,
           barMaxWidth: isMaximized ? 6 : 3,
           itemStyle: {
             color: (p: { data: number }) => (p.data >= 0 ? '#e03e3e' : '#2eaa67'),
@@ -542,9 +656,9 @@ export function MiniKlineChart({
           series.push({
             name: 'DIF',
             type: 'line',
-            data: subIndicatorData.dif,
-            xAxisIndex: subAxis,
-            yAxisIndex: subAxis,
+            data: [...subIndicatorData.dif, ...padNulls],
+            xAxisIndex: macdAxis,
+            yAxisIndex: macdAxis,
             symbol: 'none',
             lineStyle: { color: '#faad14', width: 1 },
           })
@@ -553,9 +667,9 @@ export function MiniKlineChart({
           series.push({
             name: 'DEA',
             type: 'line',
-            data: subIndicatorData.dea,
-            xAxisIndex: subAxis,
-            yAxisIndex: subAxis,
+            data: [...subIndicatorData.dea, ...padNulls],
+            xAxisIndex: macdAxis,
+            yAxisIndex: macdAxis,
             symbol: 'none',
             lineStyle: { color: '#1677ff', width: 1 },
           })
@@ -563,17 +677,39 @@ export function MiniKlineChart({
       }
 
       // 副图指标：RSI（grid[2]）— 仅蜡烛图模式且有副图指标时
-      if (hasSubIndicator && subIndicator === 'rsi' && subIndicatorData.rsi) {
-        const subAxis = 2
+      if (subIndicatorData.rsi) {
+        const rsiAxis = 3
         series.push({
           name: 'RSI',
           type: 'line',
-          data: subIndicatorData.rsi,
-          xAxisIndex: subAxis,
-          yAxisIndex: subAxis,
+          data: [...subIndicatorData.rsi, ...padNulls],
+          xAxisIndex: rsiAxis,
+          yAxisIndex: rsiAxis,
           symbol: 'none',
           lineStyle: { color: '#b37feb', width: 1.2 },
         })
+        // RSI 超买超卖参考线（70/30）- 分时图模式下补齐到完整时间窗口
+        const refLinePadding = isTimesharing ? padNulls : []
+        series.push({
+          name: 'RSI_Overbought',
+          type: 'line',
+          data: [...bars.map(() => 70), ...refLinePadding],
+          xAxisIndex: rsiAxis,
+          yAxisIndex: rsiAxis,
+          symbol: 'none',
+          lineStyle: { color: 'rgba(224,62,62,0.3)', width: 1, type: 'dashed' },
+          silent: true,
+        } as echarts.SeriesOption)
+        series.push({
+          name: 'RSI_Oversold',
+          type: 'line',
+          data: [...bars.map(() => 30), ...refLinePadding],
+          xAxisIndex: rsiAxis,
+          yAxisIndex: rsiAxis,
+          symbol: 'none',
+          lineStyle: { color: 'rgba(46,170,103,0.3)', width: 1, type: 'dashed' },
+          silent: true,
+        } as echarts.SeriesOption)
       }
 
       // ── 保留用户缩放状态 ──
@@ -583,7 +719,7 @@ export function MiniKlineChart({
         backgroundColor: 'transparent',
         animation: false,
         tooltip: {
-          show: isMaximized,
+          show: true,
           trigger: 'axis',
           axisPointer: { type: 'cross' },
           confine: true,
@@ -600,7 +736,16 @@ export function MiniKlineChart({
         axisPointer: {
           link: [{ xAxisIndex: 'all' }],
         },
-        legend: { show: false },
+        legend: {
+          show: isTimesharing,
+          top: isMaximized ? 8 : 2,
+          right: isMaximized ? 60 : '4%',
+          textStyle: { color: '#9ca3af', fontSize: isMaximized ? 11 : 9 },
+          itemWidth: isMaximized ? 16 : 12,
+          itemHeight: isMaximized ? 8 : 6,
+          itemGap: 12,
+          data: ['价格', 'VWAP', 'TWAP'],
+        },
         grid: grids,
         xAxis: xAxes,
         yAxis: yAxes,
@@ -629,7 +774,7 @@ export function MiniKlineChart({
     return () => {
       cancelAnimationFrame(rafId)
     }
-  }, [bars, symbol, mainIndicator, subIndicator, isMaximized, isTimesharing, vwapData, ma5Data, ma20Data, bollData, donchianData, td9Data, chanlunData, subIndicatorData])
+  }, [bars, symbol, mainIndicators, isMaximized, isTimesharing, period, vwapData, twapData, ma5Data, ma20Data, bollData, donchianData, td9Data, chanlunData, subIndicatorData, signals, indicatorData, fullTimesharingTimes])
 
   // ==================== 事件绑定（放大模式十字星 + 缩放状态保留） ====================
 
@@ -684,6 +829,16 @@ export function MiniKlineChart({
     return () => ro.disconnect()
   }, [])
 
+  // ── 副图指标数值（业界主流机构配色） ──
+  const macdVal = subIndicatorData.macd?.[currentIndex] ?? null
+  const difVal = subIndicatorData.dif?.[currentIndex] ?? null
+  const deaVal = subIndicatorData.dea?.[currentIndex] ?? null
+  const rsiVal = subIndicatorData.rsi?.[currentIndex] ?? null
+  const macdColor = macdVal != null && macdVal >= 0 ? '#e03e3e' : '#2eaa67'
+
+  const subLabelFontSize = isMaximized ? 11 : 9
+  const subLabelLeft = isMaximized ? 64 : '9%'
+
   return (
     <div className="monitor-cell__chart-wrapper" style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
       {isMaximized && currentBar && (
@@ -698,8 +853,9 @@ export function MiniKlineChart({
           <span style={{ color: '#e5e7eb' }}>{currentBar.time}</span>
           {isTimesharing ? (
             <>
-              <span>价格 <span style={{ color: '#e5e7eb' }}>{formatBarValue(currentBar.close)}</span></span>
-              <span>均价 <span style={{ color: '#faad14' }}>{formatBarValue(vwapData[currentIndex] ?? null)}</span></span>
+              <span>价格 <span style={{ color: '#60a5fa' }}>{formatBarValue(currentBar.close)}</span></span>
+              <span>VWAP <span style={{ color: '#faad14' }}>{formatBarValue(vwapData[currentIndex] ?? null)}</span></span>
+              <span>TWAP <span style={{ color: '#b37feb' }}>{formatBarValue(twapData[currentIndex] ?? null)}</span></span>
               <span>量 {formatVolume(currentBar.volume)}</span>
             </>
           ) : (
@@ -709,182 +865,43 @@ export function MiniKlineChart({
               <span>低 <span style={{ color: '#2eaa67' }}>{formatBarValue(currentBar.low)}</span></span>
               <span>收 {formatBarValue(currentBar.close)}</span>
               <span>量 {formatVolume(currentBar.volume)}</span>
-              {subIndicator === 'macd' && subIndicatorData.macd && (
-                <span>
-                  MACD {formatBarValue(subIndicatorData.macd[currentIndex] ?? null)}
-                  <span style={{ marginLeft: 8, color: '#faad14' }}>DIF {formatBarValue(subIndicatorData.dif?.[currentIndex] ?? null)}</span>
-                  <span style={{ marginLeft: 8, color: '#1677ff' }}>DEA {formatBarValue(subIndicatorData.dea?.[currentIndex] ?? null)}</span>
-                </span>
-              )}
-              {subIndicator === 'rsi' && subIndicatorData.rsi && (
-                <span style={{ color: '#b37feb' }}>RSI {formatBarValue(subIndicatorData.rsi[currentIndex] ?? null)}</span>
-              )}
             </>
           )}
         </div>
       )}
-      <div ref={chartRef} className="monitor-cell__chart-inner" style={{ width: '100%', flex: 1 }} />
+      <div style={{ position: 'relative', width: '100%', flex: 1 }}>
+        <div ref={chartRef} className="monitor-cell__chart-inner" style={{ width: '100%', height: '100%' }} />
+        {subIndicatorData.macd && (
+          <div style={{
+            position: 'absolute',
+            left: subLabelLeft,
+            top: '74.5%',
+            fontSize: subLabelFontSize,
+            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+            pointerEvents: 'none',
+            lineHeight: 1.2,
+            whiteSpace: 'nowrap',
+          }}>
+            <span style={{ color: macdColor }}>MACD {formatBarValue(macdVal, 3)}</span>
+            <span style={{ marginLeft: 8, color: '#faad14' }}>DIF {formatBarValue(difVal, 3)}</span>
+            <span style={{ marginLeft: 8, color: '#1677ff' }}>DEA {formatBarValue(deaVal, 3)}</span>
+          </div>
+        )}
+        {subIndicatorData.rsi && (
+          <div style={{
+            position: 'absolute',
+            left: subLabelLeft,
+            top: '90.5%',
+            fontSize: subLabelFontSize,
+            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+            pointerEvents: 'none',
+            lineHeight: 1.2,
+            whiteSpace: 'nowrap',
+          }}>
+            <span style={{ color: '#b37feb' }}>RSI(14) {formatBarValue(rsiVal, 2)}</span>
+          </div>
+        )}
+      </div>
     </div>
   )
-}
-
-// ==================== 指标计算辅助函数 ====================
-
-function calcMA(bars: KlineBar[], period: number): (number | null)[] {
-  const result: (number | null)[] = []
-  for (let i = 0; i < bars.length; i++) {
-    if (i < period - 1) {
-      result.push(null)
-    } else {
-      let sum = 0
-      for (let j = 0; j < period; j++) {
-        sum += bars[i - j].close
-      }
-      result.push(sum / period)
-    }
-  }
-  return result
-}
-
-function calcBoll(
-  bars: KlineBar[],
-  period: number,
-  multiplier: number,
-): { upper: (number | null)[]; mid: (number | null)[]; lower: (number | null)[] } {
-  const mid = calcMA(bars, period)
-  const upper: (number | null)[] = []
-  const lower: (number | null)[] = []
-  for (let i = 0; i < bars.length; i++) {
-    if (i < period - 1) {
-      upper.push(null)
-      lower.push(null)
-    } else {
-      const m = mid[i] as number
-      let variance = 0
-      for (let j = 0; j < period; j++) {
-        const diff = bars[i - j].close - m
-        variance += diff * diff
-      }
-      const std = Math.sqrt(variance / period)
-      upper.push(m + multiplier * std)
-      lower.push(m - multiplier * std)
-    }
-  }
-  return { upper, mid, lower }
-}
-
-function calcDonchian(
-  bars: KlineBar[],
-  period: number,
-): { upper: (number | null)[]; lower: (number | null)[] } {
-  const upper: (number | null)[] = []
-  const lower: (number | null)[] = []
-  for (let i = 0; i < bars.length; i++) {
-    if (i < period - 1) {
-      upper.push(null)
-      lower.push(null)
-    } else {
-      let hh = -Infinity
-      let ll = Infinity
-      for (let j = 0; j < period; j++) {
-        hh = Math.max(hh, bars[i - j].high)
-        ll = Math.min(ll, bars[i - j].low)
-      }
-      upper.push(hh)
-      lower.push(ll)
-    }
-  }
-  return { upper, lower }
-}
-
-function calcMACD(
-  bars: KlineBar[],
-  fastPeriod: number,
-  slowPeriod: number,
-  signalPeriod: number,
-): SubIndicatorData {
-  const closes = bars.map((b) => b.close)
-  const emaFast = calcEMA(closes, fastPeriod)
-  const emaSlow = calcEMA(closes, slowPeriod)
-
-  const dif: (number | null)[] = []
-  for (let i = 0; i < closes.length; i++) {
-    if (emaFast[i] == null || emaSlow[i] == null) {
-      dif.push(null)
-    } else {
-      dif.push((emaFast[i] as number) - (emaSlow[i] as number))
-    }
-  }
-
-  const difValues = dif.map((v) => v ?? 0)
-  const dea = calcEMA(difValues, signalPeriod)
-
-  const macd: (number | null)[] = []
-  for (let i = 0; i < closes.length; i++) {
-    if (dif[i] == null || dea[i] == null) {
-      macd.push(null)
-    } else {
-      macd.push(((dif[i] as number) - (dea[i] as number)) * 2)
-    }
-  }
-
-  return { macd, dif, dea }
-}
-
-function calcEMA(values: number[], period: number): (number | null)[] {
-  const result: (number | null)[] = []
-  const multiplier = 2 / (period + 1)
-  let prevEMA: number | null = null
-
-  for (let i = 0; i < values.length; i++) {
-    if (i < period - 1) {
-      result.push(null)
-    } else if (i === period - 1) {
-      let sum = 0
-      for (let j = 0; j < period; j++) {
-        sum += values[i - j]
-      }
-      prevEMA = sum / period
-      result.push(prevEMA)
-    } else {
-      prevEMA = values[i] * multiplier + (prevEMA as number) * (1 - multiplier)
-      result.push(prevEMA)
-    }
-  }
-  return result
-}
-
-function calcRSI(bars: KlineBar[], period: number): (number | null)[] {
-  const result: (number | null)[] = []
-  let avgGain = 0
-  let avgLoss = 0
-
-  for (let i = 0; i < bars.length; i++) {
-    if (i === 0) {
-      result.push(null)
-      continue
-    }
-    const change = bars[i].close - bars[i - 1].close
-    const gain = change > 0 ? change : 0
-    const loss = change < 0 ? -change : 0
-
-    if (i < period) {
-      avgGain += gain
-      avgLoss += loss
-      if (i === period - 1) {
-        avgGain /= period
-        avgLoss /= period
-        const rs = avgLoss === 0 ? 100 : avgGain / avgLoss
-        result.push(100 - 100 / (1 + rs))
-      } else {
-        result.push(null)
-      }
-    } else {
-      avgGain = (avgGain * (period - 1) + gain) / period
-      avgLoss = (avgLoss * (period - 1) + loss) / period
-      const rs = avgLoss === 0 ? 100 : avgGain / avgLoss
-      result.push(100 - 100 / (1 + rs))
-    }
-  }
-  return result
 }

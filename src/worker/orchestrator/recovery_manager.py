@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
-import logging
 
 from framework.commons.exceptions import OrchestrationNotFoundError, RecoveryFailedError
+from framework.commons.logger import get_logger
+from framework.commons.redis_client import redis_client
 from worker.orchestrator.checkpoint_manager import CheckpointManager
 from worker.orchestrator.orchestration_tracker import OrchestrationTracker
 
-logger = logging.getLogger(__name__)
+logger = get_logger("ORCHESTRATOR.RECOVERY")
 
 
 class RecoveryManager:
@@ -91,16 +92,13 @@ class RecoveryManager:
                     dep_node = dag.nodes.get(dep)
                     if dep_node is None:
                         continue
-                    # 检查 Redis 中该步骤的状态
-                    from framework.commons.redis_client import redis_client
-
+                    # 检查 Redis 中该步骤的状态（通过 redis_client 公共方法，不访问内部 client）
                     key = f"cycle:{cycle_id}:task:{dep}"
-                    data = redis_client.client.hgetall(key)  # type: ignore[union-attr]
+                    data = redis_client.hgetall(key)
                     if not data:
                         all_deps_done = False
                         break
-                    status_val = data.get("status", data.get(b"status", b""))  # type: ignore[union-attr]
-                    status_str = status_val.decode() if isinstance(status_val, bytes) else str(status_val)  # type: ignore[union-attr]
+                    status_str = data.get("status", "")
                     if status_str != "SUCCESS":
                         all_deps_done = False
                         break

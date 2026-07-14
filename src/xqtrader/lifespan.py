@@ -67,8 +67,8 @@ async def app_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # 停止盘内监控
     await intraday_task.stop()
-    # 关闭 Agent Redis 连接
+    # 关闭 Agent Redis 连接（通过公共 close 方法，不访问 _bus 私有属性）
     from xqtrader.api.v1.agent.agent import _service
 
-    await _service._bus.close()
+    await _service.close()
     logger.info("应用已关闭")

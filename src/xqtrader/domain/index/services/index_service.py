@@ -5,13 +5,11 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-import numpy as np
-import talib  # type: ignore[import-unfound]
-
 from framework.commons.exceptions import NotFoundException
 from framework.commons.pagination import build_paginated_response, paginate
 from xqtrader.domain.index.models.index import Index
 from xqtrader.domain.index.models.index_daily import IndexDaily
+from xqtrader.domain.market.intraday.indicator_calculator import IndicatorCalculator
 from xqtrader.domain.security.services.stock_detail_service import StockApiFormatter
 
 
@@ -121,27 +119,22 @@ class IndexKlineService:
     ) -> dict[str, dict[str, list[float | None]]]:
         if not rows:
             return {key: {} for key in ["ma", "macd", "rsi", "kdj", "bias"]}
-        close = np.array([row.close for row in rows], dtype=float)
-        high = np.array([row.high for row in rows], dtype=float)
-        low = np.array([row.low for row in rows], dtype=float)
-        ma = {f"ma{p}": StockApiFormatter.series(talib.MA(close, timeperiod=p)) for p in [5, 10, 20, 60]}
-        dif, dea, macd = talib.MACD(close, fastperiod=12, slowperiod=26, signalperiod=9)
-        k, d = talib.STOCH(high, low, close, fastk_period=9, slowk_period=3, slowd_period=3)
-        j = 3 * k - 2 * d
-        ma_arr = talib.MA(close, timeperiod=6)
-        bias = ((close - ma_arr) / ma_arr) * 100
+        # 统一使用 IndicatorCalculator 计算技术指标，与个股 K 线口径一致
+        bars = [
+            {
+                "open": r.open or 0.0, "high": r.high or 0.0,
+                "low": r.low or 0.0, "close": r.close or 0.0,
+                "volume": float(r.vol or 0.0), "amount": float(r.amount or 0.0),
+            }
+            for r in rows
+        ]
+        calc = IndicatorCalculator.from_dicts(bars)
+        dif, dea, macd = calc.calc_macd(12, 26, 9)
+        kdj = calc.calc_kdj(9, 3, 3)
         return {
-            "ma": ma,
-            "macd": {
-                "dif": StockApiFormatter.series(dif),
-                "dea": StockApiFormatter.series(dea),
-                "macd": StockApiFormatter.series(macd * 2),
-            },
-            "rsi": {"rsi14": StockApiFormatter.series(talib.RSI(close, timeperiod=14))},
-            "kdj": {
-                "k": StockApiFormatter.series(k),
-                "d": StockApiFormatter.series(d),
-                "j": StockApiFormatter.series(j),
-            },
-            "bias": {"bias6": StockApiFormatter.series(bias)},
+            "ma": {f"ma{p}": calc.calc_ma(p) for p in [5, 10, 20, 60]},
+            "macd": {"dif": dif, "dea": dea, "macd": macd},
+            "rsi": {"rsi14": calc.calc_rsi(14)},
+            "kdj": kdj,
+            "bias": {"bias6": calc.calc_bias(6)},
         }

@@ -89,6 +89,7 @@ export function WatchlistStrategyTab({ accountId }: WatchlistStrategyTabProps) {
       }
     });
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- message 为 antd 稳定引用
   }, [accountId, loadInstances]);
   useEffect(() => {
     let cancelled = false;
@@ -173,6 +174,7 @@ export function WatchlistStrategyTab({ accountId }: WatchlistStrategyTabProps) {
       cancelled = true;
       if (searchTimer.current) clearTimeout(searchTimer.current);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- message 为 antd 稳定引用
   }, [searchText, existingSymbols]);
 
   const handleAddToWatchlist = useCallback(async (stock: StockSearchItem) => {
@@ -190,6 +192,7 @@ export function WatchlistStrategyTab({ accountId }: WatchlistStrategyTabProps) {
     } catch {
       message.error('添加失败');
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- message 为 antd 稳定引用
   }, [accountId, loadInstances, loadWatchlist]);
 
   const handleRemoveFromWatchlist = useCallback(async (itemId: number, symbol: string) => {
@@ -200,6 +203,7 @@ export function WatchlistStrategyTab({ accountId }: WatchlistStrategyTabProps) {
     } catch {
       message.error(`删除 ${symbol} 失败`);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- message 为 antd 稳定引用
   }, [loadInstances]);
 
   const handleEditWatchlistItem = useCallback((item: ApiWatchlistItem) => {
@@ -230,6 +234,7 @@ export function WatchlistStrategyTab({ accountId }: WatchlistStrategyTabProps) {
     await loadInstances();
     setEditingItem(null);
     message.success('自选股配置已保存');
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- message 为 antd 稳定引用
   }, [editForm, editingItem, loadInstances, loadWatchlist]);
 
   const handleInstanceAction = useCallback(async (instanceId: number, action: 'start') => {
@@ -239,6 +244,7 @@ export function WatchlistStrategyTab({ accountId }: WatchlistStrategyTabProps) {
     } catch {
       message.error(`${action} 失败`);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- message 为 antd 稳定引用
   }, []);
 
   const formatPrice = (v: number | null) => {
@@ -465,6 +471,7 @@ export function WatchlistStrategyTab({ accountId }: WatchlistStrategyTabProps) {
         </div>
       </div>
       <PositionSizingConfigDrawer
+        key={activeInstance?.id ?? 'none'}
         open={sizingDrawerOpen}
         onClose={() => setSizingDrawerOpen(false)}
         onSaved={loadInstances}

@@ -1,20 +1,9 @@
-import { createContext, useContext, useState, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { NAV_ITEMS } from '@/config/navigation'
+import { WorkspaceActionsContext } from './WorkspaceActionsContext'
 import './Workspace.css'
-
-interface WorkspaceActionsContextValue {
-  setActions: (actions: ReactNode | null) => void
-}
-
-const WorkspaceActionsContext = createContext<WorkspaceActionsContextValue>({
-  setActions: () => {},
-})
-
-export function useWorkspaceActions() {
-  return useContext(WorkspaceActionsContext)
-}
 
 export function Workspace() {
   const { t } = useTranslation()

@@ -2,6 +2,8 @@ import type { MinuteBar } from '@/api/intraday'
 
 export interface KlineBar {
   time: string
+  /** 交易日期 YYYY-MM-DD，用于跨天聚合分桶 */
+  date: string
   open: number
   close: number
   high: number
@@ -12,15 +14,22 @@ export interface KlineBar {
 }
 
 export function minuteBarsToKline(bars: MinuteBar[]): KlineBar[] {
-  return bars.map((b) => ({
-    time: b.trade_time.substring(11, 16),
-    open: b.open,
-    close: b.close,
-    high: b.high,
-    low: b.low,
-    volume: b.volume,
-    amount: b.amount,
-  }))
+  return bars.map((b) => {
+    // trade_time 格式如 "2026-07-12T09:31:00+08:00"
+    const fullTime = b.trade_time
+    const date = fullTime.substring(0, 10)
+    const time = fullTime.substring(11, 16)
+    return {
+      time,
+      date,
+      open: b.open,
+      close: b.close,
+      high: b.high,
+      low: b.low,
+      volume: b.volume,
+      amount: b.amount,
+    }
+  })
 }
 
 export function dailyBarsToKline(
@@ -28,6 +37,7 @@ export function dailyBarsToKline(
 ): KlineBar[] {
   return bars.map((b) => ({
     time: b.trade_date,
+    date: b.trade_date,
     open: b.open,
     close: b.close,
     high: b.high,
@@ -40,44 +50,57 @@ export function dailyBarsToKline(
 
 /**
  * 将 1m K线聚合为 N 分钟 K线
- * @param bars 1m K线数组（time 格式 "HH:MM"）
+ * 按 date + 时间桶 分桶，避免跨天同时段被合并
+ * @param bars 1m K线数组
  * @param minutes 聚合周期（5/15 等）
  */
 export function aggregateMinuteBars(bars: KlineBar[], minutes: number): KlineBar[] {
   if (bars.length === 0 || minutes <= 1) return bars
   const result: KlineBar[] = []
   let bucket: KlineBar[] = []
-  let bucketKey = -1
+  let bucketKey = ''
+  let bucketTimeBucket = -1 // 显式跟踪时间桶编号，避免从 key 字符串解析
 
   for (const bar of bars) {
     const [h, m] = bar.time.split(':').map(Number)
     const totalMin = h * 60 + m
-    const key = Math.floor(totalMin / minutes)
-    if (bucketKey === -1) bucketKey = key
+    const timeBucket = Math.floor(totalMin / minutes)
+    // key 包含日期，避免跨天同时段被合并到同一桶
+    const key = `${bar.date}-${timeBucket}`
+    if (bucketKey === '') {
+      bucketKey = key
+      bucketTimeBucket = timeBucket
+    }
     if (key !== bucketKey) {
-      if (bucket.length > 0) result.push(mergeBars(bucket, bucketKey, minutes))
+      if (bucket.length > 0) {
+        result.push(mergeBars(bucket, bucket[0].date, bucketTimeBucket, minutes))
+      }
       bucket = []
       bucketKey = key
+      bucketTimeBucket = timeBucket
     }
     bucket.push(bar)
   }
-  if (bucket.length > 0) result.push(mergeBars(bucket, bucketKey, minutes))
+  if (bucket.length > 0) {
+    result.push(mergeBars(bucket, bucket[0].date, bucketTimeBucket, minutes))
+  }
   return result
 }
 
-function mergeBars(bucket: KlineBar[], bucketKey: number, minutes: number): KlineBar {
+function mergeBars(bucket: KlineBar[], date: string, timeBucket: number, minutes: number): KlineBar {
   const first = bucket[0]
   const last = bucket[bucket.length - 1]
   const high = Math.max(...bucket.map((b) => b.high))
   const low = Math.min(...bucket.map((b) => b.low))
   const volume = bucket.reduce((sum, b) => sum + b.volume, 0)
   const amount = bucket.reduce((sum, b) => sum + b.amount, 0)
-  const startMin = bucketKey * minutes
+  const startMin = timeBucket * minutes
   const h = Math.floor(startMin / 60)
   const m = startMin % 60
   const timeLabel = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
   return {
     time: timeLabel,
+    date,
     open: first.open,
     close: last.close,
     high,
@@ -87,44 +110,14 @@ function mergeBars(bucket: KlineBar[], bucketKey: number, minutes: number): Klin
   }
 }
 
-// ==================== 神奇九转 TD Sequential ====================
+// ==================== 神奇九转 TD Sequential（后端 API 返回） ====================
 
-export interface TD9Result {
-  /** 买入计数（1-9，正值表示连续下跌计数） */
-  buySetup: (number | null)[]
-  /** 卖出计数（1-9，正值表示连续上涨计数） */
-  sellSetup: (number | null)[]
-}
-
-/**
- * 计算神奇九转 TD Sequential
- * 买入setup: 连续9根 close < 4根前close（下跌动能衰竭）
- * 卖出setup: 连续9根 close > 4根前close（上涨动能衰竭）
- */
-export function calcTD9(bars: KlineBar[]): TD9Result {
-  const buySetup: (number | null)[] = new Array(bars.length).fill(null)
-  const sellSetup: (number | null)[] = new Array(bars.length).fill(null)
-  let buyCount = 0
-  let sellCount = 0
-
-  for (let i = 0; i < bars.length; i++) {
-    if (i < 4) continue
-    const close = bars[i].close
-    const refClose = bars[i - 4].close
-    if (close > refClose) {
-      sellCount = sellCount < 9 ? sellCount + 1 : 1
-      buyCount = 0
-      sellSetup[i] = sellCount
-    } else if (close < refClose) {
-      buyCount = buyCount < 9 ? buyCount + 1 : 1
-      sellCount = 0
-      buySetup[i] = buyCount
-    } else {
-      buyCount = 0
-      sellCount = 0
-    }
-  }
-  return { buySetup, sellSetup }
+/** 神奇九转数据，由后端 /stocks/{symbol}/td9 返回 */
+export interface Td9Data {
+  /** 买入计数（1-9，连续下跌动能衰竭） */
+  buy_setup: (number | null)[]
+  /** 卖出计数（1-9，连续上涨动能衰竭） */
+  sell_setup: (number | null)[]
 }
 
 // ==================== 缠论（后端 API 返回） ====================

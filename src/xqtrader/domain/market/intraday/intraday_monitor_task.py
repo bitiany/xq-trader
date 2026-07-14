@@ -31,6 +31,7 @@ from framework.dal.enginee import engines_manager
 from xqtrader.broker.services.qmt_data_collector import QmtDataCollector
 from xqtrader.domain.market.intraday.continuous_aggregate_setup import setup_continuous_aggregates
 from xqtrader.domain.market.intraday.dynamic_pool import load_dynamic_stock_pool
+from xqtrader.domain.market.intraday.intraday_signal_engine import IntradaySignalEngine
 from xqtrader.domain.market.intraday.minute_bar_collector import MinuteBarCollector
 from xqtrader.domain.market.intraday.publishers import (
     CHANNEL_CONTROL,
@@ -54,6 +55,9 @@ _AFTERNOON_END = time(15, 0)
 
 # 回补并发数（避免过多并发拖慢 QMT）
 _BACKFILL_CONCURRENCY = 5
+
+# 交易时段自动检查间隔（秒）：服务跨日运行时定期检查是否进入交易时段
+_TRADING_SESSION_CHECK_INTERVAL = 60
 
 
 class IntradayMonitorTask:
@@ -85,12 +89,14 @@ class IntradayMonitorTask:
             self._qmt, self._collector, self._scanner,
         )
         self._signal_generator = IntradaySignalGenerator.get_instance()
+        self._signal_engine = IntradaySignalEngine.get_instance()
 
         self._task: asyncio.Task[None] | None = None
         self._running = False
         self._monitoring = False  # 是否正在监控（收到 start 后为 True）
         self._ca_initialized = False  # Continuous Aggregate 是否已初始化
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._last_session_check_ts: float = 0.0  # 上次交易时段检查时间（loop.time）
 
     @classmethod
     def get_instance(cls) -> IntradayMonitorTask:
@@ -108,7 +114,13 @@ class IntradayMonitorTask:
         return self._monitoring
 
     async def start(self) -> None:
-        """启动后台任务（FastAPI lifespan 调用）"""
+        """启动后台任务（FastAPI lifespan 调用）
+
+        启动流程：
+        1. 启动 Redis 控制信号监听（接收 Celery Beat 调度的 start/stop）
+        2. 若启动时已处于 A 股交易时段（周一至周五 9:30-11:30/13:00-15:00），
+           自动触发 start_monitoring()，支持盘中程序重启后自动恢复监控
+        """
         if self._running:
             logger.warning("IntradayMonitorTask 已在运行，跳过启动")
             return
@@ -116,6 +128,31 @@ class IntradayMonitorTask:
         self._loop = asyncio.get_running_loop()
         self._task = asyncio.create_task(self._run())
         logger.info("IntradayMonitorTask 后台任务已启动")
+
+        # 盘中重启自动恢复监控：若已处于交易时段，直接启动监控
+        if self._is_in_trading_session():
+            logger.info("[autostart] 检测到当前处于交易时段，自动启动盘内监控")
+            try:
+                await self.start_monitoring()
+            except Exception as e:
+                logger.error("[autostart] 自动启动监控失败: %s", e, exc_info=True)
+        else:
+            logger.info("[autostart] 非交易时段，等待 Celery Beat 调度 start 信号")
+
+    @staticmethod
+    def _is_in_trading_session() -> bool:
+        """判断当前是否处于 A 股交易时段（周一至周五 9:30-11:30 / 13:00-15:00）
+
+        使用 Asia/Shanghai 时区，避免服务器时区差异导致误判。
+        """
+        now = datetime.now(_CST)
+        # 周末非交易日
+        if now.weekday() >= 5:
+            return False
+        now_time = now.time()
+        in_morning = _MORNING_START <= now_time < _MORNING_END
+        in_afternoon = _AFTERNOON_START <= now_time < _AFTERNOON_END
+        return in_morning or in_afternoon
 
     async def stop(self) -> None:
         """停止后台任务（FastAPI shutdown 调用）"""
@@ -147,6 +184,8 @@ class IntradayMonitorTask:
 
         使用 loop.run_in_executor 在线程中运行阻塞式 pubsub.listen()，
         通过 asyncio.run_coroutine_threadsafe 桥接到事件循环处理消息。
+
+        同时在消息等待超时分支中定期检查交易时段，服务跨日运行时自动启动监控。
         """
         pubsub = redis_client.pubsub()
         pubsub.subscribe(CHANNEL_CONTROL)
@@ -179,11 +218,39 @@ class IntradayMonitorTask:
                     message = await asyncio.wait_for(message_queue.get(), timeout=1.0)
                     await self._handle_control_message(message.get("data"))
                 except asyncio.TimeoutError:
+                    # 超时期间检查是否需要自动启动监控（服务跨日运行场景）
+                    await self._maybe_auto_start_monitoring(loop.time())
                     continue
         finally:
             pubsub.unsubscribe(CHANNEL_CONTROL)
             pubsub.close()
             listener_future.cancel()
+
+    async def _maybe_auto_start_monitoring(self, now_ts: float) -> None:
+        """服务跨日运行时自动启动监控。
+
+        当后台任务运行中但未监控时，每分钟检查一次是否进入交易时段，
+        若进入则自动触发 start_monitoring()。覆盖场景：
+        - 服务在前一交易日盘后启动，跨日到下一交易日开盘时自动恢复监控
+        - Celery Beat 未启用时作为兜底机制
+
+        Args:
+            now_ts: 当前 loop.time() 时间戳
+        """
+        if self._monitoring or not self._running:
+            return
+        if now_ts - self._last_session_check_ts < _TRADING_SESSION_CHECK_INTERVAL:
+            return
+        self._last_session_check_ts = now_ts
+
+        if not self._is_in_trading_session():
+            return
+
+        logger.info("[autostart] 检测到当前处于交易时段，自动启动盘内监控")
+        try:
+            await self.start_monitoring()
+        except Exception as e:
+            logger.error("[autostart] 自动启动监控失败: %s", e, exc_info=True)
 
     async def _handle_control_message(self, raw_data: Any) -> None:
         """处理控制消息
@@ -263,11 +330,17 @@ class IntradayMonitorTask:
         # 5. 启动信号生成器（监听异动事件 -> 自动创建 PreOrder -> 提交执行）
         await self._signal_generator.start()
 
+        # 6. 启动分时信号引擎（监听分钟线就绪 -> 计算 5 类核心信号 -> WS 推送）
+        await self._signal_engine.start()
+
     async def stop_monitoring(self) -> None:
-        """停止监控：停止信号生成器 -> 取消订阅 -> 停止 Scanner/Collector"""
+        """停止监控：停止信号引擎/生成器 -> 取消订阅 -> 停止 Scanner/Collector"""
         if not self._monitoring:
             return
         self._monitoring = False
+
+        # 停止分时信号引擎
+        await self._signal_engine.stop()
 
         # 停止信号生成器
         await self._signal_generator.stop()

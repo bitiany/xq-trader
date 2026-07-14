@@ -189,6 +189,7 @@ export function BacktestPage() {
         message.error('加载策略列表失败')
       })
     return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- message 为 antd 稳定引用
   }, [])
 
   const handleConfigChange = useCallback(<K extends keyof BacktestConfig>(key: K, value: BacktestConfig[K]) => {
@@ -227,6 +228,7 @@ export function BacktestPage() {
     } finally {
       setRunning(false)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- message 为 antd 稳定引用
   }, [activeSymbol, config])
 
   const canRun = !!config.strategyId && !!activeSymbol

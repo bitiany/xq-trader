@@ -29,7 +29,7 @@ import { StockFundFlowPanel } from '@/components/stock/StockFundFlowPanel'
 import { StockKlineChart } from '@/components/stock/StockKlineChart'
 import { StockNewsPanel } from '@/components/stock/StockNewsPanel'
 import { StockQuoteHeader } from '@/components/stock/StockQuoteHeader'
-import { useWorkspaceActions } from '@/components/layout/Workspace'
+import { useWorkspaceActions } from '@/components/layout/WorkspaceActionsContext'
 import { useRequest } from '@/hooks/useRequest'
 import { useRequestErrorToast } from '@/hooks/useRequestErrorToast'
 import { useStockKline } from '@/hooks/useStockKline'
@@ -262,7 +262,7 @@ export function StockDetailPage() {
       bars[bars.length - 1]?.trade_date ??
       null
     )
-  }, [bars, inSession, liveQuote?.timestamp, stockOverview?.quote])
+  }, [bars, inSession, liveQuote?.timestamp, stockOverview])
 
   const displayQuote = useMemo(() => {
     if (!stockOverview || !overviewReady) {

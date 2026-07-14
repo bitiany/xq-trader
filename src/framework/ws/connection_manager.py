@@ -104,10 +104,9 @@ class ConnectionManager:
                         await self.disconnect(conn_id)
             except asyncio.CancelledError:
                 break
-            except WsConnectionError:
-                raise
-            except Exception as e:
-                raise WsConnectionError("Heartbeat check failed") from e
+            except Exception:
+                # 单次心跳检查失败不应终止整个心跳任务（长任务必须保持运行）
+                logger.warning("心跳检查异常", exc_info=True)
 
     async def _ping_loop(self) -> None:
         while True:
@@ -126,10 +125,9 @@ class ConnectionManager:
                     await asyncio.gather(*tasks, return_exceptions=True)
             except asyncio.CancelledError:
                 break
-            except WsConnectionError:
-                raise
-            except Exception as e:
-                raise WsConnectionError("Server ping failed") from e
+            except Exception:
+                # 单次 ping 失败不应终止整个 ping 任务
+                logger.warning("服务端 ping 异常", exc_info=True)
 
     async def connect(self, websocket: WebSocket) -> str:
         conn_id = uuid4().hex
@@ -153,9 +151,8 @@ class ConnectionManager:
         if ws and ws.client_state == WebSocketState.CONNECTED:
             try:
                 await ws.close()
-            except WsConnectionError:
-                raise
             except Exception as e:
+                # disconnect 是清理操作，关闭异常不应传播（避免心跳/ping 任务级联退出）
                 logger.warning("关闭 WebSocket 连接异常: conn=%s error=%s", conn_id[:8], e, exc_info=True)
 
         logger.info(f"Connection {conn_id[:8]} disconnected, cleaned {len(topics)} subscriptions")

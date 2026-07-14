@@ -48,7 +48,7 @@ class RSIFactor(FactorPlugin):
         self.params = {"period": period}
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
-        close = df["close"].values.astype(float)
+        close = df["close"].to_numpy(dtype=np.float64)
         rsi = talib.RSI(close, timeperiod=self.period)
         return pd.DataFrame({self.factor_id: rsi}, index=df.index)
 
@@ -78,7 +78,7 @@ class RSIDeltaFactor(FactorPlugin):
         self.params = {"period": period}
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
-        close = df["close"].values.astype(float)
+        close = df["close"].to_numpy(dtype=np.float64)
         rsi = talib.RSI(close, timeperiod=self.period)
         delta = pd.Series(rsi).diff().values
         return pd.DataFrame({self.factor_id: delta}, index=df.index)
@@ -113,9 +113,9 @@ class KDJFactor(FactorPlugin):
         self.params = {"fastk": fastk, "slowk": slowk, "slowd": slowd}
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
-        high = df["high"].values.astype(float)
-        low = df["low"].values.astype(float)
-        close = df["close"].values.astype(float)
+        high = df["high"].to_numpy(dtype=np.float64)
+        low = df["low"].to_numpy(dtype=np.float64)
+        close = df["close"].to_numpy(dtype=np.float64)
         k, d = talib.STOCH(
             high, low, close,
             fastk_period=self.fastk,
@@ -150,9 +150,9 @@ class CCIFactor(FactorPlugin):
         self.params = {"period": period}
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
-        high = df["high"].values.astype(float)
-        low = df["low"].values.astype(float)
-        close = df["close"].values.astype(float)
+        high = df["high"].to_numpy(dtype=np.float64)
+        low = df["low"].to_numpy(dtype=np.float64)
+        close = df["close"].to_numpy(dtype=np.float64)
         cci = talib.CCI(high, low, close, timeperiod=self.period)
         return pd.DataFrame({self.factor_id: cci}, index=df.index)
 
@@ -179,9 +179,9 @@ class WILLRFactor(FactorPlugin):
         self.params = {"period": period}
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
-        high = df["high"].values.astype(float)
-        low = df["low"].values.astype(float)
-        close = df["close"].values.astype(float)
+        high = df["high"].to_numpy(dtype=np.float64)
+        low = df["low"].to_numpy(dtype=np.float64)
+        close = df["close"].to_numpy(dtype=np.float64)
         willr = talib.WILLR(high, low, close, timeperiod=self.period)
         return pd.DataFrame({self.factor_id: willr}, index=df.index)
 

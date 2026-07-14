@@ -16,6 +16,8 @@ export interface IntradaySignal {
   raw_values: Record<string, unknown> | null
   selection_id: number | null
   node_id: string | null
+  /** 信号触发的 1m bar 时间（ISO 字符串，Shanghai 时区），由后端 raw_values 注入并提取到顶层 */
+  trade_time: string | null
   created_at: string
   updated_at: string
 }
@@ -60,7 +62,13 @@ export async function stopIntradayMonitor(): Promise<{ message: string }> {
 
 // ==================== 动态股票池 ====================
 
+export interface PoolItem {
+  symbol: string
+  name: string
+}
+
 export interface DynamicPoolResponse {
+  items: PoolItem[]
   symbols: string[]
   count: number
 }

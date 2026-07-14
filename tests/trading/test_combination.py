@@ -1,12 +1,10 @@
 """组合策略单元测试"""
 
-import pytest
-
 from xqtrader.domain.trading.rules.base import RuleResult
 from xqtrader.domain.trading.rules.combination.and_or import AndCombination, OrCombination
+from xqtrader.domain.trading.rules.combination.ic_weighted import ICWeightedCombination
 from xqtrader.domain.trading.rules.combination.weighted_score import WeightedScoreCombination
 from xqtrader.domain.trading.rules.combination.weighted_vote import WeightedVoteCombination
-from xqtrader.domain.trading.rules.combination.ic_weighted import ICWeightedCombination
 
 
 def _make_result(rule_id: str, passed: bool, score: float = 0.0,

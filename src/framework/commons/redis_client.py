@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import json
+from typing import cast
 
 import redis as redis_lib
 
 from framework.config.settings import settings
+
+# 类型别名：避开 _RedisClient 类内 set 方法对内置 set 的名称遮蔽
+_StrSet = set[str]
 
 
 class _RedisClient:
@@ -54,28 +58,37 @@ class _RedisClient:
 
     def publish(self, channel: str, message: dict) -> int:
         """发布消息到频道。"""
-        return self.client.publish(channel, json.dumps(message, ensure_ascii=False))
+        # redis-py stubs 将同步 Redis 的方法返回类型标注为 Awaitable | Any（兼容 async），
+        # 实际同步客户端返回 int，用 cast 显式断言真实返回类型。
+        return cast(int, self.client.publish(channel, json.dumps(message, ensure_ascii=False)))
 
     def pubsub(self) -> redis_lib.client.PubSub:
         """创建PubSub对象。"""
-        return self.client.pubsub()
+        return cast(redis_lib.client.PubSub, self.client.pubsub())
 
     # ==================== Set 操作 ====================
 
     def sadd(self, name: str, *values: str) -> int:
-        return self.client.sadd(name, *values)
+        return cast(int, self.client.sadd(name, *values))
 
     def srem(self, name: str, *values: str) -> int:
-        return self.client.srem(name, *values)
+        return cast(int, self.client.srem(name, *values))
 
     def scard(self, name: str) -> int:
-        return self.client.scard(name)
+        return cast(int, self.client.scard(name))
 
-    def smembers(self, name: str) -> set:
-        return self.client.smembers(name)
+    def smembers(self, name: str) -> _StrSet:
+        # 注：用模块级 _StrSet 别名，避免 mypy 将 set 误解析为同类内的 set() 方法
+        return cast(set[str], self.client.smembers(name))
 
     def scan(self, cursor: int = 0, match: str | None = None, count: int = 10) -> tuple[int, list[str]]:
         return self.client.scan(cursor=cursor, match=match, count=count)  # type: ignore[return-value]
+
+    # ==================== Hash 操作 ====================
+
+    def hgetall(self, name: str) -> dict[str, str]:
+        """返回 hash 中所有字段-值对（decode_responses=True 时值为 str）。"""
+        return cast(dict[str, str], self.client.hgetall(name))
 
 
 # 全局单例

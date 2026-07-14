@@ -1,31 +1,30 @@
 """表达式引擎单元测试 — 词法分析、语法分析、求值器、算子"""
 
-import pytest
 import pandas as pd
-import numpy as np
+import pytest
 
-from xqtrader.domain.trading.rules.expression.lexer import tokenize, Token, TokenType
-from xqtrader.domain.trading.rules.expression.parser import (
-    parse_expression,
-    NumberNode,
-    IdentifierNode,
-    CompareNode,
-    LogicalNode,
-    FuncCallNode,
-)
 from xqtrader.domain.trading.rules.expression.evaluator import ExpressionEvaluator
+from xqtrader.domain.trading.rules.expression.lexer import TokenType, tokenize
 from xqtrader.domain.trading.rules.expression.operators import (
-    op_rank,
-    op_zscore,
-    op_delta,
-    op_ma,
+    op_abs,
     op_cross_above,
     op_cross_below,
-    op_abs,
+    op_delta,
     op_log,
-    op_sign,
+    op_ma,
     op_max,
     op_min,
+    op_rank,
+    op_sign,
+    op_zscore,
+)
+from xqtrader.domain.trading.rules.expression.parser import (
+    CompareNode,
+    FuncCallNode,
+    IdentifierNode,
+    LogicalNode,
+    NumberNode,
+    parse_expression,
 )
 
 

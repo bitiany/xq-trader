@@ -123,17 +123,15 @@ class TestPaperFullChain:
         # 记录执行前状态
         before_account = await api_client.get(f"{API_PREFIX}/trading/accounts/{PAPER_ACCOUNT_ID}")
         before_cash = float(before_account.json()["data"]["available_cash"])
-        before_positions = await api_client.get(
-            f"{API_PREFIX}/trading/positions",
-            params={"account_id": PAPER_ACCOUNT_ID},
-        )
-        before_pos_count = len(before_positions.json()["data"]["items"])
 
         # 1. 决策流
         decision = await _run_decision(api_client, signal_date, execution_date)
         pre_orders = decision.get("pre_orders") or []
         if not pre_orders:
-            pytest.skip(f"{signal_date} 无预订单产出，跳过单日链路（signals={decision['signals_count']} fusion={decision['fusion_count']}）")
+            pytest.skip(
+                f"{signal_date} 无预订单产出，跳过单日链路"
+                f"（signals={decision['signals_count']} fusion={decision['fusion_count']}）"
+            )
 
         # 2. 审批 + 3. 提交（模拟撮合）
         submitted: list[dict] = []

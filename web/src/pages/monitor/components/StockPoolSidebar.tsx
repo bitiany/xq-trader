@@ -1,10 +1,10 @@
 import { useState, useMemo } from 'react'
 import { useMonitorStore } from '../stores/monitorStore'
-import type { WatchlistItem } from '@/api/trading'
 import '@/pages/monitor/styles/monitor.css'
 
 interface StockPoolSidebarProps {
-  watchlistItems: WatchlistItem[]
+  /** 自选池列表（仅需 symbol + name 字段，由 MonitorDashboardPage 从动态股票池 API 聚合） */
+  watchlistItems: { symbol: string; name?: string }[]
   positionSymbols: { symbol: string; name?: string }[]
 }
 
@@ -53,7 +53,7 @@ export function StockPoolSidebar({ watchlistItems, positionSymbols }: StockPoolS
         <div className="monitor-sidebar__section-title">自选池 ({filteredWatchlist.length})</div>
         {filteredWatchlist.map((item) => (
           <div
-            key={item.id}
+            key={item.symbol}
             className="monitor-sidebar__item"
             draggable
             onDragStart={(e) => handleDragStart(e, item.symbol, item.name ?? item.symbol)}

@@ -116,7 +116,8 @@ class Klow25Factor(FactorPlugin):
         open_ = df["open"].astype(float)
         close = df["close"].astype(float)
         high = df["high"].astype(float)
-        lower_shadow = (np.minimum(open_, close) - low) / (high - low + 1e-12)
+        body_low = pd.Series(np.minimum(open_.to_numpy(), close.to_numpy()), index=df.index)
+        lower_shadow = (body_low - low) / (high - low + 1e-12)
         result = lower_shadow.rolling(5).mean()
         return pd.DataFrame({self.factor_id: result.values}, index=df.index)
 
@@ -244,5 +245,6 @@ class CorrPv10Factor(FactorPlugin):
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         close = df["close"].astype(float)
         volume = df["volume"].astype(float)
-        result = close.rolling(10).corr(np.log1p(volume))
+        log_volume = pd.Series(np.log1p(volume.to_numpy()), index=df.index)
+        result = close.rolling(10).corr(log_volume)
         return pd.DataFrame({self.factor_id: result.values}, index=df.index)

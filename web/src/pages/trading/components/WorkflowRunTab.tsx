@@ -102,6 +102,7 @@ export function WorkflowRunTab({ accountId, onOpenApproval }: WorkflowRunTabProp
     } catch {
       message.error('工作流运行记录加载失败');
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- message 为 antd 稳定引用
   }, [accountId]);
 
   useEffect(() => {
@@ -122,6 +123,7 @@ export function WorkflowRunTab({ accountId, onOpenApproval }: WorkflowRunTabProp
       });
     });
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- message 为 antd 稳定引用
   }, [accountId]);
 
   const handleSubmitOne = useCallback(async (preOrderId: number) => {
@@ -136,6 +138,7 @@ export function WorkflowRunTab({ accountId, onOpenApproval }: WorkflowRunTabProp
     } finally {
       setSubmittingIds((ids) => ids.filter((id) => id !== preOrderId));
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- message 为 antd 稳定引用
   }, [loadPreOrders]);
 
   const handleSubmitBatch = useCallback(async () => {
@@ -158,6 +161,7 @@ export function WorkflowRunTab({ accountId, onOpenApproval }: WorkflowRunTabProp
     } finally {
       setBatchSubmitting(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- message 为 antd 稳定引用
   }, [executablePreOrders, loadPreOrders]);
 
   const orderColumns: ColumnsType<PreOrder> = [

@@ -36,7 +36,10 @@ class TestExecutionSubmitterRouting:
         body = response.json()
         assert body["code"] == 0
         orders = body["data"]["items"]
-        qmt_orders = [item for item in orders if item.get("broker_order_id") and not str(item["broker_order_id"]).startswith("SIM-")]
+        qmt_orders = [
+            item for item in orders
+            if item.get("broker_order_id") and not str(item["broker_order_id"]).startswith("SIM-")
+        ]
         assert qmt_orders, "live 账户应存在 QMT 订单"
         for order in qmt_orders:
             assert order["account_id"] == 11

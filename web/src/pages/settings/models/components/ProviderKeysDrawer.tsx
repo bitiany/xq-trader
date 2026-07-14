@@ -112,6 +112,7 @@ export function ProviderKeysDrawer({ open, provider, onClose }: ProviderKeysDraw
       message.error(err instanceof Error ? err.message : t('common.loadFailed'))
       updateRow(row.rowKey, { saving: false })
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- message 为 antd 稳定引用
   }, [loadKeys, providerCode, t, updateRow])
 
   const handleRemoveDraft = useCallback((rowKey: string) => {
@@ -126,6 +127,7 @@ export function ProviderKeysDrawer({ open, provider, onClose }: ProviderKeysDraw
     } catch (err) {
       message.error(err instanceof Error ? err.message : t('common.loadFailed'))
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- message 为 antd 稳定引用
   }, [loadKeys, t])
 
   const handleAddDraftRow = () => {

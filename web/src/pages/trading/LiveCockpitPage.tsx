@@ -51,7 +51,7 @@ export function LiveCockpitPage() {
   const { message } = App.useApp();
   const [accounts, setAccounts] = useState<TradingAccount[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
-  const [activeDecisionInstanceId, setActiveDecisionInstanceId] = useState<number | null>(null);
+  const [decisionInstance, setDecisionInstance] = useState<{ accountId: number | null; instanceId: number | null }>({ accountId: null, instanceId: null });
   const [historyOpen, setHistoryOpen] = useState(false);
   const [signalHistory, setSignalHistory] = useState<PreOrder[]>([]);
 
@@ -59,6 +59,12 @@ export function LiveCockpitPage() {
     () => accounts.find(account => account.id === selectedAccountId) ?? null,
     [accounts, selectedAccountId],
   );
+
+  // activeDecisionInstanceId 由当前账号与已加载实例的归属关系派生，账号切换时自动归零，避免在 effect 内同步 setState
+  const activeDecisionInstanceId = decisionInstance.accountId === selectedAccountId ? decisionInstance.instanceId : null;
+  const handleDecisionInstanceChange = useCallback((instanceId: number | null) => {
+    setDecisionInstance({ accountId: selectedAccountId, instanceId });
+  }, [selectedAccountId]);
 
   const initFromAsset = useTradingStore((s) => s.initFromAsset);
   const updateFromPnl = useTradingStore((s) => s.updateFromPnl);
@@ -78,15 +84,14 @@ export function LiveCockpitPage() {
   }, []);
 
   useEffect(() => {
-    setActiveDecisionInstanceId(null);
     if (selectedAccountId === null) {
       return;
     }
     let cancelled = false;
     fetchAccountDecisionWorkflowInstance(selectedAccountId).then((instance) => {
-      if (!cancelled) setActiveDecisionInstanceId(instance.id);
+      if (!cancelled) setDecisionInstance({ accountId: selectedAccountId, instanceId: instance.id });
     }).catch(() => {
-      if (!cancelled) setActiveDecisionInstanceId(null);
+      if (!cancelled) setDecisionInstance({ accountId: selectedAccountId, instanceId: null });
     });
     return () => { cancelled = true; };
   }, [selectedAccountId]);
@@ -125,6 +130,7 @@ export function LiveCockpitPage() {
       });
     });
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- message 为 antd 稳定引用
   }, [historyOpen, selectedAccountId]);
 
   const handlePnlUpdate = useCallback((_channel: string, data: TradingPnlData) => {
@@ -184,7 +190,7 @@ export function LiveCockpitPage() {
             <SignalApprovalTab
               accountId={selectedAccountId}
               instanceId={activeDecisionInstanceId}
-              onInstanceChange={setActiveDecisionInstanceId}
+              onInstanceChange={handleDecisionInstanceChange}
               onOpenHistory={() => setHistoryOpen(true)}
             />
           </div>

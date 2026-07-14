@@ -9,7 +9,9 @@ from xqtrader.domain.security.services.stock_detail_service import (
     StockDetailService,
     StockDirectoryService,
     StockFundFlowService,
+    StockIndicatorService,
     StockKlineService,
+    StockTd9Service,
 )
 from xqtrader.domain.security.services.stock_diagnosis_service import StockDiagnosisService
 from xqtrader.domain.security.services.stock_technical_service import (
@@ -25,6 +27,8 @@ _fund_flow_service = StockFundFlowService()
 _chanlun_service = StockChanlunService()
 _technical_service = StockTechnicalService()
 _diagnosis_service = StockDiagnosisService()
+_td9_service = StockTd9Service()
+_indicator_service = StockIndicatorService()
 
 
 @router.get("", summary="查询股票列表")
@@ -94,8 +98,39 @@ async def get_stock_technical(symbol: str) -> dict:
 async def get_stock_chanlun(
     symbol: str,
     period: Literal["daily", "5m", "15m"] = Query(default="daily", description="周期: daily/5m/15m"),
+    display_limit: int = Query(default=120, description="展示K线数量（与前端K线limit一致，缠论内部加载更多数据计算）"),
 ) -> dict:
-    return await _chanlun_service.get_chanlun(symbol, period=period)
+    return await _chanlun_service.get_chanlun(symbol, period=period, display_limit=display_limit)
+
+
+@router.get("/{symbol}/td9", summary="查询个股神奇九转", operation_id="get_stock_td9")
+async def get_stock_td9(
+    symbol: str,
+    period: Literal["daily", "5m", "15m"] = Query(default="daily", description="周期: daily/5m/15m"),
+) -> dict:
+    return await _td9_service.get_td9(symbol, period=period)
+
+
+@router.get(
+    "/{symbol}/indicators",
+    summary="查询个股技术指标（监控大屏专用）",
+    operation_id="get_stock_indicators",
+)
+async def get_stock_indicators(
+    symbol: str,
+    period: Literal["1m", "5m", "15m", "daily"] = Query(default="1m", description="周期: 1m/5m/15m/daily"),
+    main_indicators: str | None = Query(
+        default=None,
+        description="主图指标列表，逗号分隔，如 vwap,ma,boll,donchian。为空时返回全部",
+    ),
+) -> dict:
+    """统一查询个股技术指标（MA/BOLL/Donchian/MACD/RSI/VWAP/TWAP）。
+
+    所有指标由后端统一计算，前端不再重复实现 calcXXX 函数。
+    返回数组索引与 K 线 bars 一一对应，前端按索引渲染即可。
+    """
+    indicators = main_indicators.split(",") if main_indicators else None
+    return await _indicator_service.get_indicators(symbol, period=period, main_indicators=indicators)
 
 
 @router.get("/{symbol}/trend", summary="查询个股趋势诊断", operation_id="get_stock_trend")

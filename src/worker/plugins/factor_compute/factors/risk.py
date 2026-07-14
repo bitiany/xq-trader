@@ -48,7 +48,7 @@ class CsLogMvFactor(FactorPlugin):
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         total_mv = df["total_mv"].astype(float)
         result = np.log1p(total_mv.abs().replace(0, np.nan))
-        return pd.DataFrame({self.factor_id: result.values}, index=df.index)
+        return pd.DataFrame({self.factor_id: np.asarray(result)}, index=df.index)
 
 
 class CsTurnoverFactor(FactorPlugin):
@@ -112,7 +112,7 @@ class CsLogAmountFactor(FactorPlugin):
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         amount = df["amount"].astype(float)
         result = np.log1p(amount.abs().replace(0, np.nan))
-        return pd.DataFrame({self.factor_id: result.values}, index=df.index)
+        return pd.DataFrame({self.factor_id: np.asarray(result)}, index=df.index)
 
 
 class CsVolumeRatioFactor(FactorPlugin):
@@ -188,7 +188,7 @@ class CmraFactor(FactorPlugin):
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         close = df["close"].astype(float)
         ret = close.pct_change()
-        cum_log_ret = np.log1p(ret).cumsum()
+        cum_log_ret = pd.Series(np.log1p(ret.to_numpy()), index=ret.index).cumsum()
         cmra = (
             cum_log_ret.rolling(window=252, min_periods=self.min_periods).max()
             - cum_log_ret.rolling(window=252, min_periods=self.min_periods).min()

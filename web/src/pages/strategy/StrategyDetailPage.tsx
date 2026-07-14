@@ -55,6 +55,7 @@ export function StrategyDetailPage() {
       const msg = isApiError(err) ? err.message : err instanceof Error ? err.message : t('common.loadFailed')
       message.error(msg)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- message 为 antd 稳定引用
   }, [decodedId, navigate, t])
 
   const openConfigEditor = useCallback(() => {
@@ -90,6 +91,7 @@ export function StrategyDetailPage() {
     } finally {
       setSubmitting(false)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- message 为 antd 稳定引用
   }, [configText, detail, reload, t])
 
   const typeColor = (type: StrategyType): string => (type === 'selection' ? 'purple' : 'blue')

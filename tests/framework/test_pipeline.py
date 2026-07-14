@@ -5,8 +5,6 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-import pytest
-
 from framework.pipeline import (
     Aspect,
     Pipeline,
@@ -15,9 +13,6 @@ from framework.pipeline import (
     Stage,
     StageResult,
 )
-from framework.pipeline.errors import PipelineAspectError, PipelineStageError
-from framework.pipeline.models import StageResult as SR
-
 
 # ==================== 测试用 Stage ====================
 

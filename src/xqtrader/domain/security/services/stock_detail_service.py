@@ -21,6 +21,8 @@ from DataAPI.DfApi import _DF_CACHE  # type: ignore[import-not-found]  # noqa: I
 from framework.commons.exceptions import BusinessException, NotFoundException
 from framework.commons.logger import get_logger
 from framework.commons.pagination import build_paginated_response, paginate
+from framework.commons.time_util import today_shanghai
+from xqtrader.domain.market.intraday.indicator_calculator import IndicatorCalculator
 from xqtrader.domain.market.models.balance_sheet import BalanceSheet
 from xqtrader.domain.market.models.candlestick import CandlestickDaily, CandlestickMinute
 from xqtrader.domain.market.models.cash_flow import CashFlowStatement
@@ -411,70 +413,44 @@ class StockKlineService(SecurityMixin):
     def _technical_overlays(self, rows: list[CandlestickDaily]) -> dict[str, dict[str, list[float | None]]]:
         if not rows:
             return {key: {} for key in ["ma", "macd", "rsi", "kdj", "bias", "adx", "boll", "td9"]}
+        # 统一使用 IndicatorCalculator 计算所有技术指标，避免 talib 与自实现两套口径
+        bars = [
+            {
+                "open": r.open, "high": r.high, "low": r.low, "close": r.close,
+                "volume": float(r.volume), "amount": float(r.amount) * 1000,
+            }
+            for r in rows
+        ]
+        calc = IndicatorCalculator.from_dicts(bars)
+
+        # ADX 算法复杂（Wilder 平滑 + DI 计算），保留 talib 实现
         close = np.array([row.close for row in rows], dtype=float)
         high = np.array([row.high for row in rows], dtype=float)
         low = np.array([row.low for row in rows], dtype=float)
+
         ma_periods = [5, 10, 20, 30, 60, 120]
-        ma = {f"ma{p}": StockApiFormatter.series(talib.MA(close, timeperiod=p)) for p in ma_periods}
-        dif, dea, macd = talib.MACD(close, fastperiod=12, slowperiod=26, signalperiod=9)
-        upper, middle, lower = talib.BBANDS(close, timeperiod=20, nbdevup=2, nbdevdn=2)
-        k, d = talib.STOCH(high, low, close, fastk_period=9, slowk_period=3, slowd_period=3)
-        j = 3 * k - 2 * d
+        dif, dea, macd = calc.calc_macd(12, 26, 9)
+        boll = calc.calc_boll(20, 2.0)
+        kdj = calc.calc_kdj(9, 3, 3)
         return {
-            "ma": ma,
-            "macd": {
-                "dif": StockApiFormatter.series(dif),
-                "dea": StockApiFormatter.series(dea),
-                "macd": StockApiFormatter.series(macd * 2),
-            },
-            "rsi": {"rsi14": StockApiFormatter.series(talib.RSI(close, timeperiod=14))},
-            "kdj": {
-                "k": StockApiFormatter.series(k),
-                "d": StockApiFormatter.series(d),
-                "j": StockApiFormatter.series(j),
-            },
-            "bias": self._bias(close),
+            "ma": {f"ma{p}": calc.calc_ma(p) for p in ma_periods},
+            "macd": {"dif": dif, "dea": dea, "macd": macd},
+            "rsi": {"rsi14": calc.calc_rsi(14)},
+            "kdj": kdj,
+            "bias": {f"bias{period}": calc.calc_bias(period) for period in [6, 12, 24]},
             "adx": {
                 "adx": StockApiFormatter.series(talib.ADX(high, low, close, timeperiod=14)),
                 "plus_di": StockApiFormatter.series(talib.PLUS_DI(high, low, close, timeperiod=14)),
                 "minus_di": StockApiFormatter.series(talib.MINUS_DI(high, low, close, timeperiod=14)),
             },
             "boll": {
-                "upper": StockApiFormatter.series(upper),
-                "middle": StockApiFormatter.series(middle),
-                "lower": StockApiFormatter.series(lower),
+                "upper": boll["upper"],
+                # calc_boll 返回 "mid"，前端期望 "middle"，保持兼容
+                "middle": boll["mid"],
+                "lower": boll["lower"],
             },
-            "td9": self._td9(close),
+            "td9": calc.calc_td9(),
         }
-
-    def _bias(self, close: np.ndarray) -> dict[str, list[float | None]]:
-        result: dict[str, list[float | None]] = {}
-        for period in [6, 12, 24]:
-            ma = talib.MA(close, timeperiod=period)
-            bias = np.where((ma == 0) | np.isnan(ma), np.nan, (close - ma) / ma * 100)
-            result[f"bias{period}"] = StockApiFormatter.series(bias)
-        return result
-
-    def _td9(self, close: np.ndarray) -> dict[str, list[float | None]]:
-        buy_setup: list[float | None] = [None] * len(close)
-        sell_setup: list[float | None] = [None] * len(close)
-        buy_count = 0
-        sell_count = 0
-        for index in range(len(close)):
-            if index < 4:
-                continue
-            if close[index] > close[index - 4]:
-                sell_count = sell_count + 1 if sell_count < 9 else 1
-                buy_count = 0
-                sell_setup[index] = float(sell_count)
-            elif close[index] < close[index - 4]:
-                buy_count = buy_count + 1 if buy_count < 9 else 1
-                sell_count = 0
-                buy_setup[index] = float(buy_count)
-            else:
-                buy_count = 0
-                sell_count = 0
-        return {"buy_setup": buy_setup, "sell_setup": sell_setup}
 
 
 class StockFundFlowService(SecurityMixin):
@@ -550,48 +526,11 @@ class StockFundFlowService(SecurityMixin):
         return items
 
 
-class StockChanlunService(SecurityMixin):
-    """个股缠论图形元素服务。
+class StockBarMixin:
+    """K线数据获取混入，提供分钟线查询与 N 分钟聚合能力。
 
-    支持日线和分钟级（5m/15m）缠论计算，底层统一调用 chanpy。
+    供缠论、神奇九转等需要 K 线数据的服务复用，避免重复实现。
     """
-
-    _VALID_PERIODS = frozenset({"daily", "5m", "15m"})
-
-    async def get_chanlun(self, symbol: str, period: str = "daily") -> dict[str, Any]:
-        await self._ensure_security(symbol)
-        if period not in self._VALID_PERIODS:
-            raise BusinessException(
-                message=f"不支持的缠论周期: {period}，仅支持 {sorted(self._VALID_PERIODS)}"
-            )
-        bars: list[dict[str, Any]]
-        kl_type = self._kl_type(period)
-
-        if period == "daily":
-            rows = await CandlestickDaily.filter(
-                symbol=symbol, order_by=CandlestickDaily.trade_date.asc(), limit=12000
-            )
-            if len(rows) < 5:
-                return {"fractals": [], "strokes": [], "pivots": [], "bs_points": []}
-            bars = [StockApiFormatter.bar_item(row) for row in rows]
-        else:
-            # 分钟级：5m / 15m，从 1m 聚合
-            minutes = int(period.rstrip("m"))
-            raw_bars = await self._fetch_minute_bars(symbol, limit=2000)
-            if len(raw_bars) < 5:
-                return {"fractals": [], "strokes": [], "pivots": [], "bs_points": []}
-            bars = self._aggregate_minute_bars(raw_bars, minutes)
-
-        return self._chanlun_visuals(bars, kl_type)
-
-    @staticmethod
-    def _kl_type(period: str) -> Any:
-        """根据周期返回对应的 KL_TYPE。"""
-        if period == "daily":
-            return KL_TYPE.K_DAY
-        if period == "5m":
-            return KL_TYPE.K_5M
-        return KL_TYPE.K_15M
 
     async def _fetch_minute_bars(self, symbol: str, limit: int = 2000) -> list[dict[str, Any]]:
         """查询最新 1m K线（正序）。"""
@@ -615,26 +554,31 @@ class StockChanlunService(SecurityMixin):
 
     @staticmethod
     def _aggregate_minute_bars(bars: list[dict[str, Any]], minutes: int) -> list[dict[str, Any]]:
-        """将 1m bar 列表聚合为 N 分钟 bar 列表。"""
+        """将 1m bar 列表聚合为 N 分钟 bar 列表。
+
+        按 日期 + 时间桶 分桶，避免跨天同时段被错误合并到同一桶。
+        """
         if not bars or minutes <= 1:
             return bars
         result: list[dict[str, Any]] = []
         bucket: list[dict[str, Any]] = []
-        bucket_key = -1
+        bucket_key: tuple[str, int] | None = None
         for bar in bars:
             trade_time = pd.to_datetime(bar["trade_date"])
             total_min = trade_time.hour * 60 + trade_time.minute
-            key = total_min // minutes
-            if bucket_key == -1:
+            # key 包含日期，避免跨天同时段被合并到同一桶
+            key: tuple[str, int] = (trade_time.date().isoformat(), total_min // minutes)
+            if bucket_key is None:
                 bucket_key = key
             if key != bucket_key:
                 if bucket:
-                    result.append(StockChanlunService._merge_bars(bucket, bucket_key, minutes))
+                    result.append(StockBarMixin._merge_bars(bucket, bucket_key[1], minutes))
                 bucket = []
                 bucket_key = key
             bucket.append(bar)
         if bucket:
-            result.append(StockChanlunService._merge_bars(bucket, bucket_key, minutes))
+            assert bucket_key is not None
+            result.append(StockBarMixin._merge_bars(bucket, bucket_key[1], minutes))
         return result
 
     @staticmethod
@@ -653,6 +597,116 @@ class StockChanlunService(SecurityMixin):
             "volume": sum(b["volume"] for b in bucket),
             "amount": sum(b["amount"] for b in bucket),
         }
+
+    async def _load_bars(self, symbol: str, period: str) -> list[dict[str, Any]]:
+        """加载指定周期的 K 线数据（供 IndicatorCalculator 使用）。
+
+        统一数据加载入口，供 StockTd9Service / StockIndicatorService 复用，
+        避免各服务重复实现导致数据口径不一致。
+
+        Returns:
+            bars: bar 字典列表，包含 open/high/low/close/volume/amount
+                  volume 单位为手，amount 单位为元
+        """
+        if period == "daily":
+            # desc 取最近 N 根再 reverse，与 get_kline 口径一致，确保 idx 与前端 K 线对齐
+            daily_rows = await CandlestickDaily.filter(
+                symbol=symbol, order_by=CandlestickDaily.trade_date.desc(), limit=120
+            )
+            daily_rows = list(reversed(daily_rows))
+            # daily amount 单位为千元，转为元以统一 OHLCV 口径
+            bars = [
+                {
+                    "open": r.open, "high": r.high, "low": r.low, "close": r.close,
+                    "volume": float(r.volume), "amount": float(r.amount) * 1000,
+                }
+                for r in daily_rows
+            ]
+        elif period == "1m":
+            # 1m 当天数据，最多 240 根
+            today = today_shanghai()
+            minute_rows = await CandlestickMinute.filter(
+                symbol=symbol, trade_date=today,
+                order_by=CandlestickMinute.trade_time.asc(), limit=240,
+            )
+            bars = [
+                {
+                    "open": r.open, "high": r.high, "low": r.low, "close": r.close,
+                    "volume": r.volume, "amount": r.amount,
+                }
+                for r in minute_rows
+            ]
+        else:
+            # 5m/15m：从 1m 聚合
+            minutes = int(period.rstrip("m"))
+            limit = 1500 if period == "5m" else 3000
+            raw_bars = await self._fetch_minute_bars(symbol, limit=limit)
+            bars = self._aggregate_minute_bars(raw_bars, minutes)
+
+        return bars
+
+
+class StockChanlunService(StockBarMixin, SecurityMixin):
+    """个股缠论图形元素服务。
+
+    支持日线和分钟级（5m/15m）缠论计算，底层统一调用 chanpy。
+    """
+
+    _VALID_PERIODS = frozenset({"daily", "5m", "15m"})
+
+    async def get_chanlun(
+        self, symbol: str, period: str = "daily", display_limit: int = 120,
+    ) -> dict[str, Any]:
+        """查询缠论图形元素。
+
+        缠论计算需要足够的历史数据才能正确识别笔/中枢/分型，
+        因此内部加载大量历史数据（最多 12000 根）进行计算，
+        然后只返回最近 display_limit 根范围内的图形元素，并将 idx 偏移到 0-based。
+
+        Args:
+            symbol: 证券代码
+            period: 周期 daily/5m/15m
+            display_limit: 前端展示的 K 线数量（与前端 K 线 limit 一致）
+        """
+        await self._ensure_security(symbol)
+        if period not in self._VALID_PERIODS:
+            raise BusinessException(
+                message=f"不支持的缠论周期: {period}，仅支持 {sorted(self._VALID_PERIODS)}"
+            )
+        bars: list[dict[str, Any]]
+        kl_type = self._kl_type(period)
+
+        if period == "daily":
+            rows = await CandlestickDaily.filter(
+                symbol=symbol, order_by=CandlestickDaily.trade_date.asc(), limit=12000,
+            )
+            if len(rows) < 5:
+                return {"fractals": [], "strokes": [], "pivots": [], "bs_points": []}
+            bars = [StockApiFormatter.bar_item(row) for row in rows]
+        else:
+            # 分钟级：5m / 15m，从 1m 聚合
+            # 加载足够多的 1m 原始数据进行缠论计算
+            minutes = int(period.rstrip("m"))
+            raw_bars = await self._fetch_minute_bars(symbol, limit=6000)
+            if len(raw_bars) < 5:
+                return {"fractals": [], "strokes": [], "pivots": [], "bs_points": []}
+            bars = self._aggregate_minute_bars(raw_bars, minutes)
+
+        visuals = self._chanlun_visuals(bars, kl_type)
+
+        # 截取最近 display_limit 根范围内的图形元素，并将 idx 偏移到 0-based
+        total = len(bars)
+        offset = max(0, total - display_limit)
+        return self._offset_chanlun_visuals(visuals, offset)
+
+    @staticmethod
+    def _kl_type(period: str) -> Any:
+        """根据周期返回对应的 KL_TYPE。"""
+        if period == "daily":
+            return KL_TYPE.K_DAY
+        if period == "5m":
+            return KL_TYPE.K_5M
+        return KL_TYPE.K_15M
 
     def _chanlun_visuals(self, bars: list[dict[str, Any]], kl_type: Any) -> dict[str, list[dict[str, Any]]]:
         df = pd.DataFrame(bars)
@@ -790,3 +844,193 @@ class StockChanlunService(SecurityMixin):
                 }
             )
         return bs_points
+
+    @staticmethod
+    def _offset_chanlun_visuals(
+        visuals: dict[str, list[dict[str, Any]]], offset: int,
+    ) -> dict[str, list[dict[str, Any]]]:
+        """将缠论图形元素的 idx 偏移到 0-based，并过滤掉 offset 之前的数据。
+
+        缠论计算基于完整历史数据（如 12000 根），但前端只展示最近 N 根。
+        此方法将所有 idx 减去 offset，使最近 N 根的 idx 从 0 开始，
+        同时过滤掉完全在展示范围之外（idx < offset）的元素。
+
+        Args:
+            visuals: _chanlun_visuals 返回的完整图形数据
+            offset: 偏移量（= 总数据量 - 展示数量）
+        """
+        if offset <= 0:
+            return visuals
+
+        # 笔：start_index 和 end_index 都需要偏移，两端都在展示范围外才过滤
+        strokes = []
+        for s in visuals.get("strokes", []):
+            si = s["start_index"] - offset
+            ei = s["end_index"] - offset
+            # 笔的起点可能在展示范围外，但终点在范围内，仍需保留（笔从左边延伸进来）
+            if ei < 0:
+                continue
+            s2 = dict(s)
+            s2["start_index"] = max(0, si)
+            s2["end_index"] = ei
+            strokes.append(s2)
+
+        # 中枢：start_index 和 end_index 同理
+        pivots = []
+        for p in visuals.get("pivots", []):
+            si = p["start_index"] - offset
+            ei = p["end_index"] - offset
+            if ei < 0:
+                continue
+            p2 = dict(p)
+            p2["start_index"] = max(0, si)
+            p2["end_index"] = ei
+            pivots.append(p2)
+
+        # 分型：单个 index
+        fractals = []
+        for f in visuals.get("fractals", []):
+            fi = f["index"] - offset
+            if fi < 0:
+                continue
+            f2 = dict(f)
+            f2["index"] = fi
+            fractals.append(f2)
+
+        # 买卖点：单个 index
+        bs_points = []
+        for b in visuals.get("bs_points", []):
+            bi = b["index"] - offset
+            if bi < 0:
+                continue
+            b2 = dict(b)
+            b2["index"] = bi
+            bs_points.append(b2)
+
+        return {
+            "fractals": fractals,
+            "strokes": strokes,
+            "pivots": pivots,
+            "bs_points": bs_points,
+        }
+
+
+class StockTd9Service(StockBarMixin, SecurityMixin):
+    """个股神奇九转（TD Sequential）服务。
+
+    支持日线和分钟级（5m/15m）TD9 计算，算法统一由 IndicatorCalculator 提供。
+    周期数据获取方式与缠论服务统一：daily 查日线表，5m/15m 从 1m 聚合。
+    """
+
+    _VALID_PERIODS = frozenset({"daily", "5m", "15m"})
+
+    async def get_td9(self, symbol: str, period: str = "daily") -> dict[str, list[float | None]]:
+        await self._ensure_security(symbol)
+        if period not in self._VALID_PERIODS:
+            raise BusinessException(
+                message=f"不支持的 TD9 周期: {period}，仅支持 {sorted(self._VALID_PERIODS)}"
+            )
+
+        # 复用 StockBarMixin._load_bars 统一数据加载口径，确保 idx 与前端 K 线对齐
+        bars = await self._load_bars(symbol, period)
+        if len(bars) < 5:
+            return {"buy_setup": [], "sell_setup": []}
+
+        calc = IndicatorCalculator.from_dicts(bars)
+        return calc.calc_td9()
+
+
+class StockIndicatorService(StockBarMixin, SecurityMixin):
+    """个股技术指标统一计算服务（监控大屏专用）。
+
+    设计要点：
+    - 所有技术指标（MA/BOLL/Donchian/MACD/RSI/VWAP/TWAP）统一由 IndicatorCalculator 计算
+    - 算法口径与 signal_calculators.py 完全一致，前端不再重复实现
+    - 支持 1m/5m/15m/daily 四种周期
+    - 1m 周期额外计算 VWAP/TWAP（分时均线）
+    - 返回数组索引与 K 线 bars 一一对应，前端直接按索引渲染
+
+    职责单一：仅负责数据加载与指标调度，不涉及信号触发或持久化。
+    """
+
+    _VALID_PERIODS = frozenset({"1m", "5m", "15m", "daily"})
+
+    async def get_indicators(
+        self,
+        symbol: str,
+        period: str = "1m",
+        main_indicators: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """计算指定周期的所有技术指标。
+
+        Args:
+            symbol: 证券代码，如 600000.SH
+            period: 周期，1m/5m/15m/daily
+            main_indicators: 主图指标列表，如 ["vwap", "ma", "boll", "donchian"]
+                              为空时返回全部主图指标
+
+        Returns:
+            {
+                "ma5": [...], "ma20": [...],
+                "boll": {"upper": [...], "mid": [...], "lower": [...]},
+                "donchian": {"upper": [...], "lower": [...]},
+                "macd": {"dif": [...], "dea": [...], "macd": [...]},
+                "rsi": [...],
+                "vwap": [...],  # 仅 1m 周期
+                "twap": [...],  # 仅 1m 周期
+            }
+        """
+        await self._ensure_security(symbol)
+        if period not in self._VALID_PERIODS:
+            raise BusinessException(
+                message=f"不支持的指标周期: {period}，仅支持 {sorted(self._VALID_PERIODS)}"
+            )
+
+        bars = await self._load_bars(symbol, period)
+        if not bars:
+            return self._empty_result(period)
+
+        calc = IndicatorCalculator.from_dicts(bars)
+
+        # 副图指标始终计算
+        dif, dea, macd = calc.calc_macd(12, 26, 9)
+        rsi = calc.calc_rsi(14)
+
+        result: dict[str, Any] = {
+            "macd": {"dif": dif, "dea": dea, "macd": macd},
+            "rsi": rsi,
+        }
+
+        # 主图指标按需计算
+        requested = set(main_indicators) if main_indicators else {"ma", "boll", "donchian", "vwap"}
+        if period == "1m":
+            # 1m 分时图始终计算 VWAP/TWAP（分时图核心元素）
+            requested |= {"vwap"}
+
+        if "ma" in requested:
+            result["ma5"] = calc.calc_ma(5)
+            result["ma20"] = calc.calc_ma(20)
+
+        if "boll" in requested:
+            result["boll"] = calc.calc_boll(20, 2.0)
+
+        if "donchian" in requested:
+            result["donchian"] = calc.calc_donchian(20)
+
+        if "vwap" in requested and period == "1m":
+            result["vwap"] = calc.calc_vwap()
+            result["twap"] = calc.calc_twap()
+
+        return result
+
+    @staticmethod
+    def _empty_result(period: str) -> dict[str, Any]:
+        """空数据返回。"""
+        result: dict[str, Any] = {
+            "macd": {"dif": [], "dea": [], "macd": []},
+            "rsi": [],
+        }
+        if period == "1m":
+            result["vwap"] = []
+            result["twap"] = []
+        return result

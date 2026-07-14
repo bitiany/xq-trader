@@ -44,7 +44,7 @@ class Alpha12Factor(FactorPlugin):
         open_ = df["open"].astype(float)
         volume = df["volume"].astype(float)
         result = np.sign(volume.diff()) * -(close - open_).diff()
-        return pd.DataFrame({self.factor_id: result.values}, index=df.index)
+        return pd.DataFrame({self.factor_id: np.asarray(result)}, index=df.index)
 
 
 class Alpha101Factor(FactorPlugin):
@@ -169,4 +169,4 @@ class Alpha41Factor(FactorPlugin):
         geo_mean = np.sqrt(np.where((high > 0) & (low > 0), high * low, np.nan))
         arith_mean = (high + low + close) / 3
         result = geo_mean - arith_mean
-        return pd.DataFrame({self.factor_id: result.values}, index=df.index)
+        return pd.DataFrame({self.factor_id: np.asarray(result)}, index=df.index)

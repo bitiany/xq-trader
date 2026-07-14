@@ -63,6 +63,7 @@ export function RiskSidePanel({ accountId, instanceId, onOpenHistory }: RiskSide
       });
     });
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- message 为 antd 稳定引用
   }, [accountId, instanceId]);
 
   const handleToggleRule = useCallback(async (ruleId: number, enabled: boolean) => {
@@ -72,6 +73,7 @@ export function RiskSidePanel({ accountId, instanceId, onOpenHistory }: RiskSide
     } catch {
       message.error('更新失败');
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- message 为 antd 稳定引用
   }, []);
 
   const handleResolveEvent = useCallback(async (eventId: number) => {
@@ -82,6 +84,7 @@ export function RiskSidePanel({ accountId, instanceId, onOpenHistory }: RiskSide
     } catch {
       message.error('处理失败');
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- message 为 antd 稳定引用
   }, []);
 
   const showKillSwitchResult = useCallback((result: KillSwitchResult) => {
@@ -100,6 +103,7 @@ export function RiskSidePanel({ accountId, instanceId, onOpenHistory }: RiskSide
     } else {
       message.success(summary);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- message 为 antd 稳定引用
   }, []);
 
   const handleKillSwitch = useCallback(() => {
@@ -145,6 +149,7 @@ export function RiskSidePanel({ accountId, instanceId, onOpenHistory }: RiskSide
         }
       },
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- message 为 antd 稳定引用
   }, [accountId, instanceId, showKillSwitchResult]);
 
   const enabledCount = rules.filter(r => r.is_enabled).length;

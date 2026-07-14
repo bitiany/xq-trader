@@ -90,10 +90,10 @@ class CdlBullFreqFactor(FactorPlugin):
     data_origin: str = "computed"
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
-        o = df["open"].values.astype(float)
-        h = df["high"].values.astype(float)
-        low_ = df["low"].values.astype(float)
-        c = df["close"].values.astype(float)
+        o = df["open"].to_numpy(dtype=np.float64)
+        h = df["high"].to_numpy(dtype=np.float64)
+        low_ = df["low"].to_numpy(dtype=np.float64)
+        c = df["close"].to_numpy(dtype=np.float64)
         bull_count, _ = _classify_cdl_patterns(o, h, low_, c)
         freq = pd.Series(bull_count).rolling(window=20, min_periods=self.min_periods).sum().values
         return pd.DataFrame({self.factor_id: freq}, index=df.index)
@@ -115,10 +115,10 @@ class CdlBearFreqFactor(FactorPlugin):
     data_origin: str = "computed"
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
-        o = df["open"].values.astype(float)
-        h = df["high"].values.astype(float)
-        low_ = df["low"].values.astype(float)
-        c = df["close"].values.astype(float)
+        o = df["open"].to_numpy(dtype=np.float64)
+        h = df["high"].to_numpy(dtype=np.float64)
+        low_ = df["low"].to_numpy(dtype=np.float64)
+        c = df["close"].to_numpy(dtype=np.float64)
         _, bear_count = _classify_cdl_patterns(o, h, low_, c)
         freq = pd.Series(bear_count).rolling(window=20, min_periods=self.min_periods).sum().values
         return pd.DataFrame({self.factor_id: freq}, index=df.index)
@@ -143,10 +143,10 @@ class CdlNetScoreFactor(FactorPlugin):
     data_origin: str = "computed"
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
-        o = df["open"].values.astype(float)
-        h = df["high"].values.astype(float)
-        low_ = df["low"].values.astype(float)
-        c = df["close"].values.astype(float)
+        o = df["open"].to_numpy(dtype=np.float64)
+        h = df["high"].to_numpy(dtype=np.float64)
+        low_ = df["low"].to_numpy(dtype=np.float64)
+        c = df["close"].to_numpy(dtype=np.float64)
         bull_count, bear_count = _classify_cdl_patterns(o, h, low_, c)
         bull_sum = pd.Series(bull_count).rolling(window=20, min_periods=self.min_periods).sum()
         bear_sum = pd.Series(bear_count).rolling(window=20, min_periods=self.min_periods).sum()
@@ -174,10 +174,10 @@ class CdlUpperShadowRatioFactor(FactorPlugin):
     data_origin: str = "computed"
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
-        o = df["open"].values.astype(float)
-        h = df["high"].values.astype(float)
-        low_ = df["low"].values.astype(float)
-        c = df["close"].values.astype(float)
+        o = df["open"].to_numpy(dtype=np.float64)
+        h = df["high"].to_numpy(dtype=np.float64)
+        low_ = df["low"].to_numpy(dtype=np.float64)
+        c = df["close"].to_numpy(dtype=np.float64)
         body_high = np.maximum(o, c)
         hl_range = h - low_
         # 避免 hl_range=0 时除法产生 RuntimeWarning（涨停/跌停 H==L）
@@ -207,10 +207,10 @@ class CdlLowerShadowRatioFactor(FactorPlugin):
     data_origin: str = "computed"
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
-        o = df["open"].values.astype(float)
-        h = df["high"].values.astype(float)
-        low_ = df["low"].values.astype(float)
-        c = df["close"].values.astype(float)
+        o = df["open"].to_numpy(dtype=np.float64)
+        h = df["high"].to_numpy(dtype=np.float64)
+        low_ = df["low"].to_numpy(dtype=np.float64)
+        c = df["close"].to_numpy(dtype=np.float64)
         body_low = np.minimum(o, c)
         hl_range = h - low_
         # 避免 hl_range=0 时除法产生 RuntimeWarning（涨停/跌停 H==L）
@@ -240,10 +240,10 @@ class CdlBodyRatioFactor(FactorPlugin):
     data_origin: str = "computed"
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
-        o = df["open"].values.astype(float)
-        h = df["high"].values.astype(float)
-        low_ = df["low"].values.astype(float)
-        c = df["close"].values.astype(float)
+        o = df["open"].to_numpy(dtype=np.float64)
+        h = df["high"].to_numpy(dtype=np.float64)
+        low_ = df["low"].to_numpy(dtype=np.float64)
+        c = df["close"].to_numpy(dtype=np.float64)
         body = np.abs(c - o)
         hl_range = h - low_ + 0.001
         body_ratio = body / hl_range

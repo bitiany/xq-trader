@@ -2,6 +2,7 @@
 export const TOPIC_BROKER_STATUS = 'ws.broker.status'
 export const TOPIC_TRADING_PNL = 'ws.trading.pnl'
 export const TOPIC_MARKET_WATCHLIST_QUOTES = 'ws.market.watchlist_quotes'
+export const TOPIC_INTRADAY_SIGNAL = 'ws.intraday.signal'
 
 // ── WS 数据类型 ──
 export interface BrokerStatusData {
@@ -46,6 +47,23 @@ export interface WatchlistQuotesData {
   items: WatchlistQuoteItem[]
   timestamp: number
   reason?: string
+}
+
+// ── 盘内分时信号（5 类核心信号） ──
+export interface IntradaySignalData {
+  id: number
+  instance_id: number
+  signal_date: string
+  symbol: string
+  name?: string
+  direction: 'long' | 'short' | 'neutral'
+  strength: number | null
+  signal_type: string | null
+  signal_source: string
+  raw_values?: Record<string, unknown> | null
+  resonance?: string[] | null
+  trade_time?: string | null
+  created_at?: string | null
 }
 
 // ── WS 连接 ──

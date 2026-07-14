@@ -129,6 +129,7 @@ export function StrategyListPage() {
     } finally {
       setSubmitting(false)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- message 为 antd 稳定引用
   }, [editTarget, form, reload, t])
 
   const handleDelete = useCallback(
@@ -142,6 +143,7 @@ export function StrategyListPage() {
         message.error(msg)
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- message 为 antd 稳定引用
     [reload, t],
   )
 

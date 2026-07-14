@@ -240,6 +240,7 @@ export function SignalApprovalTab({
       });
     });
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- message 为 antd 稳定引用
   }, [accountId, instanceId, reloadPendingData]);
 
   const handleRunWorkflow = useCallback(async () => {
@@ -264,6 +265,7 @@ export function SignalApprovalTab({
     } finally {
       setWorkflowRunning(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- message 为 antd 稳定引用
   }, [accountId, onInstanceChange, reloadPendingData]);
 
   const openApprovalDialog = useCallback((po: PreOrder) => {
@@ -321,6 +323,7 @@ export function SignalApprovalTab({
     } finally {
       setApprovalSubmitting(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- message 为 antd 稳定引用
   }, [approvalForm, approvalTarget]);
 
   const handleReject = useCallback(async (preOrderId: number) => {
@@ -334,6 +337,7 @@ export function SignalApprovalTab({
     } finally {
       setRejectingId(null);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- message 为 antd 稳定引用
   }, []);
 
   const handleBatchApprove = useCallback(async () => {
@@ -352,6 +356,7 @@ export function SignalApprovalTab({
     } finally {
       setBatchSubmitting(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- message 为 antd 稳定引用
   }, [preOrders]);
 
   const handleBatchReject = useCallback(async () => {
@@ -370,6 +375,7 @@ export function SignalApprovalTab({
     } finally {
       setBatchSubmitting(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- message 为 antd 稳定引用
   }, [preOrders]);
 
   return (

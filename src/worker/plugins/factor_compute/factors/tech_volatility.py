@@ -51,9 +51,9 @@ class ATRRatioFactor(FactorPlugin):
         self.params = {"period": period}
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
-        high = df["high"].values.astype(float)
-        low = df["low"].values.astype(float)
-        close = df["close"].values.astype(float)
+        high = df["high"].to_numpy(dtype=np.float64)
+        low = df["low"].to_numpy(dtype=np.float64)
+        close = df["close"].to_numpy(dtype=np.float64)
         atr = talib.ATR(high, low, close, timeperiod=self.period)
         ratio = np.where(close != 0, atr / close, np.nan)
         return pd.DataFrame({self.factor_id: ratio}, index=df.index)
@@ -82,9 +82,9 @@ class ATRRatioDeltaFactor(FactorPlugin):
         self.params = {"period": period}
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
-        high = df["high"].values.astype(float)
-        low = df["low"].values.astype(float)
-        close = df["close"].values.astype(float)
+        high = df["high"].to_numpy(dtype=np.float64)
+        low = df["low"].to_numpy(dtype=np.float64)
+        close = df["close"].to_numpy(dtype=np.float64)
         atr = talib.ATR(high, low, close, timeperiod=self.period)
         ratio = np.where(close != 0, atr / close, np.nan)
         delta = pd.Series(ratio).diff().values
@@ -139,9 +139,9 @@ class NatrFactor(FactorPlugin):
         self.params = {"period": period}
 
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
-        high = df["high"].values.astype(float)
-        low = df["low"].values.astype(float)
-        close = df["close"].values.astype(float)
+        high = df["high"].to_numpy(dtype=np.float64)
+        low = df["low"].to_numpy(dtype=np.float64)
+        close = df["close"].to_numpy(dtype=np.float64)
         natr = talib.NATR(high, low, close, timeperiod=self.period)
         return pd.DataFrame({self.factor_id: natr}, index=df.index)
 

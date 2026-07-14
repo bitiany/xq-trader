@@ -49,6 +49,7 @@ export function OrderFlowTab({ accountId }: OrderFlowTabProps) {
       });
     });
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- message 为 antd 稳定引用
   }, [accountId]);
 
   const columns = useMemo(() => [

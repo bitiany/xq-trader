@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+import httpx
 import pytest
 import yaml  # type: ignore[import-untyped]
-import httpx
 
 from mcp_server.config import SourceSection
 from mcp_server.openapi.loader import OpenApiLoader

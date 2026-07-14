@@ -67,6 +67,7 @@ export function SelectionHistoryPage() {
     return () => {
       cancelled = true
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- message 为 antd 稳定引用
   }, [strategyId, t])
 
   const handleQuery = useCallback(async () => {
@@ -91,6 +92,7 @@ export function SelectionHistoryPage() {
     } finally {
       setLoading(false)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- message 为 antd 稳定引用
   }, [signalDate, strategyId, t])
 
   const scoreBounds = useMemo(() => {

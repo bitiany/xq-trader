@@ -714,7 +714,7 @@ export function StockKlineChart({
       ],
       series,
     }
-  }, [allOverlays, bars, fundFlowItems, hasBars, mainIndicator, subIndicator, initialZoom, mainMa, pivotSeries, showTd9, strokeSeries, t, tradeMarkerSeries])
+  }, [allOverlays, bars, bspSeries, fundFlowItems, hasBars, mainIndicator, subIndicator, initialZoom, mainMa, pivotSeries, showTd9, strokeSeries, t, tradeMarkerSeries])
 
   const resizeCleanupRef = useRef<(() => void) | null>(null)
 
