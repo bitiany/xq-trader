@@ -208,7 +208,10 @@ class CZS(Generic[LINE_TYPE]):
                 break
             if (self.bi_out.is_down() and bi._low() < self.bi_out._low()) or (self.bi_out.is_up() and bi._high() > self.bi_out._high()):
                 return False, None
-            r = abs(bi.get_end_val()-self.bi_out.get_end_val())/self.bi_out.get_end_val()
+            bi_out_end = self.bi_out.get_end_val()
+            if bi_out_end == 0:
+                return False, None
+            r = abs(bi.get_end_val() - bi_out_end) / bi_out_end
             if r < peak_rate:
                 peak_rate = r
         return True, peak_rate

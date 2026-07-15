@@ -49,7 +49,8 @@ class MABiasFactor(FactorPlugin):
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         close = df["close"].to_numpy(dtype=np.float64)
         ma = talib.MA(close, timeperiod=self.period)
-        bias = np.where(close != 0, ma / close - 1, np.nan)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            bias = np.where(close != 0, ma / close - 1, np.nan)
         return pd.DataFrame({self.factor_id: bias}, index=df.index)
 
 
@@ -83,6 +84,7 @@ class MABiasDeltaFactor(FactorPlugin):
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         close = df["close"].to_numpy(dtype=np.float64)
         ma = talib.MA(close, timeperiod=self.period)
-        bias = np.where(close != 0, ma / close - 1, np.nan)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            bias = np.where(close != 0, ma / close - 1, np.nan)
         bias_delta = pd.Series(bias).diff().values
         return pd.DataFrame({self.factor_id: bias_delta}, index=df.index)
