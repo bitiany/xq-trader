@@ -611,6 +611,7 @@
       "startDate": "开始日期",
       "forceRefresh": "强制刷新",
       "confirmTrigger": "确认触发",
+      "selectAction": "请选择动作",
       "status": {
         "idle": "空闲",
         "running": "运行中",

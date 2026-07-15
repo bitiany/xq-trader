@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { App, Button, DatePicker, Form, Modal, Switch } from 'antd'
+import { useMemo, useState } from 'react'
+import { App, Button, DatePicker, Form, Modal, Select, Switch } from 'antd'
 import dayjs from 'dayjs'
 import {
   BarChart3,
@@ -47,6 +47,32 @@ function statusClass(status: string): string {
 interface TriggerParamsFormValues {
   start_date: dayjs.Dayjs | null
   force_refresh: boolean
+  action?: string
+}
+
+// 从 params_schema 提取 enum 类型字段（如 intraday_control 的 action）
+interface EnumField {
+  name: string
+  title: string
+  options: { label: string; value: string }[]
+}
+
+function extractEnumFields(schema: Record<string, unknown> | null): EnumField[] {
+  if (!schema) return []
+  const props = schema.properties as Record<string, Record<string, unknown>> | undefined
+  if (!props) return []
+  const result: EnumField[] = []
+  for (const [name, def] of Object.entries(props)) {
+    const enumValues = def.enum as string[] | undefined
+    if (Array.isArray(enumValues) && enumValues.length > 0) {
+      result.push({
+        name,
+        title: (def.title as string) || name,
+        options: enumValues.map((v) => ({ label: v, value: v })),
+      })
+    }
+  }
+  return result
 }
 
 export function TaskCard({ task, onRefresh }: TaskCardProps) {
@@ -59,7 +85,17 @@ export function TaskCard({ task, onRefresh }: TaskCardProps) {
   const [triggering, setTriggering] = useState(false)
   const [form] = Form.useForm<TriggerParamsFormValues>()
 
+  // 识别 params_schema 中的 enum 字段（如 intraday_control 的 action: start/stop）
+  const enumFields = useMemo(() => extractEnumFields(task.params_schema), [task.params_schema])
+  const hasEnumParams = enumFields.length > 0
+
   const handleDirectTrigger = async () => {
+    // 含 enum 参数的任务必须通过参数设置弹窗选择动作，不能直接触发
+    if (hasEnumParams) {
+      form.resetFields()
+      setSettingsVisible(true)
+      return
+    }
     try {
       setTriggering(true)
       const result = await triggerCollectTask(task.task_id)
@@ -91,6 +127,10 @@ export function TaskCard({ task, onRefresh }: TaskCardProps) {
       }
       if (values.force_refresh) {
         params.force_refresh = true
+      }
+      for (const field of enumFields) {
+        const v = values[field.name as keyof TriggerParamsFormValues] as string | undefined
+        if (v) params[field.name] = v
       }
       const result = await triggerCollectTask(task.task_id, params)
       if (result.queued) {
@@ -166,6 +206,16 @@ export function TaskCard({ task, onRefresh }: TaskCardProps) {
         destroyOnClose
       >
         <Form form={form} layout="vertical" initialValues={{ force_refresh: false }}>
+          {enumFields.map((field) => (
+            <Form.Item
+              key={field.name}
+              name={field.name}
+              label={field.title}
+              rules={[{ required: true, message: t('data.tasks.selectAction') }]}
+            >
+              <Select options={field.options} placeholder={t('data.tasks.selectAction')} />
+            </Form.Item>
+          ))}
           <Form.Item name="start_date" label={t('data.tasks.startDate')}>
             <DatePicker style={{ width: '100%' }} />
           </Form.Item>

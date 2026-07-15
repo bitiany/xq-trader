@@ -611,6 +611,7 @@
       "endDate": "End Date",
       "forceRefresh": "Force Refresh",
       "confirmTrigger": "Confirm Trigger",
+      "selectAction": "Select action",
       "status": {
         "idle": "Idle",
         "running": "Running",

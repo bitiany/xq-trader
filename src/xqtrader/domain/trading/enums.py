@@ -54,6 +54,25 @@ class SignalSource:
     INTRADAY = "intraday"  # 盘内监控产出
 
 
+class IntradaySignalType:
+    """盘内分时信号类型 — 5 类核心信号 + 共振信号
+
+    对应分时图上的信号分析场景（不做 T+0 交易，仅判断当日信号）。
+    1. VWAP 突破/跌破：价格穿越 VWAP 日内多空分水岭
+    2. TWAP 偏离预警：价格偏离日内公平均价超过阈值
+    3. MACD 金叉/死叉：DIF 与 DEA 交叉
+    4. RSI 超买/超卖：RSI 进入极端区域
+    5. 量价背离：价创新高/低但量未配合
+    6. 共振信号：同一根 bar 有 2+ 信号同方向触发
+    """
+    VWAP_BREAKTHROUGH = "vwap_breakthrough"  # VWAP 突破/跌破
+    TWAP_DEVIATION = "twap_deviation"        # TWAP 偏离预警
+    MACD_CROSS = "macd_cross"                # MACD 金叉/死叉
+    RSI_EXTREME = "rsi_extreme"              # RSI 超买/超卖
+    VOLUME_PRICE_DIVERGENCE = "volume_price_divergence"  # 量价背离
+    RESONANCE = "resonance"                  # 共振信号（多维度指标一致）
+
+
 class PreOrderSide:
     """预订单操作方向"""
     OPEN = "open"

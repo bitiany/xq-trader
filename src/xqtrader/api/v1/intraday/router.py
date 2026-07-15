@@ -70,16 +70,23 @@ async def get_intraday_status() -> dict:
 
 @router.get("/pool", summary="查询动态股票池")
 async def get_dynamic_pool() -> dict:
-    """查询当前动态股票池（自选+持仓+已审批 pre_order 去重）。"""
+    """查询当前动态股票池（自选+持仓+已审批 pre_order 去重）。
+
+    返回包含标的名称的列表，用于前端展示。
+    """
     symbols = await load_dynamic_stock_pool()
-    return {"symbols": symbols, "count": len(symbols)}
+    # 查询 Security 表补充名称
+    securities = await Security.filter(symbol__in=symbols, limit=None) if symbols else []
+    name_map = {sec.symbol: sec.name for sec in securities if sec.name}
+    items = [{"symbol": s, "name": name_map.get(s, s)} for s in symbols]
+    return {"items": items, "symbols": symbols, "count": len(symbols)}
 
 
 @router.get("/minute-bars", summary="查询分钟线数据")
 async def get_minute_bars(
     symbol: str = Query(..., description="证券代码，如 600000.SH"),
     trade_date: date | None = Query(None, description="交易日期，不传时返回最新可用数据"),
-    limit: int = Query(240, ge=1, le=2000, description="返回条数上限"),
+    limit: int = Query(240, ge=1, le=5000, description="返回条数上限"),
 ) -> dict:
     """查询分钟级 K 线数据。
 
@@ -189,6 +196,13 @@ async def get_intraday_signals(
     for s in items:
         d = s.to_dict()
         d["name"] = name_map.get(s.symbol, s.symbol)
+        # 从 raw_values 提取 trade_time 到顶层字段
+        # （TradingSignal 表无独立 trade_time 字段，由 signal_engine 持久化时注入）
+        raw_values = d.get("raw_values") or {}
+        if isinstance(raw_values, dict):
+            d["trade_time"] = raw_values.get("trade_time")
+        else:
+            d["trade_time"] = None
         result_items.append(d)
 
     return build_paginated_response(result_items, total, page, page_size)

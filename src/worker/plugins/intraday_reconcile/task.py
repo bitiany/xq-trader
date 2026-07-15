@@ -132,7 +132,9 @@ class IntradayReconcileTask(BaseTask):
         Returns:
             写入的记录数
         """
-        start_time = trade_date.strftime("%Y%m%d")
+        # start_time 和 end_time 必须使用相同位数格式（14位 YYYYMMDDHHMMSS），
+        # 否则 QMT xtdata 无法正确解析时间范围。
+        start_time = f"{trade_date.strftime('%Y%m%d')}093000"
         # end_time 含当日 15:00，确保拿到完整交易日
         end_time = f"{trade_date.strftime('%Y%m%d')}150000"
 

@@ -30,10 +30,13 @@ class IntradayControlTask(BaseTask):
     prevent_concurrent = False
 
     def _run_impl(self, **kwargs: Any) -> dict[str, Any]:
-        action: str = kwargs.get("action", "")
+        action: str = (kwargs.get("action") or "").strip()
 
         if action not in ("start", "stop"):
-            raise ValueError(f"无效的 action: {action}，仅支持 start/stop")
+            raise ValueError(
+                f"无效的 action: '{action}'，仅支持 start/stop。"
+                f"请在任务中心触发时选择动作（start 启动 / stop 停止）。"
+            )
 
         publish_control(action)
 

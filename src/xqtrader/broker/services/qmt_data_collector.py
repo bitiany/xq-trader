@@ -24,7 +24,7 @@ class QmtDataCollector:
     """
 
     _LOCK_TIMEOUT = 300             # 锁等待超时（connect/get_full_tick/get_market_data_ex 等）
-    _DOWNLOAD_TIMEOUT = 120         # download_history_data2 超时（秒），防止废弃代码导致永久挂起
+    _DOWNLOAD_TIMEOUT = 300         # download_history_data2 超时（秒），首次下载需从服务器拉取，120s 不够
     _xtdata_lock = threading.Lock()
 
     @classmethod
@@ -272,10 +272,12 @@ class QmtDataCollector:
     ) -> dict[str, Any]:
         """同步方法：下载并获取分钟级K线数据。
 
-        与日线不同：download_history_data2 指定 end_time（分钟线需精确控制范围）。
+        使用 download_history_data（单标的API）逐个下载，而非 download_history_data2（批量API）。
+        原因：download_history_data2 对已有部分缓存的数据不会重新下载，导致数据不完整。
         """
-        # 阶段 1: 下载补缓存
-        xtdata.download_history_data2(stock_list, period, start_time, end_time)
+        # 阶段 1: 逐个标的下载补缓存
+        for sym in stock_list:
+            xtdata.download_history_data(sym, period, start_time, end_time)
 
         # 阶段 2: 读取数据
         raw = xtdata.get_market_data_ex(

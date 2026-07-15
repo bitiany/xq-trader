@@ -177,6 +177,11 @@ class Base(DeclarativeBase):
                     conditions.append(column <= value)
                 elif operator == 'ne':
                     conditions.append(column != value)
+                elif operator == 'isnull':
+                    if value:
+                        conditions.append(column.is_(None))
+                    else:
+                        conditions.append(column.isnot(None))
             else:
                 # 简单等值查询
                 column = getattr(cls, key, None)
