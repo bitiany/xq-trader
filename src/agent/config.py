@@ -36,7 +36,7 @@ class AgentSettings:
         self.LLM_API_KEY = os.getenv("LLM_API_KEY", "")
         self.LLM_MODEL_NAME = os.getenv(
             "AGENT_LLM_MODEL_NAME",
-            os.getenv("LLM_MODEL_NAME", "Qwen/Qwen3-235B-A22B-Instruct-2507"),
+            os.getenv("LLM_MODEL_NAME", "Qwen/Qwen3-235B-A22B-Thinking-2507"),
         )
         self.WORKSPACE = os.getenv("AGENT_WORKSPACE", str(_AGENT_ROOT / "workspace"))
         self.MAX_CONCURRENT_RUNS = int(os.getenv("AGENT_MAX_CONCURRENT_RUNS", "1"))
@@ -56,12 +56,12 @@ class AgentSettings:
             for g in os.getenv(
                 "MCP_GROUPS",
                 "stocks,factors,strategies,selection,positions,indices,research,sentiment,"
-                "research_thesis,investor_profile",
+                "research_thesis,investor_profile,events",
             ).split(",")
             if g.strip()
         ]
         self.MCP_TOOL_TIMEOUT = int(os.getenv("MCP_TOOL_TIMEOUT", "30"))
-        self.MAX_TOOL_ITERATIONS = int(os.getenv("AGENT_MAX_TOOL_ITERATIONS", "25"))
+        self.MAX_TOOL_ITERATIONS = int(os.getenv("AGENT_MAX_TOOL_ITERATIONS", "50"))
         self.MAX_SUBAGENT_ITERATIONS = int(
             os.getenv("AGENT_MAX_SUBAGENT_ITERATIONS", "8")
         )

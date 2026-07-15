@@ -206,6 +206,24 @@ class RedisEventHook(AgentHook):
             payload=self._event_payload({"delta": delta}),
         )
 
+    async def emit_reasoning(self, reasoning_content: str | None) -> None:
+        if not reasoning_content:
+            return
+        await self._bus.publish_event(
+            EventType.THINKING,
+            self._run_id,
+            session_id=self._session_id,
+            payload=self._event_payload({"delta": reasoning_content}),
+        )
+
+    async def emit_reasoning_end(self) -> None:
+        await self._bus.publish_event(
+            EventType.THINKING,
+            self._run_id,
+            session_id=self._session_id,
+            payload=self._event_payload({"delta": "", "end": True}),
+        )
+
     async def before_execute_tools(self, context: AgentHookContext) -> None:
         for tc in context.tool_calls:
             if _is_spawn(tc.name):

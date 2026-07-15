@@ -53,9 +53,19 @@ Skill 分两类：
 | skill | 类型 | 触发场景 | 输出沉淀 |
 |-------|------|---------|---------|
 | stock-research | Orchestrator | 个股全方位分析（基本面+技术面+资金面+舆情） | 论点卡（慢变量） |
-| technical-analysis | Worker | 技术面专项分析（趋势/关键位/信号/缠论） | 不沉淀（快时钟） |
 | strategy-timing | Orchestrator | 策略择时（现在该不该买、买卖时机） | 不沉淀（快时钟） |
 | event-monitor | Orchestrator | 舆情事件驱动（有什么事件、利好利空、持仓影响、宏观恐慌） | 触发论点卡失效/更新 catalysts |
+| compare-analysis | Orchestrator（轻） | 跨标的对比分析 | 不沉淀 |
+| trade-review | Orchestrator（轻） | 交易复盘（按标的查成交记录、盈亏归因、交易纪律检查） | 不沉淀 |
+| technical-analysis | Worker | 技术面专项分析（趋势/关键位/信号/缠论） | 不沉淀（快时钟） |
+| sentiment-analysis | Worker | 舆情与情绪分析（新闻摘要+情感打分+事件信号） | 不沉淀（快时钟） |
+| fund-flow | Worker | 资金流分析（主力/超大单/背离） | 不沉淀（快时钟） |
+| research-report | Worker | 券商研报（评级/一致预期/目标价+RAG全文检索） | 不沉淀 |
+| position-review | Worker | 持仓盘点（持仓/资产/委托/成交） | 不沉淀 |
+| market-overview | 独立 | 大盘/板块/情绪概览 | 不沉淀 |
+| factor-research | 独立 | 因子研究与因子时序查询 | 不沉淀 |
+| strategy-inspect | 独立 | 策略与规则结构检视 | 不沉淀 |
+| selection-replay | 独立 | 选股样本池与选股结果复盘 | 不沉淀 |
 
 **strategy-timing 定位**：策略择时是**快时钟**场景，输出择时报告**不写入论点卡**，
 是当日时点判断，用完即弃。复用 13 个 SPI 策略插件（趋势/形态/反转三类）的信号判定能力，
@@ -104,10 +114,10 @@ Orchestrator 通过 `spawn` 委托 Worker 执行快变量分析：
 | 载体 | 内容 | 持久化 |
 |------|------|--------|
 | 论点卡 | 五步法四差、方向、证伪、催化剂 | PostgreSQL，跨会话 |
-| 综合报告 | 论点卡摘要 + 三份 Worker 简报 + 交叉验证 | 会话历史（非权威） |
+| 投研报告 | 五步法完整推演论述 + 三份 Worker 简报 + 交叉验证 | 会话历史（非权威） |
 | Worker JSON | 技术/情绪/资金当次快照 | 仅当次报告引用，不落论点卡 |
 
-综合投研报告**适合且应当**包含「技术面简报」——由 `technical-analysis` spawn 产出，
+投研报告**适合且应当**包含「技术面简报」——由 `technical-analysis` spawn 产出，
 Orchestrator 在报告中独立成节并标注 `快时钟·as_of`。
 该节**不参与**论点卡与五步法记忆；下次分析须重新 spawn，不得复用旧报告技术结论。
 

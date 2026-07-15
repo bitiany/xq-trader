@@ -6,7 +6,6 @@ import pytest
 
 from agent.governance_hooks import (
     OrchestratorToolPolicyHook,
-    ToolPolicyViolationError,
     _match_forbidden_operation,
     _stock_research_policy_enabled,
 )
@@ -26,19 +25,52 @@ def test_match_forbidden_operation() -> None:
 @pytest.mark.asyncio
 async def test_tool_policy_blocks_fund_flow_for_orchestrator() -> None:
     from nanobot.agent.hook import AgentHookContext
-    from nanobot.providers.base import ToolCallRequest
+    from nanobot.providers.base import LLMResponse, ToolCallRequest
 
     hook = OrchestratorToolPolicyHook({"skill": "stock-research"})
+    tc = ToolCallRequest(
+        id="1",
+        name="mcp_xq_stocks_xq_get_stock_fund_flow",
+        arguments={"symbol": "603993.SH"},
+    )
     context = AgentHookContext(
         iteration=1,
         messages=[],
-        tool_calls=[
-            ToolCallRequest(
-                id="1",
-                name="mcp_xq_stocks_xq_get_stock_fund_flow",
-                arguments={"symbol": "603993.SH"},
-            ),
-        ],
+        response=LLMResponse(
+            content="",
+            tool_calls=[tc],
+            finish_reason="tool_calls",
+            usage={},
+        ),
+        tool_calls=[tc],
     )
-    with pytest.raises(ToolPolicyViolationError, match="禁止调用"):
-        await hook.before_execute_tools(context)
+    await hook.before_execute_tools(context)
+    assert tc.name == "_blocked_by_policy"
+    assert tc.arguments["blocked_tool"] == "get_stock_fund_flow"
+    assert "禁止直接调用" in tc.arguments["reason"]
+
+
+@pytest.mark.asyncio
+async def test_tool_policy_allows_spawn() -> None:
+    from nanobot.agent.hook import AgentHookContext
+    from nanobot.providers.base import LLMResponse, ToolCallRequest
+
+    hook = OrchestratorToolPolicyHook({"skill": "stock-research"})
+    tc = ToolCallRequest(
+        id="1",
+        name="spawn",
+        arguments={"task": "[spawn-worker:technical] test"},
+    )
+    context = AgentHookContext(
+        iteration=1,
+        messages=[],
+        response=LLMResponse(
+            content="",
+            tool_calls=[tc],
+            finish_reason="tool_calls",
+            usage={},
+        ),
+        tool_calls=[tc],
+    )
+    await hook.before_execute_tools(context)
+    assert tc.name == "spawn"

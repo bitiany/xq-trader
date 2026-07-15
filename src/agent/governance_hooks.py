@@ -27,10 +27,6 @@ _ORCHESTRATOR_FORBIDDEN_OPS: frozenset[str] = frozenset({
 })
 
 
-class ToolPolicyViolationError(RuntimeError):
-    """Orchestrator 调用了禁止的工具。"""
-
-
 def _stock_research_policy_enabled(context: dict[str, Any] | None) -> bool:
     if not context:
         return False
@@ -68,24 +64,42 @@ def _is_spawn_pending(detail: str) -> bool:
 
 
 class OrchestratorToolPolicyHook(AgentHook):
-    """stock-research Orchestrator 工具白名单强制（reraise 阻断 run）。"""
+    """stock-research Orchestrator 工具白名单强制。
+
+    命中禁止工具时不中断 run，而是将工具名替换为 _blocked_by_policy，
+    使工具执行返回 "Tool not found" 错误，LLM 在下一轮可自行修正改用 spawn。
+    同时将策略原因写入参数，虽然 Nanobot 框架不直接展示给 LLM，
+    但可在 tool_event 日志中追溯拦截原因。
+    """
 
     def __init__(self, run_context: dict[str, Any] | None) -> None:
-        super().__init__(reraise=True)
+        super().__init__(reraise=False)
         self._enabled = _stock_research_policy_enabled(run_context)
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
         if not self._enabled:
             return
-        for tc in context.tool_calls:
+        response = context.response
+        if response is None:
+            return
+        for tc in response.tool_calls:
             if tc.name == "spawn" or tc.name.endswith("_spawn"):
                 continue
             op_id = _match_forbidden_operation(tc.name)
             if op_id:
-                raise ToolPolicyViolationError(
-                    f"stock-research Orchestrator 禁止调用 {op_id}；"
-                    f"请通过 spawn 委托对应 Worker",
+                logger.warning(
+                    "Orchestrator 工具策略拦截: %s 被禁止，改用 spawn 委托",
+                    tc.name,
+                    extra=trace_fields(),
                 )
+                tc.name = "_blocked_by_policy"
+                tc.arguments = {
+                    "blocked_tool": op_id,
+                    "reason": (
+                        f"stock-research Orchestrator 禁止直接调用 {op_id}；"
+                        f"请通过 spawn 委托对应 Worker 执行"
+                    ),
+                }
 
 
 class SpawnContractHook(AgentHook):

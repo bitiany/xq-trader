@@ -64,13 +64,14 @@ keywords: 舆情, 情绪, 新闻, 消息面, 事件驱动, 利好, 利空, 公�
 | `mcp_xq_sentiment_xq_get_stock_sentiment` | 个股舆情快照 |
 | `mcp_xq_stocks_xq_get_stock_news` | 个股新闻 |
 | `mcp_xq_stocks_xq_get_stock_announcements` | 个股公告 |
+| `mcp_xq_events_xq_detect_events` | 轻量事件检测（两层：关键词+LLM，补充事件信号） |
 | `web_search` | 补充搜索（最多 1 次） |
 
 ### 执行流程
 
-1. 并行调用 `get_stock_sentiment` + `get_stock_news` + `get_stock_announcements`
-2. 综合舆情快照与新闻公告，研判情绪指数（贪婪/中性/恐慌）
-3. 输出完整 Markdown 舆情报告
+1. 并行调用 `get_stock_sentiment` + `get_stock_news` + `get_stock_announcements` + `detect_events`
+2. 综合舆情快照、新闻公告与事件检测，研判情绪指数（贪婪/中性/恐慌）
+3. 输出完整 Markdown 舆情报告（含事件信号节）
 
 ### 情绪指数规则（内联）
 
@@ -78,7 +79,34 @@ keywords: 舆情, 情绪, 新闻, 消息面, 事件驱动, 利好, 利空, 公�
 - `sentiment_score < -0.3` 且负面提及占优 → 恐慌
 - 其余 → 中性
 
+### 输出格式（模式 B）
+
+```markdown
+# {symbol} 舆情与事件报告（{date}）
+
+## 情绪快照
+- 情绪指数：贪婪/中性/恐慌（得分 {score}）
+- 热度：{heat_score}
+- 偏多因素：...
+- 偏空因素：...
+
+## 近期新闻
+（新闻列表，标注来源与时间）
+
+## 近期公告
+（公告列表，标注类型与时间）
+
+## 事件信号
+- 利好事件：...（来自 detect_events，若有）
+- 利空事件：...（若有）
+- 交易信号映射：...（severity ≥ 4 的事件附历史统计影响）
+
+## 结论
+情绪偏多/偏空/中性 + 关键事件提示
+```
+
 ### 约束
 
 - 情绪判断须基于工具返回数据，不可凭空推断
 - 信号方向仅给「偏多/偏空/中性」，不输出具体买卖建议
+- 事件检测仅输出信号摘要，不触发论点卡失效（论点卡失效由 event-monitor Orchestrator 负责）

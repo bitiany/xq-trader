@@ -134,13 +134,35 @@ groups:
 
   positions:
     title: 持仓盘点
-    description: 持仓、资产、订单与成交（仅只读）
+    description: 持仓、资产、订单、成交与历史交易查询（仅只读）
     include:
       - operation_id: list_broker_positions
       - operation_id: get_broker_position
       - operation_id: get_broker_asset
       - operation_id: list_broker_orders
       - operation_id: list_broker_trades
+      - operation_id: list_historical_trades
+      - operation_id: list_historical_orders
+      - operation_id: list_position_snapshots
+    tools:
+      list_historical_trades:
+        risk_level: L0
+        description: |
+          查询历史成交记录（L0 只读）。按标的+日期范围从 OMS td_trade 表查询，
+          含成交价/量/金额/佣金/印花税/过户费/冲击成本。
+          用于交易复盘、盈亏归因与交易纪律检查。
+      list_historical_orders:
+        risk_level: L0
+        description: |
+          查询历史委托记录（L0 只读）。按标的+日期范围从 OMS td_order 表查询，
+          含委托价/量/成交价/成交数量/状态/信号日/执行日。
+          用于交易复盘与委托-成交差异分析。
+      list_position_snapshots:
+        risk_level: L0
+        description: |
+          查询持仓快照历史（L0 只读）。按标的+日期范围从 td_position_snapshot 表查询，
+          含持仓量/成本价/市值/权重/浮动盈亏/当日盈亏。
+          用于持仓变化追踪与日际盈亏对比。
 
   indices:
     title: 指数行情

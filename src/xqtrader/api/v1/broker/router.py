@@ -14,6 +14,7 @@ from xqtrader.broker.services.qmt_data_collector import QmtDataCollector
 from xqtrader.broker.services.qmt_query_service import QmtQueryService
 from xqtrader.broker.services.qmt_trader import QmtTrader
 from xqtrader.domain.market.services.local_market_quote_service import LocalMarketQuoteService
+from xqtrader.domain.trading.services.trade_history_service import TradeHistoryService
 
 router = APIRouter(prefix="/broker", tags=["券商代理"])
 
@@ -21,6 +22,7 @@ _connection = QmtConnection.get_instance()
 _data_collector = QmtDataCollector()
 _trader = QmtTrader()
 _query_service = QmtQueryService()
+_history_service = TradeHistoryService()
 # 复用 lifespan 创建的单例（绑定主事件循环）；若 lifespan 未初始化则惰性创建
 _callback_handler = QmtCallbackHandler.get_instance()
 
@@ -346,3 +348,69 @@ async def query_account_infos() -> dict:
     """查询所有资金账号。"""
     accounts = await _query_service.query_account_infos()
     return {"accounts": accounts}
+
+
+# ── 历史查询 ──────────────────────────────────────────────
+
+
+@router.get(
+    "/history/trades",
+    summary="查询历史成交",
+    operation_id="list_historical_trades",
+)
+async def query_historical_trades(
+    symbol: str | None = Query(default=None, description="证券代码，如 600519.SH"),
+    start_date: str | None = Query(default=None, description="起始日期 YYYY-MM-DD"),
+    end_date: str | None = Query(default=None, description="截止日期 YYYY-MM-DD"),
+    limit: int = Query(default=100, description="最大返回条数", ge=1, le=500),
+) -> dict:
+    """查询历史成交记录（来自 QMT 实盘历史数据）。"""
+    trades = await _history_service.query_historical_trades(
+        symbol=symbol,
+        start_date=_parse_yyyymmdd(start_date) if start_date else None,
+        end_date=_parse_yyyymmdd(end_date) if end_date else None,
+        limit=limit,
+    )
+    return {"trades": trades, "count": len(trades)}
+
+
+@router.get(
+    "/history/orders",
+    summary="查询历史委托",
+    operation_id="list_historical_orders",
+)
+async def query_historical_orders(
+    symbol: str | None = Query(default=None, description="证券代码，如 600519.SH"),
+    start_date: str | None = Query(default=None, description="起始日期 YYYY-MM-DD"),
+    end_date: str | None = Query(default=None, description="截止日期 YYYY-MM-DD"),
+    limit: int = Query(default=100, description="最大返回条数", ge=1, le=500),
+) -> dict:
+    """查询历史委托记录（来自 QMT 实盘历史数据）。"""
+    orders = await _history_service.query_historical_orders(
+        symbol=symbol,
+        start_date=_parse_yyyymmdd(start_date) if start_date else None,
+        end_date=_parse_yyyymmdd(end_date) if end_date else None,
+        limit=limit,
+    )
+    return {"orders": orders, "count": len(orders)}
+
+
+@router.get(
+    "/history/positions",
+    summary="查询持仓快照历史",
+    operation_id="list_position_snapshots",
+)
+async def query_position_snapshots(
+    symbol: str | None = Query(default=None, description="证券代码，如 600519.SH"),
+    start_date: str | None = Query(default=None, description="起始日期 YYYY-MM-DD"),
+    end_date: str | None = Query(default=None, description="截止日期 YYYY-MM-DD"),
+    limit: int = Query(default=60, description="最大返回条数", ge=1, le=500),
+) -> dict:
+    """查询持仓快照历史（来自 QMT 实盘历史数据）。"""
+    snapshots = await _history_service.query_position_snapshots(
+        symbol=symbol,
+        start_date=_parse_yyyymmdd(start_date) if start_date else None,
+        end_date=_parse_yyyymmdd(end_date) if end_date else None,
+        limit=limit,
+    )
+    return {"snapshots": snapshots, "count": len(snapshots)}

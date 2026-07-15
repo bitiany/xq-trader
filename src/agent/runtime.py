@@ -155,6 +155,11 @@ def build_bot(*, model: str | None = None) -> Nanobot:
             image_generation_provider_configs=image_gen_provider_configs(config),
         )
         _bot = Nanobot(loop)
+        # 将主 AgentLoop 的工具注册表引用传递给 SubagentManager，
+        # 使子 Agent 也能使用 MCP 工具（详见 nanobot_patches._patch_subagent_mcp_tools）。
+        _bot._loop.subagents._mcp_tools_source = _bot._loop.tools
+        # 传递 AgentLoop 引用，使 _announce_result patch 能直接访问 _pending_queues
+        _bot._loop.subagents._loop = _bot._loop
         logger.info(
             "Nanobot created (PG session backend): workspace=%s model=%s base=%s mcp_groups=%s",
             _WORKSPACE,

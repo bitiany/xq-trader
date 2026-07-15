@@ -1371,7 +1371,7 @@ MCP Server 将 OpenAPI `operation_id` 按业务域分组暴露，命名规则：
 | `research_thesis` | **投研论点卡** | get_stock_thesis (L0), save_stock_thesis (L1), mark_thesis_stale (L1) |
 | `investor_profile` | **投资者画像** | get_preference |
 | `workflow` | 工作流触发 | run_workflow, get_workflow_status |
-| **`strategy`**（新增） | **策略信号判定** | evaluate_strategy_signals |
+| **`strategies`**（已有） | **策略信号判定** | compute_strategy_signals |
 | **`event`**（新增） | **事件驱动** | detect_events, get_market_fear_index, evaluate_event_impact_on_thesis |
 | **`research` RAG**（新增） | **研报全文检索** | query_research_report_rag |
 
@@ -1385,7 +1385,7 @@ Agent Worker 通过 `MCP_GROUPS` 环境变量挂载分组端点，默认包含 s
 
 | 工具 | 分组 | 场景 | 用途 |
 |------|------|------|------|
-| `evaluate_strategy_signals` | mcp_xq_strategy | 策略择时 | 调用 SPI 插件做信号判定 |
+| `compute_strategy_signals` | mcp_xq_strategies | 策略择时 | 调用 SPI 插件做信号判定 |
 | `detect_events` | mcp_xq_event | 事件驱动 | 两层事件检测 |
 | `get_market_fear_index` | mcp_xq_event | 事件驱动 | 宏观恐慌指数 |
 | `evaluate_event_impact_on_thesis` | mcp_xq_event | 事件驱动 | 事件→论点卡触发 |
@@ -1481,6 +1481,8 @@ Agent Worker 通过 `MCP_GROUPS` 环境变量挂载分组端点，默认包含 s
 | `compare-analysis` | Orchestrator（轻） | 跨标的/跨期对比，读各标的论点卡 | 对比问题 |
 | `market-overview` | 独立 | 大盘/板块/情绪概览 | 大盘问题 |
 | `factor-research` | 独立 | 因子研究 | 因子问题 |
+| `strategy-inspect` | 独立 | 策略/规则结构检视 | 策略问题 |
+| `selection-replay` | 独立 | 选股样本池与结果复盘 | 选股问题 |
 
 **关键原则**：技术面、情绪面、资金面、研报的**工具与解读细节只在各自 Worker 内定义一次**。Orchestrator 不写任何技术细节，只描述「何时委托哪个 Worker + 期望的结论契约」。
 
@@ -1572,9 +1574,11 @@ workspace/personas/analyst/
 
 ### 16.2 PostgreSQL 表设计
 
+> 实际 ORM 模型继承 `Base`/`AuditedBase`，表名统一使用 `ag_` 前缀。`ag_message` 采用 `payload` JSONB 无损存储完整 nanobot message dict（含 role/content/tool_calls 等全部字段），替代文档初稿中的扁平字段设计，确保框架消息结构完整保留。
+
 ```sql
 -- 投研论点卡（慢变量核心记忆）
-CREATE TABLE research_thesis (
+CREATE TABLE ag_research_thesis (
     id             BIGSERIAL PRIMARY KEY,
     symbol         VARCHAR(16)  NOT NULL,
     as_of          DATE         NOT NULL,          -- 数据截至日
@@ -1592,38 +1596,38 @@ CREATE TABLE research_thesis (
     created_at     TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at     TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
-CREATE INDEX idx_thesis_symbol_status ON research_thesis(symbol, status);
+CREATE INDEX idx_thesis_symbol ON ag_research_thesis(symbol);
 
--- 偏好设置（单用户本地部署 → 全局单行配置）
-CREATE TABLE agent_preference (
-    id             SMALLINT PRIMARY KEY DEFAULT 1,   -- 恒为 1，全局单行
+-- 偏好设置（单用户本地部署 -> 全局单行配置）
+-- 注意：实际 ORM 继承 AuditedBase（自增主键），文档中"id SMALLINT PRIMARY KEY DEFAULT 1"的单行表约束为设计期望但未落地
+CREATE TABLE ag_preference (
+    id             BIGSERIAL PRIMARY KEY,          -- 实际为 AuditedBase 自增主键
     risk_appetite  VARCHAR(16),                    -- 保守/稳健/激进
     watchlist      JSONB,                          -- 自选股
     preferences    JSONB,                          -- 其他偏好设置
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- 会话（持久化，支撑跨页面历史查看）
-CREATE TABLE agent_session (
+CREATE TABLE ag_session (
     session_key    VARCHAR(128) PRIMARY KEY,       -- stock:{symbol} / compare:... / general
-    title          VARCHAR(128),                   -- 会话列表展示用
-    metadata       JSONB,
+    meta           JSONB,
+    last_consolidated INTEGER NOT NULL DEFAULT 0,  -- 最近一次归档消息序号
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX idx_session_updated ON agent_session(updated_at DESC);  -- 会话列表按最近排序
+CREATE INDEX idx_session_updated ON ag_session(updated_at DESC);  -- 会话列表按最近排序
 
 -- 会话消息（完整历史，不受上下文窗口限制）
-CREATE TABLE agent_message (
+CREATE TABLE ag_message (
     id             BIGSERIAL PRIMARY KEY,
-    session_key    VARCHAR(128) NOT NULL,          -- 逻辑关联 agent_session，无物理外键
-    role           VARCHAR(16)  NOT NULL,
-    content        TEXT,
-    tool_calls     JSONB,
-    is_summary     BOOLEAN      NOT NULL DEFAULT false,  -- 是否为归档摘要
+    session_key    VARCHAR(128) NOT NULL,          -- 逻辑关联 ag_session，无物理外键
+    seq            INTEGER NOT NULL,               -- 消息序号
+    payload        JSONB NOT NULL,                 -- 完整 nanobot message dict（含 role/content/tool_calls 等）
     created_at     TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
-CREATE INDEX idx_message_session ON agent_message(session_key, id);
+CREATE INDEX idx_message_session_key ON ag_message(session_key);
 ```
 
 > 遵循项目 dal-orm 规范：模型继承 `Base`/`AuditedBase`，**禁止主外键物理约束**（表间仅逻辑关联，无物理外键）。
@@ -1774,7 +1778,7 @@ CREATE INDEX idx_message_session ON agent_message(session_key, id);
 
 1. 新增 `StrategySignalEvaluator`（薄包装，调用 SPI 插件 evaluate()）
 2. 新增 API 端点 `POST /strategies/signals`（operation_id=`compute_strategy_signals`）
-3. MCP 暴露 `mcp_xq_strategy_xq_evaluate_strategy_signals`
+3. MCP 暴露 `mcp_xq_strategies_xq_compute_strategy_signals`
 4. 创建 `workspace/skills/strategy-timing/SKILL.md` + 策略方法论知识库
 5. 在 AGENTS.md 注册新 skill
 

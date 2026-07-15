@@ -58,7 +58,7 @@ export function StockDetailPage() {
     const name = stockOverview?.name ?? decodedSymbol
     const sym = decodedSymbol
     const prompts: Record<string, string> = {
-      full: `请对 ${sym}（${name}）进行全方位投研分析：按国泰君安五步法推演基本面（信息差→逻辑差→超预期差→催化剂→结论），结合技术面走势、资金面动向与市场情绪综合研判，交叉验证后给出交易策略建议（含入场价、止损价、目标位、仓位建议）。`,
+      full: `请对 ${sym}（${name}）进行投研分析`,
       technical: `请对 ${sym}（${name}）进行技术面深度分析：研判当前趋势方向与强度，识别关键支撑/压力位，分析 MACD/KDJ/RSI 指标信号，结合缠论笔/线段/中枢判断走势结构，给出 ATR 波动率与短期操作建议。`,
       fund: `请对 ${sym}（${name}）进行资金面分析：研判近期主力资金净流入/流出趋势，分析超大单/大单/中单/小单资金博弈格局，识别资金流向与股价走势的背离信号，评估主力控盘程度。`,
       basic: `请快速扫描 ${sym}（${name}）的基本面：最新估值水平（PE/PB/PS/股息率）、核心财务指标（营收/净利润/ROE/毛利率）、近期公告与新闻要闻，给出基本面评级与关键风险点。`,
