@@ -7,6 +7,8 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/src \
     UV_PROJECT_ENVIRONMENT=/usr/local \
     UV_INDEX_URL=https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple \
+    PIP_INDEX_URL=https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple \
+    PIP_DEFAULT_TIMEOUT=180 \
     AGENT_WORKSPACE=/workspace \
     ENV=/config/.env
 
@@ -19,13 +21,9 @@ COPY src/xqtrader/domain/agent /app/src/xqtrader/domain/agent
 COPY src/xqtrader/domain/watermark /app/src/xqtrader/domain/watermark
 COPY docker/agent/stubs/xqtrader/__init__.py /app/src/xqtrader/__init__.py
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends gcc libxml2-dev libxslt1-dev \
-    && pip install --no-cache-dir uv \
+RUN pip install --no-cache-dir uv \
     && uv sync --frozen --no-install-project --only-group agent --no-dev \
-    && apt-get purge -y gcc \
-    && apt-get autoremove -y \
-    && rm -rf /var/lib/apt/lists/* /root/.cache \
+    && rm -rf /root/.cache \
     && useradd -m -u 1000 agent \
     && mkdir -p /workspace /config \
     && chown -R agent:agent /workspace /config /app

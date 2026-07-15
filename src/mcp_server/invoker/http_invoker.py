@@ -68,11 +68,8 @@ class HttpInvoker:
         known = {p.name for p in op.parameters}
         if op.body_schema is not None:
             known.add("body")
-        unknown = set(arguments) - known
-        if unknown:
-            raise ToolInvocationError(
-                f"不支持的参数: {', '.join(sorted(unknown))}",
-            )
+        # 兼容调用方（nanobot）透传 spawn 上下文参数（label/task/symbol 等），
+        # 静默丢弃未声明参数而非报错，与 inputSchema additionalProperties=True 对齐。
         for p in op.parameters:
             if p.name not in arguments:
                 if p.required and p.location == "path":

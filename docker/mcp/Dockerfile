@@ -7,6 +7,8 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/src \
     UV_PROJECT_ENVIRONMENT=/usr/local \
     UV_INDEX_URL=https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple \
+    PIP_INDEX_URL=https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple \
+    PIP_DEFAULT_TIMEOUT=180 \
     MCP_SERVER_HOST=0.0.0.0 \
     MCP_SERVER_PORT=8097
 

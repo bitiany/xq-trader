@@ -1,7 +1,7 @@
 """短期时序记忆 — 从会话历史提取近 N 个交易日的投研简报摘要。
 
 用于 Harness ShortTermRecallHook，支撑日际快变量对比；非权威事实，今日决策仍以 spawn 为准。
-所有 DB 查询经 PgSessionManager 后台事件循环执行，避免跨 loop 使用连接池。
+所有 DB 查询经 LoopBridge 后台事件循环执行，避免跨 loop 使用连接池。
 """
 
 from __future__ import annotations
@@ -12,8 +12,8 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
-from agent.brief_content import MIN_BRIEF_CHARS, is_indexable_brief
-from agent.session_backend import PgSessionManager
+from agent.brief_content import is_indexable_brief
+from agent.session_backend import LoopBridge
 from xqtrader.domain.agent.models.session import AgentMessage
 from xqtrader.domain.watermark.models.trade_calendar import (
     DEFAULT_TRADE_EXCHANGE,
@@ -29,7 +29,6 @@ _DIRECTION_RE = re.compile(
     r"(?:^|\n)\s*[-*]?\s*方向\s*[:：]\s*([^\n]+)",
     re.MULTILINE,
 )
-_MIN_BRIEF_CHARS = MIN_BRIEF_CHARS
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,10 +43,10 @@ class BriefSnapshot:
 
 
 class ShortTermMemoryService:
-    """短期时序记忆服务 — 经 PgSessionManager 桥接查询会话历史。"""
+    """短期时序记忆服务 — 经 LoopBridge 桥接查询会话历史。"""
 
-    def __init__(self, session_manager: PgSessionManager) -> None:
-        self._sessions = session_manager
+    def __init__(self, bridge: LoopBridge) -> None:
+        self._bridge = bridge
 
     @staticmethod
     def decay_weight(lag_trading_days: int, *, half_life: float) -> float:
@@ -105,7 +104,7 @@ class ShortTermMemoryService:
         if trading_days <= 0 or not session_key:
             return []
 
-        trading_day_list = self._sessions.run_coroutine(
+        trading_day_list = self._bridge.run_coroutine(
             self._recent_trading_days(trading_days + 1),
         )
         if len(trading_day_list) < 2:
@@ -119,7 +118,7 @@ class ShortTermMemoryService:
         cutoff = datetime.combine(oldest, datetime.min.time(), tzinfo=_TZ).astimezone(
             timezone.utc,
         )
-        rows = self._sessions.run_coroutine(
+        rows = self._bridge.run_coroutine(
             self._load_assistant_payloads_since(session_key, cutoff),
         )
 

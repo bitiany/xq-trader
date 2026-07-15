@@ -93,11 +93,22 @@ def detect_spawn_worker(task_text: str, label: str = "") -> str | None:
     return None
 
 
+_JSON_CODE_FENCE_RE = re.compile(
+    r"```(?:json)?\s*\n(.*?)\n\s*```",
+    re.DOTALL | re.IGNORECASE,
+)
+
+
 def extract_json_payload(text: str) -> dict[str, Any]:
-    """从 spawn 结果文本提取 JSON 对象。"""
+    """从 spawn 结果文本提取 JSON 对象。
+
+    支持三种格式：纯 JSON、Markdown 代码块包裹的 JSON、文本中嵌入的 JSON。
+    """
     stripped = text.strip()
     if not stripped:
         raise SpawnContractError("spawn 结果为空")
+
+    # 1. 纯 JSON 直接解析
     try:
         parsed = json.loads(stripped)
         if isinstance(parsed, dict):
@@ -105,6 +116,17 @@ def extract_json_payload(text: str) -> dict[str, Any]:
     except json.JSONDecodeError:
         pass
 
+    # 2. Markdown 代码块 ```json ... ```
+    for match in _JSON_CODE_FENCE_RE.finditer(stripped):
+        block = match.group(1).strip()
+        try:
+            parsed = json.loads(block)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            continue
+
+    # 3. 文本中嵌入的 JSON（第一个 { 到最后一个 }）
     start = stripped.find("{")
     end = stripped.rfind("}")
     if start >= 0 and end > start:
@@ -113,9 +135,14 @@ def extract_json_payload(text: str) -> dict[str, Any]:
             if isinstance(parsed, dict):
                 return parsed
         except json.JSONDecodeError as exc:
-            raise SpawnContractError(f"spawn 结果 JSON 解析失败: {exc}") from exc
+            raise SpawnContractError(
+                f"spawn 结果 JSON 解析失败: {exc}; "
+                f"output_prefix={stripped[:200]!r}",
+            ) from exc
 
-    raise SpawnContractError("spawn 结果未包含有效 JSON 对象")
+    raise SpawnContractError(
+        f"spawn 结果未包含有效 JSON 对象; output_prefix={stripped[:200]!r}",
+    )
 
 
 def validate_spawn_output(worker: str, payload: dict[str, Any]) -> None:

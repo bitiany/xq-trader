@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 
 from agent.config import agent_settings
+from agent.runtime import get_loop_bridge
 from framework.commons.logger import get_logger
 from xqtrader.domain.agent.services.thesis_service import ThesisService
 
@@ -16,9 +17,12 @@ _task: asyncio.Task[None] | None = None
 async def _reconcile_loop() -> None:
     service = ThesisService()
     interval = agent_settings.THESIS_RECONCILE_INTERVAL_S
+    bridge = get_loop_bridge()
     while True:
         try:
-            await service.reconcile_all_expired()
+            await bridge.run_coroutine_async(
+                service.reconcile_all_expired()
+            )
         except Exception:
             logger.exception("论点卡过期治理任务失败")
         await asyncio.sleep(interval)

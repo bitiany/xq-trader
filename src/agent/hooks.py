@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from pathlib import Path
+import os
 from typing import Any
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
@@ -12,13 +12,16 @@ from nanobot.agent.hook import AgentHook, AgentHookContext
 from agent.config import agent_settings
 from agent.protocol import EventType
 from agent.redis_bus import AgentRedisBus
-from agent.runtime import get_pg_session_manager
+from agent.runtime import get_loop_bridge
 from agent.short_term_memory import ShortTermMemoryService
 from framework.commons.logger import get_logger
 from xqtrader.domain.agent.errors import RunCancelledError
 from xqtrader.domain.agent.services.memory_service import MemoryService
 
 logger = get_logger("AGENT_MEMORY_HOOK")
+
+
+# ────────────────────────────────────────────────────────────────────────────
 
 
 def _inject_system_before_last_user(
@@ -109,7 +112,7 @@ class ShortTermRecallHook(AgentHook):
     """短期时序记忆 — 从会话历史提取近 N 个交易日的简报摘要，注入日际对比上下文。
 
     非权威事实：今日快变量仍以 spawn 实时取数为准；论点卡仍以 research_thesis MCP 为准。
-    DB 查询经 PgSessionManager 后台 loop 桥接，避免跨事件循环使用连接池。
+    DB 查询经 LoopBridge 后台 loop 桥接，避免跨事件循环使用连接池。
     """
 
     def __init__(self, session_key: str, symbol: str | None) -> None:
@@ -117,7 +120,7 @@ class ShortTermRecallHook(AgentHook):
         self._session_key = session_key
         self._symbol = symbol
         self._injected = False
-        self._memory = ShortTermMemoryService(get_pg_session_manager())
+        self._memory = ShortTermMemoryService(get_loop_bridge())
 
     async def before_iteration(self, context: AgentHookContext) -> None:
         if self._injected:
@@ -295,7 +298,7 @@ def _safe_args(arguments: Any) -> str:
 
 def _basename(path: str) -> str:
     try:
-        return Path(path).name or path
+        return os.path.basename(path) or path
     except (TypeError, ValueError):
         return path
 

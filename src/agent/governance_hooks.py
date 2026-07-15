@@ -49,6 +49,24 @@ def _match_forbidden_operation(tool_name: str) -> str | None:
     return None
 
 
+_SPAWN_PENDING_MARKERS = (
+    "started",
+    "i'll notify you when it completes",
+    "i will notify you when it completes",
+)
+
+
+def _is_spawn_pending(detail: str) -> bool:
+    """识别 spawn 异步未完成的通知文本（非最终结果）。
+
+    nanobot spawn 工具在子 agent 启动时返回形如
+    "Subagent [xxx] started (id: ...). I'll notify you when it completes." 的通知，
+    此时尚未产生 JSON 输出，契约校验应跳过。
+    """
+    lowered = detail.lower()
+    return any(marker in lowered for marker in _SPAWN_PENDING_MARKERS)
+
+
 class OrchestratorToolPolicyHook(AgentHook):
     """stock-research Orchestrator 工具白名单强制（reraise 阻断 run）。"""
 
@@ -88,6 +106,14 @@ class SpawnContractHook(AgentHook):
                 continue
             detail = str(ev.get("detail") or ev.get("result") or "").strip()
             if not detail:
+                continue
+            # spawn 异步执行：跳过"已启动"通知（非最终结果）
+            if _is_spawn_pending(detail):
+                logger.info(
+                    "spawn 契约跳过：子任务尚未完成 detail=%s",
+                    detail[:120],
+                    extra=trace_fields(),
+                )
                 continue
             args: dict[str, Any] = {}
             if idx < len(context.tool_calls):

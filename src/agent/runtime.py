@@ -16,7 +16,7 @@ from nanobot.providers.image_generation import image_gen_provider_configs
 
 from agent.config import agent_settings
 from agent.nanobot_patches import NanobotRuntimePatches
-from agent.session_backend import PgSessionManager
+from agent.session_backend import LoopBridge, PgSessionManager
 from framework.commons.logger import get_logger
 from xqtrader.domain.agent.services.embedding_service import EmbeddingService
 from xqtrader.domain.agent.services.memory_service import MemoryService
@@ -88,6 +88,7 @@ def _write_runtime_config() -> None:
 
 _bot: Nanobot | None = None
 _session_manager: PgSessionManager | None = None
+_loop_bridge: LoopBridge | None = None
 _runtime_initialized = False
 _nanobot_lock: asyncio.Lock | None = None
 
@@ -101,15 +102,28 @@ def get_nanobot_lock() -> asyncio.Lock:
 
 
 def init_runtime() -> None:
-    """Worker 启动时一次性初始化：patch nanobot + 同步 config.json + 记忆依赖校验。"""
-    global _runtime_initialized
+    """Worker 启动时一次性初始化：LoopBridge + patch nanobot + config.json + 记忆依赖校验。"""
+    global _runtime_initialized, _loop_bridge
     if _runtime_initialized:
         return
+    _loop_bridge = LoopBridge()
     EmbeddingService.validate_backend()
     NanobotRuntimePatches.apply()
     _write_runtime_config()
     MemoryService.get_instance().ensure_payload_types()
     _runtime_initialized = True
+
+
+def get_loop_bridge() -> LoopBridge:
+    """返回全局 LoopBridge（后台事件循环桥接 + 数据源初始化）。
+
+    Worker 主 loop 上的协程通过 run_coroutine_async 桥接到后台 loop，
+    避免跨事件循环使用 asyncpg 连接池。
+    """
+    if _loop_bridge is None:
+        init_runtime()
+    assert _loop_bridge is not None
+    return _loop_bridge
 
 
 def get_pg_session_manager() -> PgSessionManager:
@@ -133,7 +147,7 @@ def build_bot(*, model: str | None = None) -> Nanobot:
         _write_runtime_config()
         config: Config = resolve_config_env_vars(load_config(_CONFIG_PATH))
         config.agents.defaults.workspace = str(_WORKSPACE)
-        session_manager = PgSessionManager(_WORKSPACE)
+        session_manager = PgSessionManager(_WORKSPACE, get_loop_bridge())
         _session_manager = session_manager
         loop = AgentLoop.from_config(
             config,

@@ -28,7 +28,9 @@ def build_input_schema(op: Operation, *, hide_params: list[str] | None = None) -
     schema: dict[str, Any] = {
         "type": "object",
         "properties": properties,
-        "additionalProperties": False,
+        # True：兼容调用方（nanobot）静默丢弃未声明参数的行为，
+        # 避免 spawn 父任务透传 label/task/symbol 等上下文参数时被 schema 拒绝。
+        "additionalProperties": True,
     }
     if required:
         schema["required"] = required

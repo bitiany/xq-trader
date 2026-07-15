@@ -4,9 +4,14 @@
 「按 session_key 自动加载历史 → 注入上下文 → 每轮自动落盘」直接持久化到 PostgreSQL。
 
 框架以**同步**方式调用（get_or_create / save / ...），而 xqtrader DAL 是异步。
-本类持有一个后台线程运行独立 event loop，同步方法通过 run_coroutine_threadsafe
+LoopBridge 持有一个后台线程运行独立 event loop，同步方法通过 run_coroutine_threadsafe
 桥接到异步 DAL；数据源引擎在该独立 loop 上初始化并使用，避免跨事件循环的
 asyncpg 连接池绑定问题。
+
+三类拆分（职责单一）：
+- LoopBridge：后台 loop 管理 + 数据源初始化 + 协程桥接（通用基础设施）
+- PgSessionStore：会话 DB CRUD（静态方法，无状态）
+- PgSessionManager：nanobot SessionManager 接口适配 + LRU 缓存
 """
 
 from __future__ import annotations
@@ -32,25 +37,21 @@ from xqtrader.domain.agent.models.session import AgentMessage, AgentSession
 logger = get_logger("AGENT_SESSION_PG")
 
 
-class PgSessionManager:
-    """PostgreSQL 会话后端 — 鸭子兼容 nanobot SessionManager。"""
+class LoopBridge:
+    """后台事件循环桥接 — 运行独立 loop 承载 asyncpg 连接池与 DAL 调用。
 
-    _CACHE_MAX = 64
+    Worker 主 loop 上的协程通过 run_coroutine_async 桥接到后台 loop，
+    避免跨事件循环使用连接池；同步调用方使用 run_coroutine 阻塞等待。
+    """
 
-    def __init__(self, workspace: Path) -> None:
-        self.workspace = workspace
-        self.sessions_dir = workspace / "sessions"  # 兼容属性，不实际写文件
-        self._cache: OrderedDict[str, Session] = OrderedDict()
-
+    def __init__(self) -> None:
         self._loop = asyncio.new_event_loop()
         self._thread = threading.Thread(
             target=self._run_loop, name="pg-session-loop", daemon=True,
         )
         self._thread.start()
         self._submit(self._init_datasource())
-        logger.info("PgSessionManager initialized (workspace=%s)", workspace)
-
-    # ==================== 事件循环桥接 ====================
+        logger.info("LoopBridge initialized (pg-session-loop)")
 
     def _run_loop(self) -> None:
         asyncio.set_event_loop(self._loop)
@@ -61,8 +62,17 @@ class PgSessionManager:
         return asyncio.run_coroutine_threadsafe(coro, self._loop).result()
 
     def run_coroutine(self, coro: Any) -> Any:
-        """对外暴露的协程桥接入口（短期记忆等跨模块 DB 查询复用）。"""
+        """对外暴露的协程桥接入口（同步阻塞，供 nanobot 等同步调用方使用）。"""
         return self._submit(coro)
+
+    async def run_coroutine_async(self, coro: Any) -> Any:
+        """异步等待后台 loop 上的协程完成（不阻塞调用方 loop）。
+
+        ThesisService 等 xqtrader DAL 调用必须在 pg-session-loop 上执行，
+        因为数据源引擎（asyncpg 连接池）绑定到该 loop。
+        """
+        future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        return await asyncio.wrap_future(future)
 
     @staticmethod
     async def _init_datasource() -> None:
@@ -71,55 +81,15 @@ class PgSessionManager:
             engines_manager.initialize(loader.datasources)
             logger.info("Datasource initialized on pg-session-loop")
 
-    # ==================== nanobot SessionManager 接口 ====================
+
+class PgSessionStore:
+    """会话 DB CRUD — 静态方法，通过 LoopBridge 执行。
+
+    无状态，所有方法均为 staticmethod/classmethod，由 PgSessionManager 委托调用。
+    """
 
     @staticmethod
-    def safe_key(key: str) -> str:
-        return str(safe_filename(key.replace(":", "_")))
-
-    def get_or_create(self, key: str) -> Session:
-        if key in self._cache:
-            self._cache.move_to_end(key)
-            return self._cache[key]
-        session = self._submit(self._load(key)) or Session(key=key)
-        self._cache[key] = session
-        self._evict_if_needed()
-        return session
-
-    def save(self, session: Session, *, fsync: bool = False) -> None:
-        self._submit(self._persist(session))
-        self._cache[session.key] = session
-        self._cache.move_to_end(session.key)
-        self._evict_if_needed()
-
-    def _evict_if_needed(self) -> None:
-        while len(self._cache) > self._CACHE_MAX:
-            self._cache.popitem(last=False)
-
-    def invalidate(self, key: str) -> None:
-        self._cache.pop(key, None)
-
-    def delete_session(self, key: str) -> bool:
-        self.invalidate(key)
-        return bool(self._submit(self._delete(key)))
-
-    def list_sessions(self) -> list[dict[str, Any]]:
-        return cast(list[dict[str, Any]], self._submit(self._list()))
-
-    def read_session_file(self, key: str) -> dict[str, Any] | None:
-        session = self._submit(self._load(key))
-        if session is None:
-            return None
-        return self._to_payload(session)
-
-    def flush_all(self) -> int:
-        # save() 已即时落盘，缓存始终持久化，无需额外刷盘。
-        return len(self._cache)
-
-    # ==================== 异步 DB 实现 ====================
-
-    @staticmethod
-    async def _load(key: str) -> Session | None:
+    async def load(key: str) -> Session | None:
         meta_row = await AgentSession.get_or_none(session_key=key)
         if meta_row is None:
             return None
@@ -137,7 +107,7 @@ class PgSessionManager:
 
     @staticmethod
     @transactional(propagation=Propagation.REQUIRED, bind_key="default")
-    async def _persist(session: Session) -> None:
+    async def persist(session: Session) -> None:
         """全量重写会话（对齐 nanobot jsonl 原子重写语义）。"""
         exists = await AgentSession.get_or_none(session_key=session.key)
         meta_data = {
@@ -158,12 +128,12 @@ class PgSessionManager:
             await AgentMessage.create(session_key=session.key, seq=i, payload=msg)
 
     @staticmethod
-    async def _delete(key: str) -> int:
+    async def delete(key: str) -> int:
         await AgentMessage.delete_many(session_key=key)
         return await AgentSession.delete_many(session_key=key)
 
     @classmethod
-    async def _list(cls) -> list[dict[str, Any]]:
+    async def list_all(cls) -> list[dict[str, Any]]:
         rows = await AgentSession.filter(order_by=AgentSession.updated_at.desc())
         return [
             {
@@ -178,7 +148,7 @@ class PgSessionManager:
         ]
 
     @staticmethod
-    def _to_payload(session: Session) -> dict[str, Any]:
+    def to_payload(session: Session) -> dict[str, Any]:
         return {
             "key": session.key,
             "created_at": session.created_at.isoformat(),
@@ -186,3 +156,62 @@ class PgSessionManager:
             "metadata": session.metadata,
             "messages": session.messages,
         }
+
+
+class PgSessionManager:
+    """PostgreSQL 会话后端 — 鸭子兼容 nanobot SessionManager。
+
+    职责：LRU 缓存 + 委托 LoopBridge 执行 DB CRUD（PgSessionStore）。
+    """
+
+    _CACHE_MAX = 64
+
+    def __init__(self, workspace: Path, bridge: LoopBridge) -> None:
+        self.workspace = workspace
+        self.sessions_dir = workspace / "sessions"  # 兼容属性，不实际写文件
+        self._cache: OrderedDict[str, Session] = OrderedDict()
+        self._bridge = bridge
+        logger.info("PgSessionManager initialized (workspace=%s)", workspace)
+
+    @staticmethod
+    def safe_key(key: str) -> str:
+        return str(safe_filename(key.replace(":", "_")))
+
+    def get_or_create(self, key: str) -> Session:
+        if key in self._cache:
+            self._cache.move_to_end(key)
+            return self._cache[key]
+        session = self._bridge.run_coroutine(PgSessionStore.load(key)) or Session(key=key)
+        self._cache[key] = session
+        self._evict_if_needed()
+        return session
+
+    def save(self, session: Session, *, fsync: bool = False) -> None:
+        self._bridge.run_coroutine(PgSessionStore.persist(session))
+        self._cache[session.key] = session
+        self._cache.move_to_end(session.key)
+        self._evict_if_needed()
+
+    def _evict_if_needed(self) -> None:
+        while len(self._cache) > self._CACHE_MAX:
+            self._cache.popitem(last=False)
+
+    def invalidate(self, key: str) -> None:
+        self._cache.pop(key, None)
+
+    def delete_session(self, key: str) -> bool:
+        self.invalidate(key)
+        return bool(self._bridge.run_coroutine(PgSessionStore.delete(key)))
+
+    def list_sessions(self) -> list[dict[str, Any]]:
+        return cast(list[dict[str, Any]], self._bridge.run_coroutine(PgSessionStore.list_all()))
+
+    def read_session_file(self, key: str) -> dict[str, Any] | None:
+        session = self._bridge.run_coroutine(PgSessionStore.load(key))
+        if session is None:
+            return None
+        return PgSessionStore.to_payload(session)
+
+    def flush_all(self) -> int:
+        # save() 已即时落盘，缓存始终持久化，无需额外刷盘。
+        return len(self._cache)
