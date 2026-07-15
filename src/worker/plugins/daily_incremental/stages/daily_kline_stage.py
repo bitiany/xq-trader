@@ -45,7 +45,7 @@ def clean_kline_data(df: pd.DataFrame) -> pd.DataFrame:
 
     1. 删除 trade_date 为空
     2. 数值列强制转 numeric
-    3. OHLC 负值置 NaN，bfill + ffill
+    3. OHLC 负值或零值置 NaN（价格为 0 或负数属于数据源错误），bfill + ffill
     4. volume/amount 缺失填充 0
     5. pre_close 缺失用前日 close 填充
     6. pct_chg 缺失重算
@@ -69,11 +69,11 @@ def clean_kline_data(df: pd.DataFrame) -> pd.DataFrame:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    # 3. OHLC 负值置 NaN，用前后值填充
+    # 3. OHLC 负值或零值置 NaN（价格为 0 或负数属于数据源错误），用前后值填充
     existing_ohlc = [c for c in ohlc_cols if c in df.columns]
     if existing_ohlc:
         for col in existing_ohlc:
-            df.loc[df[col] < 0, col] = np.nan
+            df.loc[df[col] <= 0, col] = np.nan
         for col in existing_ohlc:
             df[col] = df[col].bfill()
             df[col] = df[col].ffill()

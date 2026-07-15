@@ -55,8 +55,7 @@ class ATRRatioFactor(FactorPlugin):
         low = df["low"].to_numpy(dtype=np.float64)
         close = df["close"].to_numpy(dtype=np.float64)
         atr = talib.ATR(high, low, close, timeperiod=self.period)
-        with np.errstate(divide="ignore", invalid="ignore"):
-            ratio = np.where(close != 0, atr / close, np.nan)
+        ratio = atr / close
         return pd.DataFrame({self.factor_id: ratio}, index=df.index)
 
 
@@ -87,8 +86,7 @@ class ATRRatioDeltaFactor(FactorPlugin):
         low = df["low"].to_numpy(dtype=np.float64)
         close = df["close"].to_numpy(dtype=np.float64)
         atr = talib.ATR(high, low, close, timeperiod=self.period)
-        with np.errstate(divide="ignore", invalid="ignore"):
-            ratio = np.where(close != 0, atr / close, np.nan)
+        ratio = atr / close
         delta = pd.Series(ratio).diff().values
         return pd.DataFrame({self.factor_id: delta}, index=df.index)
 

@@ -188,8 +188,7 @@ class CmraFactor(FactorPlugin):
     def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         close = df["close"].astype(float)
         ret = close.pct_change()
-        with np.errstate(divide="ignore", invalid="ignore"):
-            cum_log_ret = pd.Series(np.log1p(ret.to_numpy()), index=ret.index).cumsum()
+        cum_log_ret = pd.Series(np.log1p(ret.to_numpy()), index=ret.index).cumsum()
         cmra = (
             cum_log_ret.rolling(window=252, min_periods=self.min_periods).max()
             - cum_log_ret.rolling(window=252, min_periods=self.min_periods).min()

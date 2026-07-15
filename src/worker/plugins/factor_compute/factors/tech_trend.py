@@ -59,8 +59,7 @@ class MACDHistRatioFactor(FactorPlugin):
             close, fastperiod=self.fast, slowperiod=self.slow, signalperiod=self.signal_period,
         )
         hist = hist * 2
-        with np.errstate(divide="ignore", invalid="ignore"):
-            ratio = np.where(close != 0, hist / close, np.nan)
+        ratio = hist / close
         return pd.DataFrame({self.factor_id: ratio}, index=df.index)
 
 
@@ -95,8 +94,7 @@ class MACDHistDeltaFactor(FactorPlugin):
             close, fastperiod=self.fast, slowperiod=self.slow, signalperiod=self.signal_period,
         )
         hist = hist * 2
-        with np.errstate(divide="ignore", invalid="ignore"):
-            ratio = np.where(close != 0, hist / close, np.nan)
+        ratio = hist / close
         delta = pd.Series(ratio).diff().values
         return pd.DataFrame({self.factor_id: delta}, index=df.index)
 
@@ -255,7 +253,6 @@ class SARDeviationFactor(FactorPlugin):
         low = df["low"].to_numpy(dtype=np.float64)
         close = df["close"].to_numpy(dtype=np.float64)
         sar = talib.SAR(high, low, acceleration=self.acceleration, maximum=self.maximum)
-        with np.errstate(divide="ignore", invalid="ignore"):
-            deviation = np.where(close != 0, sar / close, np.nan)
+        deviation = sar / close
         delta = pd.Series(deviation).diff().values
         return pd.DataFrame({self.factor_id: delta}, index=df.index)

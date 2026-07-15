@@ -51,6 +51,14 @@ class FactorLoadStage(Stage):
             ctx.set("kline_df", df_kline)
             return StageResult.ok(data={"symbol": symbol, "rows": 0})
 
+        # 数据质量门禁：剔除 OHLCV 无效行（close<=0 / NaN）
+        df_kline = self._validate_ohlcv(symbol, df_kline)
+        if df_kline.empty:
+            logger.warning("[factor.compute] %s no valid kline data after gate", symbol)
+            ctx.set("skip_persist", True)
+            ctx.set("kline_df", df_kline)
+            return StageResult.ok(data={"symbol": symbol, "rows": 0})
+
         # 加载全量资金流数据
         df_flow = await self._load_fund_flow(symbol)
 
@@ -97,6 +105,53 @@ class FactorLoadStage(Stage):
         for col in ["open", "close", "high", "low", "volume", "amount"]:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
+        return df
+
+    @staticmethod
+    def _validate_ohlcv(symbol: str, df: pd.DataFrame) -> pd.DataFrame:
+        """数据质量门禁 - 剔除 OHLCV 无效行。
+
+        无效行定义：
+          - OHLC 任一为 NaN
+          - OHLC 任一 <= 0（价格为 0 或负数属于数据源错误）
+          - high < low 或 high < max(open, close) 或 low > min(open, close)
+
+        剔除后剩余数据不足时返回空 DataFrame，由调用方决定跳过。
+        """
+        ohlc_cols = [c for c in ("open", "high", "low", "close") if c in df.columns]
+        if not ohlc_cols:
+            return df
+
+        original_len = len(df)
+
+        # 1. OHLC 任一为 NaN 或 <= 0
+        invalid_mask = pd.Series(False, index=df.index)
+        for col in ohlc_cols:
+            invalid_mask |= df[col].isna()
+            invalid_mask |= df[col] <= 0
+
+        # 2. OHLC 逻辑关系校验
+        if {"high", "low", "open", "close"}.issubset(df.columns):
+            invalid_mask |= df["high"] < df["low"]
+            invalid_mask |= df["high"] < df[["open", "close"]].max(axis=1)
+            invalid_mask |= df["low"] > df[["open", "close"]].min(axis=1)
+
+        invalid_count = invalid_mask.sum()
+        if invalid_count > 0:
+            # 提取无效行日期用于日志
+            if "trade_date" in df.columns:
+                bad_dates = df.loc[invalid_mask, "trade_date"].tolist()
+                logger.warning(
+                    "[factor.compute] %s 数据门禁: 剔除 %d/%d 行无效数据, dates=%s",
+                    symbol, invalid_count, original_len, bad_dates[:20],
+                )
+            else:
+                logger.warning(
+                    "[factor.compute] %s 数据门禁: 剔除 %d/%d 行无效数据",
+                    symbol, invalid_count, original_len,
+                )
+            df = df[~invalid_mask].reset_index(drop=True)
+
         return df
 
     async def _load_fund_flow(self, symbol: str) -> pd.DataFrame:
