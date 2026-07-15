@@ -34,7 +34,8 @@ keywords: 个股分析, 深度分析, 每日盯盘, 五步法, 基本面, 交易
 | `research_thesis` | `get_stock_thesis` / `save_stock_thesis` / `mark_thesis_stale` | 论点卡读写 |
 | `investor_profile` | `get_preference` | 风险偏好（报告末尾 1 次） |
 | `stocks` | overview / valuation / financials / news / announcements | 五步法慢变量取数（**不含 fund_flow**） |
-| `research` | `list_stock_research_reports` | 研报共识（按需） |
+| `research` | `list_stock_research_reports` / `query_research_report_rag` | 研报共识 + 全文 RAG（附注/现金流细节深度检索） |
+| `events` | `detect_events` | 事件检测（近期事件 × 论点卡交叉验证） |
 | `positions` | `list_broker_positions` / `get_broker_asset` | 持仓（仅交易策略需要时） |
 
 工具全名：`mcp_xq_<group>_xq_<operation_id>`。
@@ -44,10 +45,11 @@ keywords: 个股分析, 深度分析, 每日盯盘, 五步法, 基本面, 交易
 | 阶段 | 目标轮次 |
 |------|---------|
 | 论点卡判断 | 1 |
-| 慢变量取数（全量模式） | 1（全部并行） |
+| 慢变量取数（全量模式，含可选 RAG） | 1（全部并行） |
 | 推演 + save_thesis | 1~2 |
 | spawn 快变量 × 3（并行） | 1 |
 | 等待子 Agent 回注 + 合并 | 2~3 |
+| 事件检测 detect_events + 交叉验证 | 1 |
 | get_preference + 最终报告 | 1~2 |
 | **合计** | **≤ 20 轮** |
 
@@ -67,7 +69,7 @@ keywords: 个股分析, 深度分析, 每日盯盘, 五步法, 基本面, 交易
 
 ### 阶段 B：慢变量（仅全量模式，第 2 轮，全部并行）
 
-**一轮内并行调用**（共 5~6 个工具，禁止分拆多轮）：
+**一轮内并行调用**（共 5~7 个工具，禁止分拆多轮）：
 
 | 工具 | 职责 |
 |------|------|
@@ -77,6 +79,9 @@ keywords: 个股分析, 深度分析, 每日盯盘, 五步法, 基本面, 交易
 | `get_stock_news` | 新闻（五步法信息差/催化剂） |
 | `get_stock_announcements` | 公告（五步法信息差/催化剂） |
 | `list_stock_research_reports` | 研报共识（按需，可与上并行） |
+| `query_research_report_rag` | 研报全文 RAG 深度检索（按需，挖掘附注/现金流细节/风险提示） |
+
+**研报 RAG 使用时机**：五步法信息差/超预期差需要研报附注级深度内容时（如现金流结构变化、关联交易细节、风险提示条款），用关键词查询研报 chunks。**禁止**对每只标的都调用 RAG——仅在列表查询无法覆盖的深度内容时使用。
 
 **禁止** Orchestrator 调用 `get_stock_fund_flow`——资金面由 fund-flow spawn Worker 独占。
 
@@ -121,15 +126,23 @@ keywords: 个股分析, 深度分析, 每日盯盘, 五步法, 基本面, 交易
 ### 阶段 E：合并输出（第 6~8 轮）
 
 1. 收到三个 Worker JSON 后，与论点卡 direction 做交叉验证（共振/背离/证伪检查）
-2. 证伪命中 → `mark_thesis_stale(symbol, reason="证伪条件命中")`
-3. 调用 `get_preference`（仅 1 次）
-4. 持仓相关时调用 `list_broker_positions` + `get_broker_asset`
-5. 按下方「输出格式」生成综合报告：
+2. **择时维度交叉验证**：技术面信号（MACD/KDJ/RSI/缠论买卖点）与论点卡方向在时间窗口内是否一致
+   - 方向一致 + 技术信号确认 → 时机共振（标注「择时 favorable」）
+   - 方向一致 + 技术信号未确认 → 时机待定（标注「择时 pending」，等待信号触发）
+   - 方向背离 → 时机冲突（标注「择时 adverse」，在交易策略中提高警惕/降低仓位）
+3. **事件维度交叉验证**：调用 `detect_events(symbol=symbol)` 检查近期事件
+   - 事件命中论点卡 `invalidation_rules.event_triggers` → `mark_thesis_stale(symbol, reason="事件触发证伪")`
+   - 事件为利好/利空但未触发证伪 → 在交叉验证节标注事件影响
+   - 无相关事件 → 标注「近期无重大事件」
+4. 证伪命中（择时/事件/基本面任一维度） → `mark_thesis_stale(symbol, reason="证伪条件命中")`
+5. 调用 `get_preference`（仅 1 次）
+6. 持仓相关时调用 `list_broker_positions` + `get_broker_asset`
+7. 按下方「输出格式」生成综合报告：
    - **最新行情**：来自 `get_stock_overview.quote`（全量模式阶段 B 已取；慢时钟模式须补调 overview）
    - **基本面结论**：来自论点卡（慢时钟）
    - **技术面/情绪面/资金面简报**：分别来自三个 spawn Worker JSON（快时钟，标注 as_of）
-   - **交叉验证**：慢×快结合点，仅此节允许引用双方结论
-6. **禁止**在阶段 E 再次调用 `save_stock_thesis`（快变量不写入论点卡）
+   - **交叉验证**：慢×快结合点 + 择时维度 + 事件维度，仅此节允许引用双方结论
+8. **禁止**在阶段 E 再次调用 `save_stock_thesis`（快变量不写入论点卡）
 
 ### 慢时钟模式捷径
 
@@ -204,8 +217,10 @@ keywords: 个股分析, 深度分析, 每日盯盘, 五步法, 基本面, 交易
 > as-of: {fund_flow.as_of} | 本节不落论点卡
 （引用 fund-flow Worker JSON）
 
-## 交叉验证（慢×快）
+## 交叉验证（慢×快 + 择时 + 事件）
 - 论点卡方向 vs 快变量共振/背离: ...
+- **择时维度**: 技术面信号与论点卡方向时机匹配（favorable / pending / adverse）
+- **事件维度**: 近期事件影响（利好/利空/中性/无重大事件），是否触发证伪
 - 证伪条件检查: ...
 
 ## 日际变化（短期时序记忆·快时钟对比）

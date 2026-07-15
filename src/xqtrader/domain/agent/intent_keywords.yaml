@@ -1,0 +1,39 @@
+# 说话风格切换关键词规则
+#
+# IntentRouter Layer 1 关键词检测：
+#   命中 professional → AnalystRoute(style="professional")
+#   命中 discussion → AnalystRoute(style="discussion")
+#   都未命中 → Layer 2 LLM 兜底分类
+#   LLM 也未命中 → AgentRoute()（不注入风格，由 Agent 自行判断）
+
+# 专业输出模式触发词（出报告/技术解读/数据分析）
+professional:
+  keywords:
+    - "分析"
+    - "报告"
+    - "技术面"
+    - "估值"
+    - "基本面"
+    - "财务"
+    - "研报"
+    - "深度"
+    - "复盘"
+    - "诊断"
+    - "简报"
+    - "评估"
+
+# 员工-老板对话模式触发词（探讨走势/持仓/交易建议）
+discussion:
+  keywords:
+    - "你看"
+    - "你觉得"
+    - "怎么样"
+    - "要不要"
+    - "持仓"
+    - "亏了"
+    - "赚了"
+    - "操作"
+    - "怎么办"
+    - "聊聊"
+    - "说说"
+    - "你觉得呢"

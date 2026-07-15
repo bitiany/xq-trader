@@ -9,6 +9,7 @@ from .position import PositionSnapshot
 from .risk import RiskEvent, RiskRule
 from .rule import RuleRegistry
 from .strategy import Strategy
+from .strategy_timing_history import StrategyTimingHistory
 from .watchlist import Watchlist, WatchlistItem
 
 __all__ = [
@@ -43,4 +44,6 @@ __all__ = [
     # 回测运行 & 结果
     "BacktestRun",
     "BacktestResult",
+    # 策略择时历史
+    "StrategyTimingHistory",
 ]

@@ -83,7 +83,7 @@ groups:
 
   strategies:
     title: 策略与规则
-    description: 策略、规则组、规则绑定
+    description: 策略、规则组、规则绑定、策略信号判定、择时历史与胜率反哺
     include:
       - operation_id: list_strategies
       - operation_id: get_strategy
@@ -91,6 +91,37 @@ groups:
       - operation_id: list_rule_group_bindings
       - operation_id: list_rules
       - operation_id: get_rule
+      - operation_id: compute_strategy_signals
+      - operation_id: record_strategy_timing_history
+      - operation_id: get_strategy_stats
+      - operation_id: get_all_strategy_stats
+    tools:
+      compute_strategy_signals:
+        risk_level: L0
+        description: |
+          策略信号判定（L0 只读）。为指定标的 + 信号日期批量执行 SPI 插件信号判定。
+          内部通过 strategy_name → rule_id 映射查找插件，加载因子（预计算读 DB + on_demand 实时计算），
+          调用 plugin.evaluate() 返回 buy/sell/neutral 信号。
+          可用策略: chanlun, td_sequential, macd_cross, ma_cross, bollinger, kdj,
+          rsi_divergence, adx_trend, bias_reversal, momentum, volume_price, vol_ratio, donchian_turtle。
+      record_strategy_timing_history:
+        risk_level: L1
+        description: |
+          记录 strategy-timing 信号到历史表（L1 写库）。strategy-timing Orchestrator
+          在 D 阶段聚合后调用此工具持久化 signals/aggregated_signal/confidence，
+          用于后续走势比对与策略胜率反哺聚合权重（样本数 ≥ 30 启用）。
+      get_strategy_stats:
+        risk_level: L0
+        description: |
+          按 rule_id 查询策略胜率统计（L0 只读）。返回 total_samples/win_count/
+          loss_count/win_rate/is_feedback_enabled/avg_return 等字段。
+          is_feedback_enabled=true 时（样本数 ≥ min_samples），Orchestrator 可用
+          win_rate 替换硬编码 0.5 计算聚合权重 weight = confidence × 0.5 + win_rate × 0.5。
+      get_all_strategy_stats:
+        risk_level: L0
+        description: |
+          查询所有策略胜率统计（L0 只读，按 win_rate 降序）。strategy-timing
+          Orchestrator 在 D 阶段开始时一次性加载全部策略胜率表，避免逐策略查询。
 
   selection:
     title: 选股与样本池
@@ -121,10 +152,25 @@ groups:
 
   research:
     title: 券商研报
-    description: 个股研报列表与详情（机构/评级/盈利预测/摘要）
+    description: 个股研报列表、详情与全文 RAG 检索（机构/评级/盈利预测/摘要/chunk 向量检索）
     include:
       - operation_id: list_stock_research_reports
       - operation_id: get_research_report
+      - operation_id: query_research_report_rag
+      - operation_id: index_research_reports
+    tools:
+      query_research_report_rag:
+        risk_level: L0
+        description: |
+          研报全文 RAG 检索（向量检索匹配 chunks）。返回 chunk 文本 + 元数据
+          （来源/发布日期/评级/相似度评分）。用于挖掘研报附注、现金流细节、
+          风险提示等列表查询无法覆盖的深度内容。
+      index_research_reports:
+        risk_level: L1
+        description: |
+          触发研报向量化索引（L1 写库）。增量处理 vector_indexed=false 的研报，
+          将全文切分为 chunks（800 字/片，150 字重叠）后向量化入库 Qdrant
+          research_report_chunks collection。
 
   sentiment:
     title: 舆情快照
@@ -157,3 +203,58 @@ groups:
     description: 全局投资偏好与自选股配置
     include:
       - operation_id: get_preference
+      - operation_id: update_preference
+    tools:
+      update_preference:
+        risk_level: L1
+        description: |
+          更新全局投资偏好（L1 写库）。risk_appetite/watchlist/preferences 整体替换。
+          供投研 Skill 读写用户风险偏好/自选股/交易风格等配置。
+
+  events:
+    title: 事件驱动
+    description: 事件检测、宏观恐慌指数、事件→论点卡触发、Polymarket 预测市场、事件→资产配置映射
+    include:
+      - operation_id: detect_events
+      - operation_id: get_market_fear_index
+      - operation_id: evaluate_event_impact_on_thesis
+      - operation_id: get_polymarket_events
+      - operation_id: evaluate_asset_allocation_impact
+    tools:
+      detect_events:
+        risk_level: L0
+        description: |
+          事件检测（L0 只读）。两层检测：关键词快速扫描 + LLM 精细识别。
+          从已采集的新闻/公告库（sdc_stock_news）扫描利好/利空/政策三类事件，
+          返回事件列表 + 交易信号映射（强烈关注/看多/谨慎/看空/强烈回避）。
+          事件类型: 资产重组、回购增持、业绩预增、股东减持、业绩预减、违规处罚、退市风险。
+      get_market_fear_index:
+        risk_level: L0
+        description: |
+          宏观恐慌指数（L0 只读）。采集 A 股市场情绪指标 + 美股 VIX/US10Y 并计算综合评分 0-100。
+          A 股维度：市场活跃度（乐咕乐股）、涨跌停家数比、微博财经舆情。
+          美股维度：VIX/US10Y（Yahoo Finance，大陆环境可能不可达）。
+          >75 极度贪婪 / 55-75 贪婪 / 45-55 中性 / 25-45 恐慌 / <25 极度恐慌。
+      evaluate_event_impact_on_thesis:
+        risk_level: L1
+        description: |
+          事件→论点卡影响评估（L1 写库）。评估事件对标的论点卡的影响：
+          利空命中证伪条件 → mark_thesis_stale 触发失效；
+          利好事件 → 建议更新 catalysts 催化剂字段；
+          无影响 → 无操作。
+      get_polymarket_events:
+        risk_level: L0
+        description: |
+          Polymarket 预测市场事件查询（L0 只读）。提供前瞻性事件概率数据，
+          含 Yes 概率、累计成交量、流动性、结束日期、分类标签。
+          应用场景：地缘政治（开战/停火概率）、贸易政策（关税概率）、
+          选举结果、加密货币价格预期等。
+          数据源：Polymarket Gamma API（公开 REST，无需认证）。
+          采集失败返回空列表（不降级、不 fallback）。
+      evaluate_asset_allocation_impact:
+        risk_level: L0
+        description: |
+          事件→资产配置影响评估（L0 只读）。基于事件类型列表，给出资产配置维度的偏好提示。
+          维度：大盘风格 / 行业轮动 / 风险偏好 / 流动性。
+          方向：risk_on / risk_off / defensive / aggressive。
+          供 strategy-timing 编排器在策略汇总阶段参考。

@@ -1,0 +1,60 @@
+# 事件→交易信号映射表 — EventDetector Layer 1 命中后查询
+#
+# 定义每类事件的交易信号、历史统计影响、跟踪建议
+# 架构文档 §11.3.1 事件→交易信号映射表
+#
+# 字段说明：
+#   signal: 交易信号（强烈关注/看多/谨慎/看空/强烈回避/利好/利空）
+#   historical_impact: 历史统计影响描述
+#   tracking_advice: 跟踪建议
+#   severity: 严重程度 1-5（用于影响评估排序）
+#   is_bullish: 是否利好（true=利好，false=利空，用于论点卡触发判定）
+
+资产重组:
+  signal: 强烈关注
+  historical_impact: 公告后平均涨幅 8-15%（A股最强）
+  tracking_advice: 事件确认后关注，警惕"利好出尽"
+  severity: 5
+  is_bullish: true
+
+回购增持:
+  signal: 看多
+  historical_impact: 中期正面效应（3-6 个月）
+  tracking_advice: 跟随大股东，关注实控人增持
+  severity: 3
+  is_bullish: true
+
+业绩预增:
+  signal: 看多
+  historical_impact: 短期正面脉冲（1-5 日）
+  tracking_advice: 预增>50% 更有价值，注意是否已被预期
+  severity: 3
+  is_bullish: true
+
+股东减持:
+  signal: 谨慎
+  historical_impact: 短期负面压力
+  tracking_advice: 回避或减仓，实控人减持高度警惕
+  severity: 4
+  is_bullish: false
+
+业绩预减:
+  signal: 看空
+  historical_impact: 短期负面
+  tracking_advice: 基本面恶化
+  severity: 4
+  is_bullish: false
+
+违规处罚:
+  signal: 强烈回避
+  historical_impact: 视严重程度可能跌停
+  tracking_advice: 立即回避，等尘埃落定
+  severity: 5
+  is_bullish: false
+
+退市风险:
+  signal: 强烈回避
+  historical_impact: 极高
+  tracking_advice: 退市风险极高，立即回避
+  severity: 5
+  is_bullish: false

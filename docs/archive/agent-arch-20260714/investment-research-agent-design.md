@@ -249,16 +249,22 @@ CREATE INDEX idx_message_session ON agent_message(session_key, id);
 ### 7.3 Qdrant 向量库（经验召回补充层）
 
 - **连接**：`localhost:56333`（HTTP）/ `localhost:56334`（gRPC），`prefer_grpc=True`
-- **嵌入模型**：`BAAI/bge-large-zh-v1.5`（本地路径 `D:\app\models\BAAI\bge-large-zh-v1.5`，1024 维，中文优化）
-- **Collection**：`research_memory`（向量 1024 维，Cosine 距离）
+- **嵌入服务双后端策略**（`QDRANT_EMBEDDING_BACKEND` 配置项，策略模式 + 注册表）：
+  - `local`（默认）：`LocalEmbeddingBackend`，本地 SentenceTransformer 加载 `BAAI/bge-large-zh-v1.5`（本地路径 `D:\app\models\BAAI\bge-large-zh-v1.5`，1024 维，中文优化），`normalize_embeddings=True` 模型自身完成 L2 归一化
+  - `tei`：`TeiEmbeddingBackend`，HTTP 调用 TEI 服务（默认 `http://127.0.0.1:6380`，`POST /embed`，TEI 不自动归一化，代码层 `_l2_normalize` 手动归一化）；Docker 部署强制使用 `tei`，避免容器内安装模型权重
+  - 两种后端产出向量等价，可混用；TEI 后端运行时强制校验返回维度 == 1024
+- **嵌入服务单例**：`EmbeddingService.get_instance()`，Worker 启动时 `validate_backend()` 校验后端可达
+- **Collection**：`research_memory`（向量 1024 维，Cosine 距离，首次连接时自动创建）
 - **写入时机**：每次论点卡定稿/每日简报生成后，将「结论摘要 + 关键判断」embedding 入库，
   payload 含 `symbol / as_of / direction / 场景标签`。
 - **召回时机**：Orchestrator 推演时可选检索 top-k 相似历史判断，作为「经验参考」注入 context（明确标注为参考、非事实）。
 - **定位**：辅助，不参与数字/结论的权威来源。
 
-### 7.4 记忆读写接口（MCP 工具）
+### 7.4 记忆读写接口（MCP 工具 + Hook 自动能力）
 
-记忆层通过 MCP 工具暴露给 Agent，保持「Agent 不直连 DB」的架构纪律：
+记忆层分两类：**结构化业务数据**通过 MCP 工具显式读写（保持「Agent 不直连 DB」的架构纪律）；**语义经验召回/索引**已演进为 Harness Hook 自动能力，**不通过 MCP 暴露**（避免 Agent 主动调用语义召回污染推理纪律）。
+
+**MCP 工具（Agent 显式调用）**：
 
 | 工具 | 作用 | 存储 |
 |------|------|------|
@@ -268,11 +274,25 @@ CREATE INDEX idx_message_session ON agent_message(session_key, id);
 | `get_preference()` | 读全局偏好（风险偏好/自选） | Postgres |
 | `list_sessions()` | 会话列表（按最近更新，供页面切换） | Postgres |
 | `get_session_history(session_key)` | 读某标的完整历史问答 | Postgres |
-| `search_research_memory(query, symbol?)` | 语义召回历史经验 | Qdrant |
-| `index_research_memory(...)` | 向量化入库 | Qdrant |
+
+**Harness Hook 自动能力（不暴露 MCP，Agent 禁止主动调用）**：
+
+| 能力 | 实现位置 | 触发时机 | 关键参数 |
+|------|---------|---------|---------|
+| 语义召回 | `MemoryRecallHook` | 每轮 run 首轮 `before_iteration`，仅执行一次 | `top_k=3`，`memory_types=["brief"]`，按 `symbol` 可选过滤 |
+| 简报索引 | `AgentWorker` 后置 | run `COMPLETED` 后，`is_indexable_brief()` 门槛达标（≥300 字且含「投研简报」或「## 交易策略」） | payload: `{symbol, role:"assistant", type:"brief"}` |
+| 论点卡索引 | `ThesisService.save_thesis` | `save_thesis` 事务内同步调用 | payload: `{symbol, as_of, direction, type:"thesis"}` |
+
+**失败处理不对称（有意为之）**：
+- 召回失败（Qdrant 连接失败 / TEI 超时）→ 异常上抛 → run 标记 `FAILED`（强依赖：确保 Agent 不在缺失经验参考时盲推）
+- 索引失败（写入异常）→ `except Exception` + `logger.error(exc_info=True)` → run 保持 `COMPLETED`（弱依赖：索引是附加价值，不应阻塞已成功的对话）
+
+**架构纪律**：`mcp_server.yml` 全局 deny `/api/v1/agent/**`，从源头切断 Agent 通过 MCP 调用 agent 域 API；Qdrant 与 TEI 完全封装在 `xqtrader.domain.agent.services` 层。
 
 > 会话读写（追加消息、拉取历史、列表）由运行时会话层直接落 Postgres；
 > `list_sessions` / `get_session_history` 供前端「历史会话查看」页面调用。
+>
+> **演进说明**：早期设计中曾考虑将 `search_research_memory` / `index_research_memory` 暴露为 MCP 工具，实际实现已演进为 Hook + Worker 后置索引模式。详见 [agent-memory-refactor-design.md](./agent-memory-refactor-design.md) v2.0。
 
 ---
 

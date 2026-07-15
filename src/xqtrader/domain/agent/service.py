@@ -9,7 +9,7 @@ from fastapi import HTTPException, Request
 
 from framework.commons.logger import get_logger
 from framework.config.settings import settings
-from xqtrader.domain.agent.intent_router import CoachRoute, IntentRouter, WorkflowRoute
+from xqtrader.domain.agent.intent_router import AnalystRoute, IntentRouter, WorkflowRoute
 from xqtrader.domain.agent.models.session import AgentMessage
 from xqtrader.domain.agent.protocol import MetaField, RunStatus, sse_event_name
 from xqtrader.domain.agent.redis_bus import AgentRedisBus
@@ -95,7 +95,7 @@ class AgentService:
         session = await self.get_session(session_id)
         user_id, tenant_id = self._user_context(request)
         try:
-            route = IntentRouter.resolve(
+            route = await IntentRouter.resolve(
                 body.content,
                 flow_id=body.flow_id,
                 context=body.context,
@@ -136,24 +136,18 @@ class AgentService:
         model = body.model or session.model or settings.AGENT.AGENT_DEFAULT_MODEL or None
         trace_id = request.headers.get("X-Trace-Id")
 
-        # CoachRoute 走 Agent Worker（同 AgentRoute），但记录场景信息并写入 context
-        # 供下游 Hook / 遥测读取。人格层激活仍由 EmotionDetectHook 在 Worker 内执行。
+        # AnalystRoute 走 Agent Worker（同 AgentRoute），但携带风格标记
+        # 供 StyleInjectionHook 在 Worker 内注入对应风格提示。
         task_context = body.context
-        if isinstance(route, CoachRoute):
+        if isinstance(route, AnalystRoute):
             logger.info(
-                "心理教练优先模式触发: session_id=%s scenario=%s intensity=%d "
-                "keywords=%s",
+                "分析师风格路由触发: session_id=%s style=%s source=%s",
                 session_id,
-                route.scenario_name,
-                route.intensity,
-                list(route.matched_keywords),
+                route.style,
+                route.source,
             )
             task_context = dict(body.context or {})
-            task_context["coach_scenario"] = {
-                "name": route.scenario_name,
-                "intensity": route.intensity,
-                "matched_keywords": list(route.matched_keywords),
-            }
+            task_context["analyst_style"] = route.style
 
         task = RunTask(
             run_id=run_id,

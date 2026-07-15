@@ -1,0 +1,73 @@
+# 事件→资产配置映射表
+# 架构文档 §11.4 事件→资产配置映射
+#
+# 字段说明：
+#   affected_dimension: 影响维度（大盘风格 / 行业轮动 / 风险偏好 / 流动性）
+#   direction: 配置方向（risk_on 加风险 / risk_off 减风险 / defensive 防御 / aggressive 进攻）
+#   suggested_weight_change: 建议权重调整方向（+ 加仓 / - 减仓 / 0 持平）
+#   rationale: 配置建议依据
+#
+# 事件类型来源：event_signal_mapping.yaml + event_detector.py LLM 枚举
+
+# ── 利好类事件 → risk_on ─────────────────────────────────────────────
+资产重组:
+  affected_dimension: 风险偏好
+  direction: risk_on
+  suggested_weight_change: +
+  rationale: 重组预期提升风险偏好，可适度加仓受益标的，关注重组进度与监管审核风险
+
+回购增持:
+  affected_dimension: 风险偏好
+  direction: risk_on
+  suggested_weight_change: +
+  rationale: 实控人/大股东增持释放信心信号，可跟随加仓，关注增持比例与持续性
+
+业绩预增:
+  affected_dimension: 大盘风格
+  direction: risk_on
+  suggested_weight_change: +
+  rationale: 业绩超预期驱动基本面修复，利好成长风格，关注预增幅度与行业景气度
+
+# ── 利空类事件 → risk_off / defensive ───────────────────────────────
+股东减持:
+  affected_dimension: 风险偏好
+  direction: risk_off
+  suggested_weight_change: '-'
+  rationale: 大股东减持释放负面信号，减仓规避，关注减持比例与实控人动向
+
+业绩预减:
+  affected_dimension: 大盘风格
+  direction: defensive
+  suggested_weight_change: '-'
+  rationale: 业绩不及预期驱动基本面恶化，转向防御风格（消费/公用事业），规避高估值成长股
+
+违规处罚:
+  affected_dimension: 风险偏好
+  direction: risk_off
+  suggested_weight_change: '-'
+  rationale: 监管处罚提升个股风险溢价，立即减仓规避，等待尘埃落定
+
+退市风险:
+  affected_dimension: 风险偏好
+  direction: risk_off
+  suggested_weight_change: '-'
+  rationale: 退市风险极高，立即清仓规避，无任何配置价值
+
+# ── 政策类事件 → 行业轮动 / 流动性 ──────────────────────────────────
+货币宽松:
+  affected_dimension: 流动性
+  direction: aggressive
+  suggested_weight_change: +
+  rationale: 降息降准释放流动性，利好高估值成长股与利率敏感型行业（券商/地产），可加仓
+
+产业政策:
+  affected_dimension: 行业轮动
+  direction: risk_on
+  suggested_weight_change: +
+  rationale: 产业政策驱动行业景气轮动，关注受益板块（如新能源/半导体/人工智能），顺势加仓
+
+监管收紧:
+  affected_dimension: 行业轮动
+  direction: defensive
+  suggested_weight_change: '-'
+  rationale: 监管收紧压制相关行业估值，减仓受限板块，转向政策友好方向

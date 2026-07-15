@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-from sqlalchemy import Date, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -45,6 +45,13 @@ class ResearchReport(AuditedBase):
     )
     summary: Mapped[str | None] = mapped_column(Text, nullable=True, comment="研报摘要")
     content: Mapped[str | None] = mapped_column(Text, nullable=True, comment="研报全文（从 PDF 解析，可选）")
+    vector_indexed: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+        comment="研报全文是否已向量化入库 Qdrant（research_report_chunks collection）",
+    )
 
     __table_args__ = (
         UniqueConstraint("info_code", name="uq_sdc_research_report_info_code"),
